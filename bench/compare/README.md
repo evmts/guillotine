@@ -40,4 +40,5 @@ Outputs are written to:
 
 - **`category-labs/monad`:** Explicitly requires Linux, `libstdc++`, and `-march=x86-64-v3`, so it cannot run natively on Apple Silicon macOS.
 - **`evmone`:** `evmone::state::TransactionReceipt` does not expose top-level return data bytes on the receipt struct, so `evmone` is verified on `EVMC_SUCCESS` and exact `gas_used`. `evmone` also performs single-pass analysis per `evmc_execute` call without cross-call caching.
-- **Guillotine JIT (`enable_native_jit = true`):** Zero-dependency ARM64 direct emitter (`src/jit/`) that compiles only side-effect-free pure-compute contracts and transparently falls back to the dispatch-schedule interpreter for stateful contracts.
+- **Guillotine JIT (`guillotine-jit`):** Zero-dependency ARM64 direct emitter (`src/jit/`). In `v0.1.0` `src/jit/` is a standalone library not yet wired into `Evm`, so `guillotine-jit` transparently executes via the dispatch-schedule interpreter (`interp fallback`) until wired.
+- **Zig version:** Requires stock Zig `0.17.1` (native `preserve_none` tail-call dispatch).

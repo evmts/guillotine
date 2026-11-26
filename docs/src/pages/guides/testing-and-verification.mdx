@@ -1,0 +1,276 @@
+---
+title: Testing, fuzzing, and formal verification
+description: How Guillotine is verified across official Ethereum spec tests, differential fuzzing, SMT and LLVM IR proofs, Lean 4 theorems, SDK E2E tests, and benchmarks.
+---
+
+# Testing, fuzzing, and formal verification
+
+Guillotine is mission-critical execution infrastructure: a silent arithmetic,
+gas, or state-transition bug causes consensus splits or fund loss. Correctness
+is therefore enforced through **seven independent verification layers** rather
+than relying on any single test suite.
+
+## Verification matrix at a glance
+
+| Layer | What it verifies | Recorded result (`v0.1.0`) | Command | CI / schedule |
+| --- | --- | --- | --- | --- |
+| **Official EEST state tests** | Full Ethereum mainnet compliance (Frontier → Osaka), post-state MPT root & RLP logs hash, fusions ON & OFF | **66,652 / 66,652** (100.00%, 0 crashes) | `zig build state-tests -Doptimize=ReleaseSafe` | Every push & PR (`ci.yml`) |
+| **Lean 4 differential fuzzer** | Guillotine vs. executable Lean `4.32.0` spec across words, gas, bytecode, EVM, OP Stack/Base, RLP | **116,384 / 116,384** (0 mismatches) | `FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe` | On-demand & release gate |
+| **SMT bitvector proofs** | Bit-precise equivalence & overflow-freedom of fast paths and fusions via Bitwuzla + Z3 | **32 / 32** theorems (`unsat`) + vacuity (`sat`) | `zig build verify-smt` | On-demand (`zig build verify`) |
+| **LLVM IR equivalence & UB** | Direct `ReleaseFast` LLVM SSA IR equivalence & poison/UB-freedom for `<op>_ref` vs `<op>_fast` | All exported pairs proved | `zig build verify-ir` | On-demand (`zig build verify`) |
+| **Lean 4 kernel proofs** | Machine-checked theorems over arithmetic, basic blocks, fusions, jump tables, and memory | All 5 proof modules build | `zig build verify-lean` | On-demand (`zig build verify`) |
+| **Core Zig test suites** | Unit, opcode differential (vs `MinimalEvm`), fusions, ModExp, precompiles, Layer 2 (`154/154`), integration, JIT, bench harness | 100% passing | `zig build test` | Every push & PR (`ci.yml`) |
+| **Multi-layer fuzzing** | 10 Zig fuzz targets, multi-threaded havoc campaign, Linux LLVM `--fuzz`, Rust FFI fuzz, TS SDK shrinking fuzzer | 0 open crashes | `zig build test-fuzz` / `zig build fuzz-campaign` | Every push, PR & nightly (`fuzz.yml`) |
+| **SDK & binding E2E** | C ABI (`libguillotine_ffi`), C SDK tests, Rust workspace tests, TypeScript Bun SDK (`340/340`, `30,290` assertions) | 100% passing | `make -f sdks/c/Makefile test`, `cd sdks/typescript && bun test` | Every push & PR (`ci.yml`) |
+| **Cross-EVM benchmarks** | In-process apples-to-apples comparison vs `evm2`, `revm`, `evmone`, `ethrex`, `gevm`, `geth`, and JITs with 0-tolerance gas + output verification | 25 workloads × 12 engine configs (100% differential match) | `node bench/compare/run.mjs` | Local / release validation |
+
+---
+
+## 1. Official Ethereum Execution Spec Tests (EEST)
+
+`zig build state-tests` runs `specs/eest_runner.zig` against the official
+pre-filled [`ethereum/execution-specs`](https://github.com/ethereum/execution-specs)
+`state_tests/**/*.json` fixtures (`tests@v21.0.3`, pinned by tag and SHA-256 in
+`scripts/fetch-eest-fixtures.sh`).
+
+A test case passes **only** when both:
+- the computed post-state **Merkle Patricia Trie root** matches `post[fork][i].hash`, and
+- the **RLP logs hash** matches `post[fork][i].logs` (or, for invalid transactions, the exact expected `TransactionException` is raised with untouched pre-state).
+
+### Coverage
+
+Both default fused execution and unfused execution (`-Devm-enable-fusion=false`)
+pass **66,652 / 66,652 (100.00%)** across all 14 mainnet hardforks from
+Frontier through Osaka, with zero crashes and clean memory leak checks.
+16,907 Amsterdam cases are skipped because Amsterdam is not yet implemented.
+
+| Fork | Cases | Fork | Cases |
+| --- | ---: | --- | ---: |
+| Frontier | 813 | Berlin | 3,593 |
+| Homestead | 883 | London | 3,874 |
+| TangerineWhistle | 881 | Paris | 3,889 |
+| SpuriousDragon | 961 | Shanghai | 4,088 |
+| Byzantium | 2,332 | Cancun | 11,578 |
+| ConstantinopleFix | 2,525 | Prague | 13,919 |
+| Istanbul | 2,652 | Osaka | 14,664 |
+
+### Running EEST locally
+
+```bash
+# 1. Fetch & verify pinned official fixtures (cached in .cache/eest-fixtures/)
+./scripts/fetch-eest-fixtures.sh
+
+# 2. Run all 66,652 cases (fusions ON)
+zig build state-tests -Doptimize=ReleaseSafe
+
+# 3. Run all 66,652 cases (fusions OFF)
+zig build state-tests -Doptimize=ReleaseSafe -Devm-enable-fusion=false
+
+# 4. Filter to specific forks or test names, and emit JSON summary
+zig build state-tests -Doptimize=ReleaseSafe -- --fork=Cancun,Prague --report=eest.json
+zig build state-tests -- --filter='eip3855_push0' --jobs=0 --verbose
+```
+
+The runner shards fixture files across isolated worker processes so a crash or
+timeout can never abort the rest of a run. See `specs/README.md` for all flags
+and JSON report fields.
+
+:::info[Legacy filler specs (`zig build specs`)]
+`zig build specs` runs the older filler-based suite under `specs/cases/`. It is
+not a CI gate and has been superseded by `zig build state-tests`.
+:::
+
+---
+
+## 2. Formal verification (`zig build verify`)
+
+Guillotine combines **three complementary formal methods** under `verify/`. Run
+all of them together with:
+
+```bash
+zig build verify
+```
+
+Or run each layer independently:
+
+### 2.1 SMT-LIB2 bitvector proofs (`zig build verify-smt`)
+
+`verify/smt/run_smt_suite.py` generates **32 self-contained `.smt2` theorems**
+into `verify/smt/proofs/` and discharges them using **Bitwuzla** (primary)
+and/or **Z3** over the full 256-bit input space:
+
+- Each theorem asserts its hypotheses and the **negation** of its claim; `unsat` proves zero counterexamples exist across all $2^{256}$ inputs.
+- Every theorem with hypotheses also generates a **vacuity check** asserting only the hypotheses (`sat`), proving the hypotheses are consistent rather than vacuously true.
+- **Model drift guard (`verify/smt/model_pins.json`):** the script hashes the exact Zig source text of every modeled function in `src/` and fails closed if any function changed without a human reviewing the SMT model and running `python3 verify/smt/run_smt_suite.py --update-pins`.
+
+Proved proof families include:
+- **Arithmetic & bitwise fast paths:** branchless `SDIV`, `SMOD`, `SAR`, `SIGNEXTEND` (including Yellow Paper equivalence and `u8` overflow safety), `BYTE`, `CLZ`, and `EXP` gas byte-length calculation.
+- **Memory & gas safety:** 32-byte alignment (`memory_align_up_32_equiv`), word count, dynamic/32-byte/1-byte bounds checks across arbitrary limits, and quadratic memory gas monotonicity & overflow-freedom.
+- **Dispatch & jump tables:** basic-block stack guard equivalence (1,024-word and arbitrary capacities) and dense jump-table bounds (`u8`, `u12`, `u16`, `u32`).
+- **Opcode fusions:** `PUSH+ADD`, `PUSH+SUB`, `PUSH+MUL`, `PUSH+AND`, `PUSH+OR`, `PUSH+XOR`, `PUSH+ADD+DUP1`, `ISZERO+PUSH+JUMPI`, and constant folding (`ADD`/`SUB`/`MUL`).
+
+Any theorem can be replayed directly by hand:
+
+```bash
+zig build verify-smt
+bitwuzla verify/smt/proofs/sdiv_branchless_equiv.smt2
+```
+
+### 2.2 Compiled LLVM IR equivalence & poison/UB verifier (`zig build verify-ir`)
+
+Source-level models alone do not prove that compiler lowering preserves
+semantics or avoids undefined behavior. `verify/llvm/llvm_ir_verify.py` verifies
+the **actual `ReleaseFast` LLVM SSA IR** emitted by
+`zig build-obj -fllvm -OReleaseFast -femit-llvm-ir=...` for exported
+`<name>_ref` vs `<name>_fast` pairs in `verify/zig/verify_exports.zig`.
+
+- Implements LLVM LangRef value-level `poison` tracking (like Alive2): `nuw`, `nsw`, `exact`, `disjoint`, `nneg`, out-of-range shifts, `select` poison masking, and immediate UB on poisoned branches, `unreachable`, or div/rem by zero.
+- Verifies both functional equivalence (`ref_ret == fast_ret` for all inputs) and absence of returned poison/UB across memory bounds/alignment/word count, block stack guards, dense jump bounds, `SIGNEXTEND`, `SAR`, `BYTE`, `CLZ`, `EXP` gas, and `SDIV`/`SMOD` helpers.
+
+```bash
+zig build verify-ir
+```
+
+### 2.3 Machine-checked Lean `4.32.0` proofs & differential oracle
+
+Under `verify/lean/` (pinned to `leanprover/lean4:v4.32.0`):
+
+1. **Kernel-checked proofs (`verify/lean/GuillotineVerify/`):**
+   - `Arithmetic.lean` — `expGasByteLenFast_eq_ref`, `signextendFast_eq_ref`, `sarFast_eq_ref`, `byteFast_eq_ref`, `clzFast_eq_ref`, `absTwoComp_eq_abs`, `sdivFast_eq_ref`, `smodFast_eq_ref`, plus edge-case theorems (`sdivFast_min_neg_one`, `smodFast_min_neg_one`, division by zero).
+   - `BasicBlock.lean` — `block_sound`, `block_sound_of_unsaturated_gas`, `blockStackGuardFast_eq_ref`, `clampedMinMax_sound`, and explicit `saturated_gas_counterexample`.
+   - `Fusions.lean` — `execFused_eq_execSeq` and per-fusion soundness theorems (`push_add_sound`, `push_sub_sound`, `push_mul_sound`, `push_and_sound`, `push_or_sound`, `push_xor_sound`, `iszero_push_jumpi_sound`, `push_add_dup1_sound`, `swap1_dup2_add_sound`, `const_fold_*_sound`).
+   - `JumpTable.lean` — `denseLookup_eq_bsearch` and `denseJumpInBoundsFast_eq_ref`.
+   - `Memory.lean` — `checkMemoryBoundsFast_eq_ref` (`dyn`/32/1), `alignUp32_no_overflow`, `alignUp32_eq_ceil_mult32`, `memoryWordCountFast_eq_ref`, `memoryGasCost_mono`, `memoryGasCost_no_overflow`.
+2. **Executable reference specification (`verify/lean/GuillotineSpec/`):**
+   - Complete executable Lean 4 oracle (`lake exe guillotine-lean-ref`) covering `Word256`, `Gas`, `Bytecode`, `Evm`, `Keccak`, `Rlp`, and `Layer2` (Base / OP Stack).
+3. **Zig ↔ Lean 4 differential fuzzer (`test/fuzz/lean_differential_fuzz.zig`):**
+   - Streams randomized and adversarial inputs through both Guillotine and `guillotine-lean-ref`, asserting identical results (**116,384 / 116,384** verified at `FUZZ_ITERS=2000`, 0 mismatches).
+
+```bash
+zig build verify-lean
+FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe
+```
+
+---
+
+## 3. Core Zig test suites
+
+Run all self-contained Zig suites with `zig build test`, or target individual layers:
+
+| Step | Scope | Source |
+| --- | --- | --- |
+| `zig build test-unit` | Inline module unit tests (stack, memory, bytecode, dispatch, storage, journal, trie, EIPs) | `src/root.zig` → `src/**/*.zig` |
+| `zig build test-opcodes` | Per-opcode differential tests vs `MinimalEvm` + ModExp suite (mandatory dev gate) | `test/evm/opcodes/` |
+| `zig build test-fusions` | Bytecode fusion unit, dispatch-schedule, and fused-vs-unfused differential tests | `test/fusions.zig`, `test/fusion/` |
+| `zig build test-precompiles` | Integration vectors for precompiles `0x01`–`0x11` + `P256VERIFY` (`0x100`), incl. KZG 4844 | `test/evm/` |
+| `zig build test-modexp` | Vendored ModExp arithmetic, gas, and precompile edge cases | `lib/voltaire/` |
+| `zig build test-layer2` | Base & OP Stack L2 rules (`154 / 154`): Bedrock → Jovian, deposits, L1/operator fees, EIP-7702 | `src/layer2/` |
+| `zig build test-integration` | Cross-module tests, `MinimalEvm` differential tracer, ERC20/DeFi fixtures, storage/forking | `test/root.zig` → `test/**/*.zig` |
+| `zig build test-fixtures-differential` | Differential checks on real contract benchmark fixtures (ERC20, Snailtracer, etc.) | `test/differential/` |
+| `zig build test-jit` | Native ARM64 JIT compiler, emitter, W^X mapping, and cache tests (`aarch64`) | `src/jit/root.zig` |
+| `zig build test-bench` | Benchmark statistics, CLI parsing, and workload construction tests | `bench/tests.zig` |
+| `zig build test-lib` | Vendored library wrapper tests | `lib/root.zig` |
+
+Filter any suite with `-Dtest-filter='<pattern>'`:
+
+```bash
+zig build test-opcodes -Dtest-filter='ADD opcode'
+zig build test-integration -Dtest-filter='trace validation'
+zig build test-unit -Dtest-filter='stack'
+```
+
+:::tip[Differential lock-step tracing with `MinimalEvm`]
+Every instruction handler in `src/` calls `beforeInstruction()` in Debug,
+ReleaseSafe, and traced builds (`-Denable-tracing=true`), stepping the plain
+switch-loop `MinimalEvm` reference interpreter (`src/tracer/minimal_evm.zig`)
+in lock-step (1 step per regular opcode, $N$ steps per fused synthetic opcode)
+and asserting identical stack, memory, gas, and storage after every step. See
+[Tracing and debugging](/guides/tracing).
+:::
+
+---
+
+## 4. Continuous multi-layer fuzzing
+
+Fuzzing targets **semantic correctness** (differential oracles and stateful
+model checkers), not only crash-freedom. `.github/workflows/fuzz.yml` runs on
+every push, pull request, and nightly at 03:00 UTC.
+
+### Zig fuzz targets (`test/fuzz/`)
+
+| Target | Oracle / invariant |
+| --- | --- |
+| `bytecode_fuzz.zig` | Independent Yellow Paper `JUMPDEST` oracle, truncated `PUSH1`–`PUSH32`, no-interior-`JUMPDEST` fusion invariant, `FailingAllocator` OOM resilience |
+| `stack_fuzz.zig` | Stateful model checker for 1,024-slot, 32-slot, and borrowed stacks (`push`/`pop`/`dup_n`/`swap_n`) |
+| `memory_fuzz.zig` | Byte-exact stateful model checker incl. overlapping `MCOPY`, nested checkpoints, and Yellow Paper quadratic gas formula |
+| `storage_journal_fuzz.zig` | Nested snapshots/reverts/commits, `simulate()` ephemeral isolation, O(1) `Journal` original-storage index, EIP-2929 `AccessList` |
+| `arithmetic_u256_fuzz.zig` | All 22 arithmetic/bitwise/shift/comparison opcodes (fusion ON & OFF) checked against `std.math.big.int.Managed` |
+| `differential_evm_fuzz.zig` | Structure-aware 8-mode bytecode generator comparing `enable_fusion = true` vs `false` vs `simulate()` across Frontier → Prague |
+| `precompiles_fuzz.zig` | Exact oracles and algebraic axioms (BN254 group homomorphism, BigInt MODEXP, BLAKE2F, ECRECOVER, all 9 BLS12-381 ops) |
+| `trie_fuzz.zig` | Stateful MPT model checker + key-insertion order-independence of 32-byte state root |
+| `eip_hardfork_fuzz.zig` | EIP-4844 blob gas, EIP-1559 fees, EIP-3529 refunds, EIP-2200/2929 SSTORE across 14 forks, EIP-7623 calldata, EIP-7702 authorizations |
+| `c_api_fuzz.zig` | Direct `extern "C"` ABI fuzzing of `libguillotine_ffi` (invalid call types, state roundtrips, `guillotine_simulate` parity) |
+
+### Running fuzzers locally
+
+```bash
+# 1. Zig fuzz seed corpora with strict leak checking (macOS & Linux)
+zig build test-fuzz
+
+# 2. Multi-threaded structure-aware + havoc campaign (saves crashes to .fuzz-crashes/)
+zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8
+
+# 3. Native LLVM coverage-guided --fuzz (Linux)
+zig build test-fuzz --fuzz -Dtest-filter="fuzz differential EVM execution"
+
+# 4. Rust BN254 & BLS12-381 FFI property/adversarial fuzz tests
+cargo test --locked -p bn254_wrapper
+
+# 5. TypeScript SDK feedback-guided mutational + delta-shrinking FFI fuzzer
+zig build shared -Doptimize=ReleaseFast
+(cd sdks/typescript && bun run test:fuzz)
+(cd sdks/typescript && bun run fuzz -- --executions=2000)
+```
+
+---
+
+## 5. End-to-end SDK & binding tests
+
+Because Guillotine is consumed across languages via its C ABI (`src/evm_c_api.zig`),
+CI tests every supported surface end to end against the `ReleaseFast` native libraries:
+
+```bash
+# Build native FFI libraries
+zig build shared static -Doptimize=ReleaseFast
+
+# C SDK end-to-end tests
+make -f sdks/c/Makefile -o build-core test
+
+# TypeScript Bun FFI SDK (340 / 340 tests, 30,290 assertions)
+(cd sdks/typescript && bun install --frozen-lockfile && bun test)
+
+# Rust workspace tests (crypto wrappers & Foundry compiler bridge)
+cargo test --locked
+```
+
+---
+
+## 6. Performance benchmarking
+
+Guillotine maintains **two complementary benchmark suites**, both checked into `bench/`:
+
+1. **In-repo ReleaseFast EVM & subsystem suite (`zig build bench`):** measures Guillotine's opcodes, contracts, precompiles, and internal subsystems in isolation against committed regression baselines.
+2. **Cross-EVM apples-to-apples suite (`bench/compare/`):** pits Guillotine in-process against `alloy-rs/evm2`, `bluealloy/revm`, `ipsilon/evmone` (Advanced & Baseline), `lambdaclass/ethrex` (LEVM), `Giulio2002/gevm`, `ethereum/go-ethereum` (`geth`), and the JIT tier (`guillotine-jit`, `evm2-jit`, `revmc`) across 25 canonical workloads with a **0-tolerance gas + output verification gate**.
+
+See [Benchmarks and native JIT](/guides/benchmarks-and-jit) for full methodology,
+reproduction commands, and measured numbers.
+
+---
+
+## 7. CI gates
+
+`.github/workflows/ci.yml` enforces on every push and pull request:
+
+1. **`ast-check`** — runs `zig ast-check` on every tracked `*.zig` file in the repository.
+2. **`build-test` (`macos-latest` arm64 & `ubuntu-latest` x86_64)** — runs `cargo test --locked`, `zig build`, `test-unit`, `test-opcodes`, `test-modexp`, `test-precompiles`, `test-layer2`, `test-bench`, `test-fusions`, `shared static -Doptimize=ReleaseFast`, C SDK tests, and TypeScript SDK tests. Linux additionally runs `test-integration` and a 5-second `fuzz-campaign`; macOS arm64 additionally runs `test-jit`.
+3. **`state-tests` (fusion ON & fusion OFF)** — fetches pinned EEST `tests@v21.0.3`, runs `zig build state-tests -Doptimize=ReleaseSafe` in both modes, and fails unless exactly `66,652 / 66,652` cases pass with `0` failures.

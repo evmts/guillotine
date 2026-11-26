@@ -1,19 +1,169 @@
 ---
 title: Benchmarks and native JIT
-description: The self-contained ReleaseFast benchmark runner, the v0.1.0 numbers, and the standalone ARM64 JIT library.
+description: Apples-to-apples cross-EVM benchmarks, the self-contained ReleaseFast runner, and the standalone ARM64 JIT library.
 ---
 
 # Benchmarks and native JIT
 
-Guillotine ships a self-contained ReleaseFast benchmark runner under `bench/`.
-It needs no external `evmts/evm-benchmarks` checkout, `zbench` dependency, or
-RPC endpoint. The repository also contains a zero-dependency ARM64 JIT library
-under `src/jit/`.
+Guillotine ships **two benchmark suites** directly inside `bench/`:
 
-## v0.1.0 numbers
+1. **Cross-EVM apples-to-apples suite (`bench/compare/`)**: in-process,
+   differentially verified comparison against **`alloy-rs/evm2`**,
+   **`bluealloy/revm`**, **`ipsilon/evmone`** (Advanced & Baseline),
+   **`lambdaclass/ethrex`** (LEVM), **`Giulio2002/gevm`**,
+   **`ethereum/go-ethereum`** (`geth`), and Tier 2 native JIT compilers
+   (**`evm2-jit`** LLVM 23, **`revmc`** LLVM 22, **`guillotine-jit`**).
+2. **In-repo ReleaseFast runner (`zig build bench`)**: self-contained micro- and
+   contract-benchmark suite for tracking opcode, precompile, and contract
+   regressions without external checkouts.
+
+The repository also contains a zero-dependency ARM64 JIT library under
+`src/jit/`.
+
+---
+
+## Cross-EVM apples-to-apples benchmarks (`bench/compare/`)
+
+Legacy cross-EVM benchmarks often suffer from CLI process-spawn overhead (e.g.
+wrapping 1 transaction in `hyperfine`), unverified outputs, mixed warm/cold
+caching, or cherry-picked synthetic loops. `bench/compare/` is engineered so
+every number is directly auditable and reproducible from this repository.
+
+### Methodology & fairness guarantees
+
+- **Zero CLI startup overhead:** Every engine runs **in-process** inside its own
+  compiled native binary (`zig-out/bin/guillotine-compare`,
+  `bench/compare/bin/compare-*`) with a monotonic clock wrapping only EVM
+  transaction execution.
+- **Public, non-cherry-picked fixtures:** 21 of 25 workloads are pulled verbatim
+  from [`alloy-rs/evm2`](https://github.com/alloy-rs/evm2) (`e80df9c46a82`,
+  classic compute benchmarks, real Mainnet DeFi contracts, and precompiles),
+  plus 4 targeted hot-loop workloads (`loop_arithmetic`, `loop_memory`,
+  `loop_storage`, `loop_staticcall`).
+- **0-tolerance differential verification gate:** Every timed sample on every
+  engine must pass `success == true`, **exact `gas_used`** (0-gas tolerance),
+  and **byte-for-byte `output`** match against canonical consensus. Any engine
+  that diverges is disqualified (`MISMATCH`) rather than timed.
+- **Warm vs. Cold separation:**
+  - **Warm steady-state:** Bytecode is pre-loaded/analyzed where supported; each
+    measured transaction starts from an identical clean pre-state snapshot (no
+    state accumulation across iterations).
+  - **Cold first-run:** Every sample builds a fresh EVM from raw unanalyzed
+    bytecode with empty jumpdest/dispatch caches.
+- **Strict JIT tier separation:** Native LLVM/AArch64 compilers are reported in
+  their own Tier 2 table showing **both** one-time compile latency and warm
+  execution latency, and explicitly flagging interpreter fallbacks.
+- **Comparable native optimization flags:** Zig `-OReleaseFast` (native CPU),
+  Rust `opt-level=3`, `lto=thin`, `codegen-units=1`, `panic=abort`,
+  `-C target-cpu=native`, C++ `evmone` `-O3 -mcpu=native` + `libsecp256k1`, Go
+  1.26 default release builds.
+- **Geometric means:** Category and overall ratios use geometric means of
+  per-workload speedups so a single long contract (`snailtracer`) cannot swamp
+  the rest of the suite.
+
+### Warm steady-state interpreters (geometric mean)
+
+Measured on **Apple M3 Max** (16 cores, 64 GB RAM, macOS arm64), **Zig `0.17.1`**
+(`preserve_none` tail-call dispatch + fusions), Rust `1.100.0`, Apple Clang
+`17.0.0`, Go `1.26.0`, gas accounting on and tracing off. All **25 / 25
+workloads** passed 100% differential verification across all **12 engine
+configurations** (0 mismatches).
+
+Higher is faster (`> 1.00×` beats the baseline):
+
+| Engine | Lang | Overall vs `revm` | Overall vs `evm2` | Classic (7) vs `revm` | Mainnet DeFi (9) vs `revm` | Precompiles (5) vs `revm` | Hot-Loops (4) vs `revm` |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **evm2** | Rust | **1.12×** | 1.00× | 1.10× | 1.01× | 1.33× | 1.15× |
+| **Guillotine** | Zig | **1.00×** | 0.90× | **1.43×** | 0.98× | 0.61× | 1.04× |
+| **revm** | Rust | **1.00×** | 0.89× | 1.00× | 1.00× | 1.00× | 1.00× |
+| **gevm** | Go | **0.99×** | 0.89× | 0.98× | 1.02× | 1.14× | 0.79× |
+| **Guillotine (no fusion)** | Zig | **0.89×** | 0.79× | 1.21× | 0.81× | 0.61× | 1.00× |
+| **ethrex (LEVM)** | Rust | **0.77×** | 0.69× | 0.84× | 0.67× | 0.89× | 0.76× |
+| **evmone (Baseline)** | C++ | **0.76×** | 0.68× | 0.94× | 0.44× | 1.11× | 1.09× |
+| **evmone (Advanced)** | C++ | **0.51×** | 0.46× | 0.82× | 0.18× | 1.11× | 0.84× |
+| **geth** | Go | **0.31×** | 0.28× | 0.41× | 0.15× | 0.68× | 0.41× |
+
+### Selected warm workload latencies (median per tx)
+
+Lower is faster. Fastest verified interpreter per row is **bold**. Full 25-row
+tables live in `bench/compare/RESULTS.md` and `bench/compare/report.html`.
+
+| Workload | Cat | Guillotine | `evm2` | `revm` | `evmone` (Baseline) | `ethrex` | `gevm` | `geth` | Guillotine vs `revm` | Guillotine vs `evm2` |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `snailtracer` | classic | **55.53 ms** | 64.75 ms | 81.67 ms | 70.53 ms | 80.80 ms | 92.29 ms | 137.01 ms | 1.47× | 1.17× |
+| `burntpix` | mainnet | **35.42 ms** | 53.65 ms | 65.83 ms | 63.54 ms | 68.33 ms | 77.51 ms | 121.02 ms | 1.86× | 1.51× |
+| `hash_10k` | classic | **2.91 ms** | 3.86 ms | 4.40 ms | 3.40 ms | 3.73 ms | 3.94 ms | 7.54 ms | 1.51× | 1.33× |
+| `fibonacci` | classic | **17.71 µs** | 51.04 µs | 58.71 µs | 55.67 µs | 58.58 µs | 60.38 µs | 89.88 µs | 3.32× | 2.88× |
+| `factorial` | classic | **17.79 µs** | 49.29 µs | 60.02 µs | 55.69 µs | 61.42 µs | 63.35 µs | 90.13 µs | 3.37× | 2.77× |
+| `uniswap_v3_pool` | mainnet | **11.40 µs** | 16.71 µs | 19.38 µs | 33.46 µs | 21.73 µs | 22.83 µs | 69.63 µs | 1.70× | 1.47× |
+| `curve_stableswap` | mainnet | **83.83 µs** | 84.50 µs | 97.33 µs | 108.17 µs | 143.90 µs | 108.50 µs | 288.60 µs | 1.16× | 1.01× |
+| `loop_memory` | opcode | **67.38 µs** | 109.04 µs | 120.42 µs | 124.50 µs | 135.58 µs | 156.46 µs | 264.17 µs | 1.79× | 1.62× |
+| `erc20_transfer` | classic | 6.51 ms | **5.24 ms** | 5.80 ms | 9.43 ms | 7.27 ms | 6.91 ms | 15.46 ms | 0.89× | 0.81× |
+| `seaport` | mainnet | 2.08 µs | 1.75 µs | 1.69 µs | 15.63 µs | 2.38 µs | **1.50 µs** | 24.29 µs | 0.81× | 0.84× |
+| `precompile_modexp` | precompile | 1.81 ms | **1.05 ms** | 2.42 ms | 1.57 ms | 1.56 ms | 1.61 ms | 1.76 ms | 1.33× | 0.58× |
+| `precompile_ecrecover` | precompile | 177.48 µs | 30.38 µs | 30.54 µs | 30.10 µs | 31.21 µs | 30.17 µs | 36.17 µs | 0.17× | 0.17× |
+
+### Tradeoffs, cold analysis, and Tier 2 JITs
+
+The full report intentionally exposes where Guillotine excels and where it still
+trails:
+
+- **Compute & opcode fusion wins:** Guillotine is the **fastest interpreter** in
+  Classic compute (`1.43×` vs `revm`, `1.30×` vs `evm2`) and on heavy Mainnet
+  compute (`burntpix` `1.86×` vs `revm`, `uniswap_v3_pool` `1.70×` vs `revm`,
+  `curve_stableswap` `1.16×` vs `revm`). Turning fusion off drops overall
+  geomean from `1.00×` to `0.89×` (`burntpix` slows `2.01×`, `snailtracer`
+  slows `1.66×`).
+- **Precompile gap (`0.61×` vs `revm`):** Pure-Zig `ECRECOVER` (`177.48 µs` vs
+  ~`30 µs` `libsecp256k1` in `evm2`/`revm`/`evmone`/`gevm`) and
+  `BN254_PAIRING` (`1.22 ms` vs `628 µs` in `evm2`) are the main drag on
+  overall geomean. `MODEXP` (`1.81 ms`) beats `revm` (`2.42 ms`) by `1.33×`.
+- **Storage & call loops:** `loop_storage` (`113.73 µs` vs `70.58 µs` `evm2`)
+  and `loop_staticcall` (`84.04 µs` vs `56.19 µs` `evm2`) show headroom in
+  journal/state lookup and nested frame setup.
+- **Cold first-run (`0.27×` vs `revm`):** Building a full dispatch schedule with
+  fusion passes takes `300–800 µs` on large uncached Mainnet contracts
+  (`seaport` `800.67 µs` cold → `2.08 µs` warm; `uniswap_v3_pool` `792.63 µs`
+  cold → `11.40 µs` warm), whereas simple jumpdest-bitmap interpreters analyze
+  in `1–25 µs`. On compute-heavy workloads like `snailtracer` (`56.94 ms` cold)
+  and `burntpix` (`38.83 ms` cold), Guillotine still finishes #1 even cold.
+- **Tier 2 LLVM JITs (`evm2-jit` LLVM 23 & `revmc` LLVM 22):** Paying a
+  one-time compile cost (`10 ms–8.5 s` depending on contract size) brings
+  `snailtracer` down to `19.31–20.31 ms` and `burntpix` down to `7.60–8.80 ms`.
+  In `v0.1.0`, Guillotine's `src/jit/` is not yet wired into `Evm`, so
+  `guillotine-jit` transparently executes on the interpreter (`interp fallback`).
+
+### Reproducing the cross-EVM suite
+
+```bash
+# 1. Fetch pinned workloads & compile all native runners
+./bench/compare/build-all.sh
+
+# 2. Run warm + cold + jit modes sequentially on an idle machine
+node bench/compare/run.mjs
+
+# 3. Filter to specific workloads or engines
+node bench/compare/run.mjs --filter snailtracer,burntpix --modes warm,jit
+node bench/compare/run.mjs --modes warm --engines guillotine,evm2,revm,evmone-baseline
+```
+
+Outputs are written to `bench/compare/RESULTS.md` (Markdown report),
+`bench/compare/report.html` (self-contained interactive HTML report), and
+`bench/compare/results/latest.json` (gitignored full dataset with raw samples
+and environment provenance). See `bench/compare/README.md` for pinned revisions
+and platform notes (including why `category-labs/monad` requires Linux x86-64-v3).
+
+---
+
+## In-repo ReleaseFast runner (`zig build bench`)
+
+For fast local regression checks without building external Rust/C++/Go engines,
+Guillotine ships a self-contained ReleaseFast runner under `bench/`.
+
+### v0.1.0 numbers (x86_64 Linux)
 
 Measured with the in-repo runner in ReleaseFast on x86_64 Linux, stock Zig
-0.17.1, gas accounting on and tracing off:
+`0.17.1`, gas accounting on and tracing off:
 
 | Workload | Median | Comparison |
 | --- | ---: | --- |
@@ -22,10 +172,11 @@ Measured with the in-repo runner in ReleaseFast on x86_64 Linux, stock Zig
 | `precompile/MODEXP-256` | **2.82 µs** | |
 | `precompile/BN254-mul` | **8.16 µs** | |
 
-The revm figure comes from `revme bench snailtracer`, a different harness on the
-same host, so treat the 1.25x ratio as indicative.
+The x86_64 revm figure above comes from `revme bench snailtracer` (a separate
+harness on the same Linux host); use `bench/compare/` above for strict
+apples-to-apples comparisons.
 
-## Running the benchmarks
+### Running the in-repo benchmarks
 
 Run every command from the repository root with Zig 0.17.1. The runner builds
 the EVM and its dependencies in ReleaseFast and refuses timing runs in any other
@@ -49,7 +200,8 @@ zig build --build-file bench/build.zig bench -Dbench-hardfork=PRAGUE -- --filter
 zig build test-bench
 ```
 
-`zig build bench-build` installs `zig-out/bin/guillotine-bench`.
+`zig build bench-build` installs `zig-out/bin/guillotine-bench`;
+`zig build bench-compare-build` installs `zig-out/bin/guillotine-compare`.
 
 :::info[Hardfork and gas budget]
 Benchmarks default to Osaka with EIP-7825's 16,777,216 transaction gas cap.
@@ -69,6 +221,8 @@ Osaka and are reported as unavailable on Prague.
   always uses tail-call dispatch.
 
 `bench/README.md` documents the workloads, the JSON schema and the statistics.
+
+---
 
 ## Native ARM64 JIT library
 

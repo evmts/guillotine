@@ -67,6 +67,7 @@ export default defineConfig({
         { text: 'Configuring the EVM', link: '/guides/configuration' },
         { text: 'State and journaling', link: '/guides/state' },
         { text: 'Tracing and debugging', link: '/guides/tracing' },
+        { text: 'Testing and verification', link: '/guides/testing-and-verification' },
         { text: 'Benchmarks and native JIT', link: '/guides/benchmarks-and-jit' },
         { text: 'Language bindings', link: '/guides/bindings' },
         { text: 'Publishing and releases', link: '/guides/publishing' },

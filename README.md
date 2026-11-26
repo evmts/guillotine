@@ -25,6 +25,25 @@ Each opcode handler is a `preserve_none` tailcall (`@call(.always_tail, ...)`, n
 
 ## Benchmarks
 
+### Cross-EVM apples-to-apples suite (`bench/compare/`)
+
+Reproducible, **in-process** comparison (zero CLI spawn overhead, 0-tolerance gas + byte-for-byte output differential gate across all 25 workloads and 12 engine configs; 21 fixtures verbatim from `alloy-rs/evm2` + 4 hot loops) on Apple M3 Max (macOS arm64, Zig `0.17.1` `preserve_none` + fusions, Rust `1.100.0`, Apple Clang `17.0.0`, Go `1.26.0`):
+
+| Warm Interpreter | Lang | Overall vs `revm` | Classic (7) vs `revm` | `snailtracer` | `burntpix` | `uniswap_v3_pool` | `fibonacci` |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **evm2** | Rust | **1.12×** | 1.10× | 64.75 ms | 53.65 ms | 16.71 µs | 51.04 µs |
+| **Guillotine** | Zig | **1.00×** | **1.43×** | **55.53 ms** | **35.42 ms** | **11.40 µs** | **17.71 µs** |
+| **revm** | Rust | 1.00× | 1.00× | 81.67 ms | 65.83 ms | 19.38 µs | 58.71 µs |
+| **gevm** | Go | 0.99× | 0.98× | 92.29 ms | 77.51 ms | 22.83 µs | 60.38 µs |
+| **ethrex (LEVM)** | Rust | 0.77× | 0.84× | 80.80 ms | 68.33 ms | 21.73 µs | 58.58 µs |
+| **evmone (Baseline)** | C++ | 0.76× | 0.94× | 70.53 ms | 63.54 ms | 33.46 µs | 55.67 µs |
+| **evmone (Advanced)** | C++ | 0.51× | 0.82× | 100.13 ms | 78.59 ms | 92.42 µs | 54.50 µs |
+| **geth** | Go | 0.31× | 0.41× | 137.01 ms | 121.02 ms | 69.63 µs | 89.88 µs |
+
+Full warm, cold first-run, Tier 2 JIT (`evm2-jit` LLVM 23, `revmc` LLVM 22), and differential audit tables: [bench/compare/RESULTS.md](bench/compare/RESULTS.md) · [bench/compare/report.html](bench/compare/report.html) · [bench/compare/README.md](bench/compare/README.md).
+
+### In-repo ReleaseFast runner (`zig build bench`)
+
 Measured with `zig build bench -- --iterations 5 --warmup 1` in `ReleaseFast` on x86_64 Linux (Zig `0.17.1`, `preserve_none` tailcall + fusions):
 
 | Workload | Fork | Median | Throughput | Notes |
@@ -42,21 +61,25 @@ Measured with `zig build bench -- --iterations 5 --warmup 1` in `ReleaseFast` on
 Reproduce locally:
 
 ```console
-$ zig build bench
+$ zig build bench                                # in-repo ReleaseFast suite
+$ ./bench/compare/build-all.sh && node bench/compare/run.mjs  # cross-EVM suite
 ```
 
-## Verification
+## Verification & Testing
 
-| Suite | Result | Command |
+| Layer | Result | Command |
 | --- | --- | --- |
-| Official EEST state tests (`tests@v21.0.3`, fusions ON) | `66,652 / 66,652` (`100.00%`) | `zig build state-tests -Doptimize=ReleaseFast` |
-| Official EEST state tests (`tests@v21.0.3`, fusions OFF) | `66,652 / 66,652` (`100.00%`) | `zig build state-tests -Doptimize=ReleaseFast -Devm-enable-fusion=false` |
+| Official EEST state tests (`tests@v21.0.3`, fusions ON) | `66,652 / 66,652` (`100.00%`) | `zig build state-tests -Doptimize=ReleaseSafe` |
+| Official EEST state tests (`tests@v21.0.3`, fusions OFF) | `66,652 / 66,652` (`100.00%`) | `zig build state-tests -Doptimize=ReleaseSafe -Devm-enable-fusion=false` |
 | Zig↔Lean `4.32.0` differential fuzzer | `116,384 / 116,384` (`0` mismatches) | `FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe` |
-| SMT bitvector proofs (Bitwuzla + Z3) | `32 / 32` theorems proved (`unsat`) | `python3 verify/smt/run_smt_suite.py` |
-| Base / OP Stack Layer 2 suite | `154 / 154` passing | `zig build test-layer2` |
-| TypeScript SDK (`@tevm/guillotine`) | `340 / 340` (`30,290` assertions) | `cd sdks/typescript && bun test` |
+| SMT bitvector proofs (Bitwuzla + Z3) | `32 / 32` theorems proved (`unsat`) | `zig build verify-smt` |
+| LLVM IR equivalence & poison/UB + Lean 4 proofs | All exported pairs & 5 proof modules | `zig build verify` (`verify-ir`, `verify-smt`, `verify-lean`) |
+| Core Zig suites (unit, opcodes, fusions, precompiles, L2, fuzz, JIT) | 100% passing (L2 `154 / 154`) | `zig build test` |
+| Multi-threaded havoc fuzz campaign | 0 open crashes (`.fuzz-crashes/`) | `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8` |
+| C SDK & Rust workspace E2E | 100% passing | `make -f sdks/c/Makefile -o build-core test && cargo test --locked` |
+| TypeScript SDK (`@tevm/guillotine`) E2E & fuzzer | `340 / 340` (`30,290` assertions) | `cd sdks/typescript && bun test && bun run test:fuzz` |
 
-16,907 Amsterdam EEST cases are skipped because Amsterdam is not yet finalized/implemented. Fetch the pinned fixtures first with `./scripts/fetch-eest-fixtures.sh`.
+16,907 Amsterdam EEST cases are skipped because Amsterdam is not yet finalized/implemented. Fetch the pinned fixtures first with `./scripts/fetch-eest-fixtures.sh`. Full methodology and CI coverage are documented in [Testing and verification](docs/src/pages/guides/testing-and-verification.mdx) and [Benchmarks and native JIT](docs/src/pages/guides/benchmarks-and-jit.mdx).
 
 ## Usage
 

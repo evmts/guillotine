@@ -101,7 +101,7 @@ function collectEnvironment() {
       ? cmdOut("sysctl", ["-n", "machdep.cpu.brand_string"])
       : os.cpus()[0]?.model || "unknown";
   const guillotineRev = cmdOut("jj", ["--no-pager", "log", "-r", "@", "-T", "commit_id.short(12)", "--no-graph"]);
-  const zigBin = fs.existsSync("/Users/williamcory/.zvm/0.15.2/zig") ? "/Users/williamcory/.zvm/0.15.2/zig" : "zig";
+  const zigBin = fs.existsSync("/Users/williamcory/.zvm/0.17.1/zig") ? "/Users/williamcory/.zvm/0.17.1/zig" : "zig";
   return {
     timestamp_iso: new Date().toISOString(),
     hostname: os.hostname(),

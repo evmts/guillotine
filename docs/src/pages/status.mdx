@@ -75,8 +75,29 @@ implementation.
 
 ## Performance
 
-`zig build bench` runs the in-repository benchmarks in ReleaseFast on x86_64
-Linux.
+### Apples-to-apples cross-EVM suite (`bench/compare/`)
+
+In-process, differentially verified comparison across 25 canonical workloads
+(21 verbatim from `alloy-rs/evm2` + 4 hot loops) on Apple M3 Max (macOS arm64,
+Zig `0.17.1`, Rust `1.100.0`, Apple Clang `17.0.0`, Go `1.26.0`, gas on,
+tracing off, **100% exact gas + output match across all 12 engine configs**):
+
+| Warm interpreter metric | Guillotine | `evm2` | `revm` | `evmone` (Baseline) | `ethrex` | `gevm` | `geth` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **Overall geomean (25 workloads) vs `revm`** | **1.00×** | 1.12× | 1.00× | 0.76× | 0.77× | 0.99× | 0.31× |
+| **Classic compute geomean (7) vs `revm`** | **1.43×** | 1.10× | 1.00× | 0.94× | 0.84× | 0.98× | 0.41× |
+| `snailtracer` (classic, 205M gas) | **55.53 ms** | 64.75 ms | 81.67 ms | 70.53 ms | 80.80 ms | 92.29 ms | 137.01 ms |
+| `burntpix` (mainnet, 92M gas) | **35.42 ms** | 53.65 ms | 65.83 ms | 63.54 ms | 68.33 ms | 77.51 ms | 121.02 ms |
+| `uniswap_v3_pool` (mainnet) | **11.40 µs** | 16.71 µs | 19.38 µs | 33.46 µs | 21.73 µs | 22.83 µs | 69.63 µs |
+| `fibonacci` (classic) | **17.71 µs** | 51.04 µs | 58.71 µs | 55.67 µs | 58.58 µs | 60.38 µs | 89.88 µs |
+
+Cold first-run analysis (`0.27×` vs `revm`) and pure-Zig `ECRECOVER` (`177.48 µs`
+vs ~`30 µs` `libsecp256k1`) remain the primary known bottlenecks. Full warm,
+cold, and Tier 2 JIT (`evm2-jit`, `revmc`) tables live in
+[Benchmarks and native JIT](/guides/benchmarks-and-jit) and
+`bench/compare/RESULTS.md`.
+
+### In-repo ReleaseFast runner (`zig build bench`, x86_64 Linux)
 
 | Workload | Guillotine median | Reference |
 | --- | ---: | --- |
@@ -85,8 +106,8 @@ Linux.
 | `precompile/MODEXP-256` | 2.82 µs | |
 | `precompile/BN254-mul` | 8.16 µs | |
 
-The revm figure comes from a different harness on the same host, so treat the
-ratio as approximate. See [Benchmarks and native JIT](/guides/benchmarks-and-jit).
+For full testing, fuzzing, formal verification, and E2E SDK details, see
+[Testing and verification](/guides/testing-and-verification).
 
 ## Checks
 

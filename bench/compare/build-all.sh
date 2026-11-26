@@ -10,8 +10,8 @@ BIN_DIR="$ROOT/bin"
 mkdir -p "$BIN_DIR" "$ROOT/.cache"
 
 ZIG_BIN="${ZIG_BIN:-$(command -v zig)}"
-if [ -x "$HOME/.zvm/0.15.2/zig" ]; then
-  ZIG_BIN="$HOME/.zvm/0.15.2/zig"
+if [ -x "$HOME/.zvm/0.17.1/zig" ]; then
+  ZIG_BIN="$HOME/.zvm/0.17.1/zig"
 fi
 
 echo "==> [1/7] Fetching/normalizing canonical workloads"

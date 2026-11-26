@@ -140,7 +140,11 @@ zig build specs             # legacy filler specs
 ```
 
 `zig build state-tests` reads fixtures that `scripts/fetch-eest-fixtures.sh`
-downloads (`tests@v21.0.3`, checked against a pinned SHA-256). `specs/README.md` documents both spec suites.
+downloads (`tests@v21.0.3`, checked against a pinned SHA-256). See
+[Testing and verification](/guides/testing-and-verification) for the full
+verification matrix (EEST, SMT/LLVM/Lean 4 formal verification, fuzzing, and
+C/TypeScript/Rust SDK tests) and [Benchmarks and native JIT](/guides/benchmarks-and-jit)
+for performance runs.
 
 Filter with `-Dtest-filter`:
 
