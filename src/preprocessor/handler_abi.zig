@@ -316,6 +316,32 @@ pub fn Native(comptime FrameType: type) type {
             return @call(tail_mod, handler, .{ frame, target, s.sp, gas, tos[0], tos[1], tos[2], tos[3] });
         }
 
+        /// Return `handler` as a value the optimizer cannot trace back to a function.
+        ///
+        /// A hot handler tail-calls its slow-path twin through this. Called directly, the
+        /// twin has one caller and LLVM inlines it whatever its size, which puts the slow
+        /// path's stack frame and register spills in the hot handler's prologue. Zig's
+        /// `noinline` cannot stop that: it is part of the function type, and
+        /// `always_tail` requires caller and callee types to match. A volatile load does
+        /// not stop it either: Zig evaluates a load from a comptime-known pointer itself.
+        ///
+        /// The empty assembly block passes the address through one register. It emits no
+        /// instruction; the tail call becomes an indirect jump through that register.
+        pub inline fn outlined(comptime handler: FrameType.OpcodeHandler) FrameType.OpcodeHandler {
+            if (comptime !has_preserve_none) return handler;
+            return switch (builtin.cpu.arch) {
+                .x86_64 => asm (""
+                    : [_] "={rax}" (-> FrameType.OpcodeHandler),
+                    : [_] "{rax}" (handler),
+                ),
+                .aarch64, .aarch64_be => asm (""
+                    : [_] "={x16}" (-> FrameType.OpcodeHandler),
+                    : [_] "{x16}" (handler),
+                ),
+                else => comptime unreachable,
+            };
+        }
+
         /// Stop executing the frame with `code`.
         pub inline fn exit(frame: *FrameType, comptime opcode: UnifiedOpcode, s: StackView, gas: Gas, code: ExitCode) ExitCode {
             flush(frame, s, gas);

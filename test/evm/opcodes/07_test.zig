@@ -464,3 +464,31 @@ test "SMOD with JUMP: very large 256-bit operations" {
     const big_mod = (@as(u256, 1) << 190) + (@as(u256, 0xDEADBEEF) << 150);
     try run_smod_test_with_jump(std.testing.allocator, massive, big_mod);
 }
+
+test "SMOD: long-division boundary operands in both orders" {
+    const max64: u256 = std.math.maxInt(u64);
+    const top_bit: u256 = @as(u256, 1) << 63;
+    // {low, limb1, limb2, limb3} operand pairs. The first four need the add-back step
+    // of long division; the rest saturate the quotient estimate or sit on a limb boundary.
+    const pairs = [_][2]u256{
+        .{ 3 | (top_bit << 128), 1 | (top_bit >> 2 << 128) },
+        .{ ((max64 - 1) << 64) | (top_bit << 128), max64 | (top_bit << 64) },
+        .{ (top_bit << 128) | ((top_bit - 1) << 192), max64 | (top_bit << 128) },
+        .{ top_bit << 192, 1 | (top_bit << 128) },
+        .{ (max64 << 128) | (max64 << 192), max64 | (max64 << 64) },
+        .{ std.math.maxInt(u256), std.math.maxInt(u256) >> 64 },
+        .{ std.math.maxInt(u256), max64 },
+        .{ std.math.maxInt(u256), max64 + 1 },
+        .{ max64 + 1, max64 },
+        .{ max64, max64 },
+        .{ max64, 1 },
+        .{ @as(u256, 1) << 255, std.math.maxInt(u256) },
+        .{ @as(u256, 1) << 255, (@as(u256, 1) << 255) - 1 },
+        .{ std.math.maxInt(u256) - 6, 3 },
+        .{ std.math.maxInt(u256) - 6, std.math.maxInt(u256) - 2 },
+    };
+    for (pairs) |pair| {
+        try run_smod_test(std.testing.allocator, pair[0], pair[1]);
+        try run_smod_test(std.testing.allocator, pair[1], pair[0]);
+    }
+}

@@ -220,6 +220,7 @@ test {
     _ = @import("stack/stack_bench.zig");
     _ = @import("internal/safety_counter.zig");
     _ = @import("core/verified_ops.zig");
+    _ = @import("core/wide_arith.zig");
     _ = @import("block/block_info.zig");
     _ = @import("block/transaction_context.zig");
     _ = @import("frame/block_info_config.zig");

@@ -4,6 +4,7 @@ const GasConstants = @import("voltaire").GasConstants;
 const log = @import("../log.zig");
 const eips = @import("../eips_and_hardforks/eips.zig");
 const verified_ops = @import("../core/verified_ops.zig");
+const wide_arith = @import("../core/wide_arith.zig");
 
 /// Arithmetic opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -59,182 +60,183 @@ pub fn Handlers(FrameType: type) type {
             return N.next(self, .SUB, cursor, s, gas);
         }
 
-        const from_native = FrameType.UintN.from_native;
+        const Handler = handler_abi.ExitCode;
+
+        /// True when any of `words` has bits above bit 63. Operands that all fit one limb
+        /// take the inline path of a division handler: one hardware divide, no call and
+        /// no stack frame. Everything else tail-calls the handler's `*_wide` twin.
+        inline fn anyWide(words: anytype) bool {
+            var merged: WordType = 0;
+            inline for (words) |word| merged |= word;
+            return !wide_arith.fitsU64(merged);
+        }
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
-        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .DIV, cursor, s, gas);
+            const top = s.tos;
+            const second = s.sp[1];
+            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&div_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
 
+            s.sp += 1;
+            s.tos = wide_arith.div64(@truncate(top), @truncate(second));
+            return N.next(self, .DIV, cursor, s, gas);
+        }
+
+        /// DIV for operands wider than 64 bits. Entered by tail call from `div`, after
+        /// `div` has run the pre-instruction hooks, with the operands still on the stack.
+        fn div_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
-                    return from_native(top).wrapping_div(from_native(second)).to_native();
+                    return @intCast(wide_arith.div(top, second));
                 }
             }.op);
-
             return N.next(self, .DIV, cursor, s, gas);
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
         ///
+        /// Operands below 2^64 are non-negative, so their signed quotient is the unsigned
+        /// one. `sdiv_wide` handles every other input.
+        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .SDIV, cursor, s, gas);
+            const top = s.tos;
+            const second = s.sp[1];
+            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&sdiv_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+
+            s.sp += 1;
+            s.tos = wide_arith.div64(@truncate(top), @truncate(second));
+            return N.next(self, .SDIV, cursor, s, gas);
+        }
+
+        /// SDIV for operands wider than 64 bits, which includes every negative operand.
+        ///
         /// Branchless: unsigned division of the operands' magnitudes, then the sign is
         /// re-applied by `verified_ops.sdivFromUnsignedQuotient`. That function is the
         /// one the SMT and Lean proofs cover (`sdiv_branchless_equiv`); with
-        /// `wrapping_div(x, 0) == 0` it yields 0 for a zero divisor and `MIN_SIGNED` for
+        /// `wide_arith.div(x, 0) == 0` it yields 0 for a zero divisor and `MIN_SIGNED` for
         /// `MIN_SIGNED / -1` without a special case.
-        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        fn sdiv_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
-            N.before(self, .SDIV, cursor, s, gas);
             const top = s.pop_unsafe();
             const second = s.peek_unsafe();
 
-            const top_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(top));
-            const second_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(second));
-            const quotient = top_abs.wrapping_div(second_abs).to_native();
+            const quotient = wide_arith.div(verified_ops.absTwoComp(top), verified_ops.absTwoComp(second));
 
             s.set_top_unsafe(verified_ops.sdivFromUnsignedQuotient(top, second, quotient));
             return N.next(self, .SDIV, cursor, s, gas);
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
-        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .MOD, cursor, s, gas);
+            const top = s.tos;
+            const second = s.sp[1];
+            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&mod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
 
+            s.sp += 1;
+            s.tos = wide_arith.rem64(@truncate(top), @truncate(second));
+            return N.next(self, .MOD, cursor, s, gas);
+        }
+
+        /// MOD for operands wider than 64 bits. Entered by tail call from `mod`.
+        fn mod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
-                    return from_native(top).wrapping_rem(from_native(second)).to_native();
+                    return @intCast(wide_arith.rem(top, second));
                 }
             }.op);
-
             return N.next(self, .MOD, cursor, s, gas);
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
         ///
-        /// Branchless: unsigned remainder of the operands' magnitudes, then the dividend's
-        /// sign is re-applied by `verified_ops.smodFromUnsignedRem`, the function the SMT
-        /// and Lean proofs cover (`smod_branchless_equiv`). With `wrapping_rem(x, 0) == 0`
-        /// it yields 0 for a zero divisor and for `MIN_SIGNED % -1` without a special case.
-        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        /// Operands below 2^64 are non-negative, so their signed remainder is the unsigned
+        /// one. `smod_wide` handles every other input.
+        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SMOD, cursor, s, gas);
+            const top = s.tos;
+            const second = s.sp[1];
+            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&smod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+
+            s.sp += 1;
+            s.tos = wide_arith.rem64(@truncate(top), @truncate(second));
+            return N.next(self, .SMOD, cursor, s, gas);
+        }
+
+        /// SMOD for operands wider than 64 bits, which includes every negative operand.
+        ///
+        /// Branchless: unsigned remainder of the operands' magnitudes, then the dividend's
+        /// sign is re-applied by `verified_ops.smodFromUnsignedRem`, the function the SMT
+        /// and Lean proofs cover (`smod_branchless_equiv`). With `wide_arith.rem(x, 0) == 0`
+        /// it yields 0 for a zero divisor and for `MIN_SIGNED % -1` without a special case.
+        fn smod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
             const top = s.pop_unsafe();
             const second = s.peek_unsafe();
 
-            const top_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(top));
-            const second_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(second));
-            const remainder = top_abs.wrapping_rem(second_abs).to_native();
+            const remainder = wide_arith.rem(verified_ops.absTwoComp(top), verified_ops.absTwoComp(second));
 
             s.set_top_unsafe(verified_ops.smodFromUnsignedRem(top, remainder));
             return N.next(self, .SMOD, cursor, s, gas);
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .ADDMOD, cursor, s, gas);
+            const addend1 = s.tos; // Top of stack (a)
+            const addend2 = s.sp[1]; // Second on stack (b)
+            const modulus = s.sp[2]; // Third on stack (N)
+            // The inline path needs one-limb operands whose sum also fits one limb.
+            const sum = @addWithOverflow(@as(u64, @truncate(addend1)), @as(u64, @truncate(addend2)));
+            if (anyWide(.{ addend1, addend2, modulus }) or sum[1] != 0) return @call(handler_abi.tail_mod, N.outlined(&addmod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+
+            s.sp += 2;
+            s.tos = wide_arith.rem64(sum[0], @truncate(modulus));
+            return N.next(self, .ADDMOD, cursor, s, gas);
+        }
+
+        /// ADDMOD for operands or sums wider than 64 bits. Entered by tail call from
+        /// `addmod`. The sum is reduced as a 257-bit value, so it never wraps.
+        fn addmod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
             const addend1 = s.pop_unsafe(); // Top of stack (a)
             const addend2 = s.pop_unsafe(); // Second on stack (b)
-            const modulus = s.pop_unsafe(); // Third on stack (N)
-            var result: WordType = 0;
-            if (modulus == 0) {
-                result = 0;
-            } else {
-                // This implementation correctly handles modular addition with potential u256 overflow.
-                // It first reduces the addends modulo N, then performs a wrapping addition.
-                // The `if (sum[1] == 1 or r >= modulus)` check handles two cases:
-                // 1. `sum[1] == 1`: The addition of the reduced addends overflowed u256.
-                // 2. `r >= modulus`: The sum is valid but still needs to be wrapped by the modulus.
-                // In both cases, a single subtraction of the modulus yields the correct result.
-                const addend1_reduced = addend1 % modulus;
-                const addend2_reduced = addend2 % modulus;
-                const sum = @addWithOverflow(addend1_reduced, addend2_reduced);
-                var r = sum[0];
-                // If overflow occurred or r >= modulus, subtract once
-                if (sum[1] == 1 or r >= modulus) {
-                    @branchHint(.unlikely);
-                    r -%= modulus;
-                }
-                result = r;
-            }
-            s.push_unsafe(result);
+            const modulus = s.peek_unsafe(); // Third on stack (N)
+            s.set_top_unsafe(@intCast(wide_arith.addmod(addend1, addend2, modulus)));
             return N.next(self, .ADDMOD, cursor, s, gas);
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .MULMOD, cursor, s, gas);
-            const factor1 = s.pop_unsafe(); // Top of stack (a)
-            const factor2 = s.pop_unsafe(); // Second on stack (b)
-            const modulus = s.pop_unsafe(); // Third on stack (N)
-            var result: WordType = undefined;
-            if (modulus == 0) {
-                result = 0;
-            } else {
-                result = mulmod_safe(factor1, factor2, modulus);
-            }
-            s.push_unsafe(result);
+            const factor1 = s.tos; // Top of stack (a)
+            const factor2 = s.sp[1]; // Second on stack (b)
+            const modulus = s.sp[2]; // Third on stack (N)
+            if (anyWide(.{ factor1, factor2, modulus })) return @call(handler_abi.tail_mod, N.outlined(&mulmod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+
+            s.sp += 2;
+            s.tos = wide_arith.mulmod64(@truncate(factor1), @truncate(factor2), @truncate(modulus));
             return N.next(self, .MULMOD, cursor, s, gas);
         }
 
-        /// Safe modular multiplication using double-width arithmetic to prevent overflow.
-        fn mulmod_safe(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
-            if (modulus == 0) return 0;
-            if (factor1 == 0 or factor2 == 0) return 0;
-            if (modulus == 1) return 0;
-
-            // Reduce operands first
-            const factor1_mod = factor1 % modulus;
-            const factor2_mod = factor2 % modulus;
-
-            // Use double-width arithmetic to prevent overflow
-            if (WordType == u256) {
-                const wide_factor1 = @as(u512, factor1_mod);
-                const wide_factor2 = @as(u512, factor2_mod);
-                const wide_modulus = @as(u512, modulus);
-                const wide_product = (wide_factor1 * wide_factor2) % wide_modulus;
-                return @intCast(wide_product);
-            } else {
-                // For other word types, fall back to addition-based approach
-                return mulmod_by_addition(factor1_mod, factor2_mod, modulus);
-            }
-        }
-
-        /// Fallback modular multiplication using repeated addition for non-u256 types.
-        fn mulmod_by_addition(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
-            var result: WordType = 0;
-            var base = factor1 % modulus;
-            var multiplier = factor2 % modulus;
-
-            while (multiplier > 0) {
-                if (multiplier & 1 == 1) {
-                    result = addmod_safe(result, base, modulus);
-                }
-                multiplier = std.math.shr(WordType, multiplier, 1);
-                if (multiplier > 0) {
-                    base = addmod_safe(base, base, modulus);
-                }
-            }
-
-            return result;
-        }
-
-        /// Safe modular addition that prevents overflow.
-        fn addmod_safe(addend1: WordType, addend2: WordType, modulus: WordType) WordType {
-            const addend1_mod = addend1 % modulus;
-            const addend2_mod = addend2 % modulus;
-
-            // Check if addition would overflow
-            if (addend1_mod > modulus - addend2_mod) {
-                @branchHint(.unlikely);
-                // Overflow case: (addend1 + addend2) = modulus + (addend1 + addend2 - modulus)
-                return (addend1_mod - (modulus - addend2_mod));
-            } else {
-                // No overflow case
-                return (addend1_mod + addend2_mod) % modulus;
-            }
+        /// MULMOD for operands wider than 64 bits. Entered by tail call from `mulmod`.
+        /// The product is reduced as a 512-bit value, so it never wraps.
+        fn mulmod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            const factor1 = s.pop_unsafe(); // Top of stack (a)
+            const factor2 = s.pop_unsafe(); // Second on stack (b)
+            const modulus = s.peek_unsafe(); // Third on stack (N)
+            s.set_top_unsafe(@intCast(wide_arith.mulmod(factor1, factor2, modulus)));
+            return N.next(self, .MULMOD, cursor, s, gas);
         }
 
         /// EXP opcode (0x0a) - Exponential operation.
@@ -1186,35 +1188,6 @@ test "ADDMOD opcode - modulus equals 1" {
     _ = try TestFrame.ArithmeticHandlers.addmod(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
-}
-
-test "MULMOD helper functions - mulmod_safe edge cases" {
-    // Test modulus = 0
-    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(100, 200, 0));
-
-    // Test factor1 = 0
-    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(0, 200, 13));
-
-    // Test factor2 = 0
-    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(100, 0, 13));
-
-    // Test modulus = 1
-    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(100, 200, 1));
-
-    // Test normal case
-    try testing.expectEqual(@as(u256, 4), TestFrame.ArithmeticHandlers.mulmod_safe(10, 20, 7));
-}
-
-test "MULMOD helper functions - addmod_safe overflow protection" {
-    const max_half = std.math.maxInt(u256) / 2;
-
-    // Test overflow case where addend1 > modulus - addend2
-    const result = TestFrame.ArithmeticHandlers.addmod_safe(max_half, max_half + 1, 100);
-    try testing.expect(result < 100);
-
-    // Test non-overflow case
-    const result2 = TestFrame.ArithmeticHandlers.addmod_safe(10, 20, 100);
-    try testing.expectEqual(@as(u256, 30), result2);
 }
 
 test "SIGNEXTEND opcode - boundary byte indices" {

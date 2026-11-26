@@ -1,6 +1,7 @@
 const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
+const wide_arith = @import("../core/wide_arith.zig");
 
 /// Synthetic arithmetic opcode handlers for the EVM stack frame.
 /// These handle fused PUSH+arithmetic operations for optimization.
@@ -61,21 +62,17 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
+        ///
+        /// The pushed dividend fits 64 bits, so a divisor of 2^64 or more gives 0 and
+        /// every other divisor needs one hardware divide. Division by zero gives 0.
         pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_DIV_INLINE, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
-            const dividend = op_data.metadata.value;
+            const dividend: u64 = op_data.metadata.value;
 
             const divisor = s.peek_unsafe();
-
-            const Uint = @import("voltaire").Uint;
-            const U256 = Uint(256, 4);
-            const dividend_u256 = U256.from_native(dividend);
-            const divisor_u256 = U256.from_native(divisor);
-
-            const result_u256 = dividend_u256.wrapping_div(divisor_u256);
-            const result = result_u256.to_native();
+            const result: u64 = if (wide_arith.fitsU64(divisor)) wide_arith.div64(dividend, @truncate(divisor)) else 0;
 
             s.set_top_unsafe(result);
 
@@ -83,6 +80,9 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
+        ///
+        /// Operands that both fit 64 bits take one hardware divide inline. Everything
+        /// else tail-calls `push_div_pointer_wide`, so this handler has no stack frame.
         pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_DIV_POINTER, cursor, s, gas);
@@ -90,17 +90,22 @@ pub fn Handlers(FrameType: type) type {
             const dividend = op_data.metadata.value_ptr.*;
 
             const divisor = s.peek_unsafe();
+            if (!wide_arith.fitsU64(dividend | divisor)) return @call(handler_abi.tail_mod, N.outlined(&push_div_pointer_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
 
-            // Convert to U256 for optimized division
-            const Uint = @import("voltaire").Uint;
-            const U256 = Uint(256, 4);
-            const dividend_u256 = U256.from_native(dividend);
-            const divisor_u256 = U256.from_native(divisor);
+            s.set_top_unsafe(wide_arith.div64(@truncate(dividend), @truncate(divisor)));
 
-            const result_u256 = dividend_u256.wrapping_div(divisor_u256);
-            const result = result_u256.to_native();
+            return N.next(self, .PUSH_DIV_POINTER, cursor, s, gas);
+        }
 
-            s.set_top_unsafe(result);
+        /// PUSH_DIV_POINTER for operands wider than 64 bits. Entered by tail call from
+        /// `push_div_pointer`, after it has run the pre-instruction hooks.
+        fn push_div_pointer_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
+            const dividend = op_data.metadata.value_ptr.*;
+
+            const divisor = s.peek_unsafe();
+            s.set_top_unsafe(@intCast(wide_arith.div(dividend, divisor)));
 
             return N.next(self, .PUSH_DIV_POINTER, cursor, s, gas);
         }

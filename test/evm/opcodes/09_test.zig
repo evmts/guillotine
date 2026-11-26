@@ -428,3 +428,42 @@ test "MULMOD with JUMP: near u64 boundary" {
     const near_u64 = @as(u256, std.math.maxInt(u32));
     try run_mulmod_test_with_jump(std.testing.allocator, near_u64, 3, 100);
 }
+
+test "MULMOD: long-division boundary operands in every position" {
+    const max64: u256 = std.math.maxInt(u64);
+    const top_bit: u256 = @as(u256, 1) << 63;
+    // {low, limb1, limb2, limb3} operand pairs. The first four need the add-back step
+    // of long division; the rest saturate the quotient estimate or sit on a limb boundary.
+    const pairs = [_][2]u256{
+        .{ 3 | (top_bit << 128), 1 | (top_bit >> 2 << 128) },
+        .{ ((max64 - 1) << 64) | (top_bit << 128), max64 | (top_bit << 64) },
+        .{ (top_bit << 128) | ((top_bit - 1) << 192), max64 | (top_bit << 128) },
+        .{ top_bit << 192, 1 | (top_bit << 128) },
+        .{ (max64 << 128) | (max64 << 192), max64 | (max64 << 64) },
+        .{ std.math.maxInt(u256), std.math.maxInt(u256) >> 64 },
+        .{ std.math.maxInt(u256), max64 },
+        .{ std.math.maxInt(u256), max64 + 1 },
+        .{ max64 + 1, max64 },
+        .{ max64, max64 },
+        .{ max64, 1 },
+        .{ @as(u256, 1) << 255, std.math.maxInt(u256) },
+        .{ @as(u256, 1) << 255, (@as(u256, 1) << 255) - 1 },
+        .{ std.math.maxInt(u256) - 6, 3 },
+        .{ std.math.maxInt(u256) - 6, std.math.maxInt(u256) - 2 },
+    };
+    for (pairs) |pair| {
+        try run_mulmod_test(std.testing.allocator, pair[0], pair[0], pair[1]);
+        try run_mulmod_test(std.testing.allocator, pair[0], pair[1], pair[0]);
+        try run_mulmod_test(std.testing.allocator, pair[1], pair[0], pair[0]);
+        try run_mulmod_test(std.testing.allocator, pair[1], pair[1], pair[0]);
+        try run_mulmod_test(std.testing.allocator, pair[0], pair[1], max64);
+        try run_mulmod_test(std.testing.allocator, max64, max64, pair[1]);
+    }
+    // One-limb operands whose sum or product needs a second limb.
+    try run_mulmod_test(std.testing.allocator, max64, max64, max64);
+    try run_mulmod_test(std.testing.allocator, max64, max64, max64 - 1);
+    try run_mulmod_test(std.testing.allocator, max64, 1, max64);
+    try run_mulmod_test(std.testing.allocator, max64, 2, 3);
+    try run_mulmod_test(std.testing.allocator, max64, max64, 0);
+    try run_mulmod_test(std.testing.allocator, max64, max64, 1);
+}
