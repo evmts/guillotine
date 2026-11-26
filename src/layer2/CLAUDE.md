@@ -41,10 +41,13 @@ contain no L2 code. `opSpec()` returns the `OpSpecId` for `.optimism` and `.base
   (test_root.zig) and `layer2-evm-host-tests` (evm_host.zig).
 - `evm_host.zig` must not be imported from mod.zig or test_root.zig: the `evm` module
   owns those files, and a file may belong to one module only.
-- `src/evm.zig` ignores `EvmConfig.precompile_overrides` and selects precompiles by its
-  comptime hardfork. `evm_host.Host.configure` therefore refuses Fjord+ (P256VERIFY,
-  BN254/BLS input limits) and Bedrock. Lift this only after the EVM applies overrides in
-  nested calls.
+- `evm_host.Host` runs Bedrock through Jovian. `src/evm.zig` consults
+  `EvmConfig.precompile_overrides` in every frame, nested calls included.
+- `Host.runFrame` drives `Evm.inner_call` on a 64 MiB thread, not `Evm.call`: `call`
+  has no access list or authorization list input and resets its refund counter, so the
+  host applies intrinsic gas (EIP-2930 lists, EIP-7702 tuples), the warm set, the
+  authorization list (outside the call's snapshot, so a revert keeps it), refunds and the
+  EIP-7623 floor itself. It refuses at compile time an OP spec on Osaka (EIP-7825).
 
 ## Testing
 

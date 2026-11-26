@@ -14,6 +14,22 @@ const transaction = @import("optimism/transaction.zig");
 const constants = @import("optimism/constants.zig");
 pub const OpSpecId = @import("optimism/spec.zig").OpSpecId;
 pub const Address = @import("voltaire").Address;
+/// EIP-7702 authorization tuple. `v` is the y_parity (0 or 1), not 27 + y_parity.
+pub const Authorization = @import("voltaire").Authorization.Authorization;
+
+/// One EIP-2930 access list entry. Duplicate addresses and keys are allowed; each
+/// occurrence costs intrinsic gas (EIP-2930).
+pub const AccessListEntry = struct {
+    address: Address,
+    storage_keys: []const u256 = &.{},
+};
+
+/// EIP-2930 intrinsic gas per access list address.
+pub const ACCESS_LIST_ADDRESS_COST: u64 = 2_400;
+/// EIP-2930 intrinsic gas per access list storage key.
+pub const ACCESS_LIST_STORAGE_KEY_COST: u64 = 1_900;
+/// EIP-7702 PER_EMPTY_ACCOUNT_COST: intrinsic gas per authorization tuple.
+pub const AUTHORIZATION_COST: u64 = 25_000;
 /// Fee fields of a user transaction. Deposits carry no gas price (use `.legacy = 0`).
 pub const Fee = union(enum) {
     /// Legacy (0x00) and EIP-2930 (0x01): one gas price that is both cap and price.
@@ -63,6 +79,10 @@ pub const Transaction = struct {
     input: []const u8 = &.{},
     is_call: bool = true,
     deposit: ?transaction.DepositTransactionParts = null,
+    /// EIP-2930 access list. Types 0x01, 0x02 and 0x04 only.
+    access_list: []const AccessListEntry = &.{},
+    /// EIP-7702 authorization list. Type 0x04 only, where it must be non-empty.
+    authorization_list: []const Authorization = &.{},
 };
 pub const Result = struct {
     outcome: deposits.Outcome,
@@ -91,15 +111,23 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
     if (tx.envelope.len == 0) return error.MissingEnvelope;
     const tx_type = try transaction.OpTxType.decode(tx.envelope, spec);
     if (tx_type.isDeposit() != (tx.deposit != null)) return error.DepositTypeMismatch;
+    // `decode` already refused type 0x04 before Isthmus (OpTxType.isSupported).
     switch (tx_type) {
-        .Legacy, .Eip2930 => if (tx.fee != .legacy) return error.FeeTypeMismatch,
+        .Legacy => if (tx.fee != .legacy) return error.FeeTypeMismatch,
+        .Eip2930 => if (tx.fee != .legacy) return error.FeeTypeMismatch,
         .Eip1559 => if (tx.fee != .dynamic) return error.FeeTypeMismatch,
-        // `Transaction` has no authorization list to apply, so executing one would
-        // silently skip its delegations.
-        .Eip7702 => return error.AuthorizationListUnsupported,
+        .Eip7702 => {
+            if (tx.fee != .dynamic) return error.FeeTypeMismatch;
+            // EIP-7702: a set-code transaction has a non-empty list and a destination.
+            if (tx.authorization_list.len == 0) return error.EmptyAuthorizationList;
+            if (tx.to == null) return error.AuthorizationListCreate;
+        },
         .Eip4844 => return error.TxTypeNotSupported,
         .Deposit => {},
     }
+    // Legacy and deposit transactions have no access list field.
+    if ((tx_type == .Legacy or tx_type == .Deposit) and tx.access_list.len != 0) return error.AccessListUnsupported;
+    if (tx_type != .Eip7702 and tx.authorization_list.len != 0) return error.AuthorizationListUnsupported;
     if (tx.is_call != (tx.to != null)) return error.CallTargetMismatch;
     try host.configure(spec);
     const checkpoint = try host.checkpoint();
@@ -254,7 +282,7 @@ test "executor errors restore state and reject invalid admission" {
     try std.testing.expectError(error.FeeTypeMismatch, execute(&host, fees.L1BlockInfo.empty(), .FJORD, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
     tx.envelope = &.{4};
     try std.testing.expectError(error.TxTypeNotSupported, execute(&host, fees.L1BlockInfo.empty(), .FJORD, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
-    try std.testing.expectError(error.AuthorizationListUnsupported, execute(&host, fees.L1BlockInfo.empty(), .ISTHMUS, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    try std.testing.expectError(error.FeeTypeMismatch, execute(&host, fees.L1BlockInfo.empty(), .ISTHMUS, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
     tx.envelope = &.{3};
     try std.testing.expectError(error.TxTypeNotSupported, execute(&host, fees.L1BlockInfo.empty(), .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
     try std.testing.expectEqual(OpSpecId.FJORD, host.configured.?);
@@ -364,6 +392,69 @@ test "executor requires a call target exactly for calls" {
     tx.to = Address.fromU256(2);
     try std.testing.expectError(error.CallTargetMismatch, execute(&host, fees.L1BlockInfo.empty(), .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
     try std.testing.expect(host.configured == null);
+}
+
+test "executor validates access and authorization lists against the transaction type" {
+    const keys = [_]u256{7};
+    const entries = [_]AccessListEntry{.{ .address = Address.fromU256(9), .storage_keys = &keys }};
+    const auth = Authorization{ .chain_id = 0, .address = Address.fromU256(5), .nonce = 0, .v = 0, .r = @as([32]u8, @splat(1)), .s = @as([32]u8, @splat(1)) };
+    const auths = [_]Authorization{auth};
+    const dynamic = Fee{ .dynamic = .{ .max_fee_per_gas = 3, .max_priority_fee_per_gas = 0 } };
+    const base = Transaction{ .sender = Address.fromU256(1), .envelope = &.{0}, .gas_limit = 100, .fee = .{ .legacy = 3 }, .base_fee = 2, .to = Address.fromU256(2) };
+    var info = fees.L1BlockInfo.empty();
+    info.operator_fee_scalar = 0;
+    info.operator_fee_constant = 0;
+
+    // A legacy transaction has no access list; a deposit has neither list.
+    var tx = base;
+    tx.access_list = &entries;
+    var host = TestHost{};
+    try std.testing.expectError(error.AccessListUnsupported, execute(&host, info, .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    tx.envelope = &.{0x7e};
+    tx.fee = .{ .legacy = 0 };
+    tx.deposit = transaction.DepositTransactionParts.deposit(@as([32]u8, @splat(1)), 0, false);
+    try std.testing.expectError(error.AccessListUnsupported, execute(&host, info, .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    tx.access_list = &.{};
+    tx.authorization_list = &auths;
+    try std.testing.expectError(error.AuthorizationListUnsupported, execute(&host, info, .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    try std.testing.expect(host.configured == null);
+
+    // Types 0x01 and 0x02 carry an access list but no authorization list.
+    for ([_]u8{ 1, 2 }) |tx_type| {
+        tx = base;
+        tx.envelope = if (tx_type == 1) &.{1} else &.{2};
+        if (tx_type == 2) tx.fee = dynamic;
+        tx.access_list = &entries;
+        var ok = TestHost{};
+        _ = try execute(&ok, info, .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        tx.authorization_list = &auths;
+        try std.testing.expectError(error.AuthorizationListUnsupported, execute(&ok, info, .JOVIAN, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    }
+
+    // Type 0x04: Isthmus and later, dynamic fee, non-empty list, never a creation.
+    tx = base;
+    tx.envelope = &.{4};
+    tx.fee = dynamic;
+    tx.authorization_list = &auths;
+    tx.access_list = &entries;
+    for ([_]OpSpecId{ .BEDROCK, .REGOLITH, .CANYON, .ECOTONE, .FJORD, .GRANITE, .HOLOCENE }) |spec| {
+        try std.testing.expectError(error.TxTypeNotSupported, execute(&host, info, spec, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    }
+    for ([_]OpSpecId{ .ISTHMUS, .JOVIAN }) |spec| {
+        var ok = TestHost{};
+        _ = try execute(&ok, info, spec, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try std.testing.expectEqual(spec, ok.configured.?);
+        var empty = tx;
+        empty.authorization_list = &.{};
+        try std.testing.expectError(error.EmptyAuthorizationList, execute(&ok, info, spec, empty, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+        var create = tx;
+        create.to = null;
+        create.is_call = false;
+        try std.testing.expectError(error.AuthorizationListCreate, execute(&ok, info, spec, create, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+        var legacy = tx;
+        legacy.fee = .{ .legacy = 3 };
+        try std.testing.expectError(error.FeeTypeMismatch, execute(&ok, info, spec, legacy, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    }
 }
 
 /// Install these overrides in every frame, including nested calls. The switch

@@ -21,13 +21,16 @@
 //! | Invalid deposit                 | `Result.invalid`: the executor includes a failed deposit    |
 //! | Checkpoints                     | `Database` snapshots (O(1) to open, rollback costs the      |
 //! |                                 | writes undone); refused over foreign snapshots              |
-//! | Fees                            | settled by the executor; the EVM's own L1-style gas charge  |
-//! |                                 | is pre-funded and reversed exactly (see `runFrame`)         |
+//! | Fees                            | settled by the executor; the frame runs through             |
+//! |                                 | `Evm.inner_call`, which moves no gas money                  |
+//! | Transaction processing          | `runFrame`: intrinsic gas, nonce, EIP-2929/2930 warm set,   |
+//! |                                 | EIP-7702 authorizations, refunds, EIP-7623 floor            |
 //! | Block system calls (4788, 2935) | disabled here; they belong to block processing              |
 //!
 //! During execution BALANCE(origin) reads the balance after the executor's up-front
-//! debit: `runFrame` pre-funds the EVM's own gas purchase with exactly that amount.
+//! debit of gas_limit * price and the L1 and operator fees.
 const std = @import("std");
+const builtin = @import("builtin");
 const evm = @import("evm");
 const primitives = @import("voltaire");
 
@@ -54,17 +57,52 @@ pub const Block = struct {
     coinbase: Address,
     base_fee: u64,
     prev_randao: [32]u8 = @as([32]u8, @splat(0)),
-    blob_base_fee: u64 = 0,
+    /// BLOBBASEFEE. Null selects the spec default: 1 from Ecotone on (an L2 block has
+    /// no blob gas, so its blob base fee is MIN_BASE_FEE_PER_BLOB_GAS), else 0.
+    blob_base_fee: ?u64 = null,
     /// Hashes of recent ancestors, newest first (see BlockInfo.block_hashes).
     block_hashes: []const [32]u8 = &.{},
 };
 
-/// Largest init code `CallParams.validate` accepts (EIP-3860 size), on every fork.
-const EVM_MAX_INITCODE: usize = 49_152;
-/// Largest calldata `CallParams.validate` accepts. Not a protocol limit.
-const EVM_MAX_INPUT: usize = 4 * 1024 * 1024;
+/// EIP-3860 MAX_INITCODE_SIZE. Enforced from Shanghai (OP Stack Canyon) on only.
+const MAX_INITCODE_SIZE: usize = 49_152;
 /// Frame gas capacity: `block_gas_limit` sizes `Frame.GasType` (i64 above 2^31-1).
 const EVM_GAS_CAPACITY: u64 = std.math.maxInt(u32);
+/// Native stack for the top-level frame. `inner_call` recurses once per call depth
+/// and, unlike `Evm.call`, does not move deep calls to a larger stack itself; this is
+/// the size of the EVM's own large-stack worker (src/evm.zig `large_stack_size`).
+const FRAME_STACK_SIZE: usize = 64 * 1024 * 1024;
+
+/// EIP-2930 and EIP-7702 intrinsic gas. Every listed address, storage key and
+/// authorization tuple is charged, duplicates included. Saturating: a list whose
+/// cost does not fit is above every gas limit.
+fn listIntrinsicGas(tx: executor.Transaction) u128 {
+    var gas: u128 = 0;
+    for (tx.access_list) |entry| {
+        gas +|= executor.ACCESS_LIST_ADDRESS_COST;
+        gas +|= @as(u128, executor.ACCESS_LIST_STORAGE_KEY_COST) *| entry.storage_keys.len;
+    }
+    gas +|= @as(u128, executor.AUTHORIZATION_COST) *| tx.authorization_list.len;
+    return gas;
+}
+
+/// Run `instance.inner_call(params)` on a thread whose stack fits the deepest call
+/// chain. The caller blocks until it finishes, so one thread at a time uses the EVM.
+fn innerCallOnFrameStack(allocator: std.mem.Allocator, comptime Evm: type, instance: *Evm, params: anytype) !@typeInfo(@TypeOf(Evm.inner_call)).@"fn".return_type.? {
+    if (comptime builtin.single_threaded) return error.FrameStackUnavailable;
+    const Job = struct {
+        instance: *Evm,
+        params: @TypeOf(params),
+        result: @typeInfo(@TypeOf(Evm.inner_call)).@"fn".return_type.?,
+        fn run(job: *@This()) void {
+            job.result = job.instance.inner_call(job.params);
+        }
+    };
+    var job = Job{ .instance = instance, .params = params, .result = .failed(0) };
+    const thread = try std.Thread.spawn(.{ .stack_size = FRAME_STACK_SIZE, .allocator = allocator }, Job.run, .{&job});
+    thread.join();
+    return job.result;
+}
 
 fn evmConfig(comptime spec: OpSpecId) evm.EvmConfig {
     return .{
@@ -188,13 +226,6 @@ pub const Host = struct {
         try self.database.set_account(address.bytes, account);
     }
 
-    fn debit(self: *Host, address: Address, amount: u256) !void {
-        if (amount == 0) return;
-        var account = (try self.database.get_account(address.bytes)) orelse return error.DebitFromMissingAccount;
-        account.balance = std.math.sub(u256, account.balance, amount) catch return error.DebitExceedsBalance;
-        try self.database.set_account(address.bytes, account);
-    }
-
     pub fn executeFrame(self: *Host, tx: executor.Transaction) !executor.Result {
         const spec = self.spec orelse return error.NotConfigured;
         switch (spec) {
@@ -202,27 +233,51 @@ pub const Host = struct {
         }
     }
 
+    /// Apply an EIP-7702 authorization list (execution-specs Prague `set_delegation`)
+    /// and warm every recovered authority. Invalid tuples are skipped. Returns the
+    /// refund for authorities that already existed.
+    fn applyAuthorizations(self: *Host, comptime hardfork: Hardfork, access_list: anytype, list: []const executor.Authorization) !u64 {
+        // The intrinsic gas check already paid for the list.
+        var unmetered: i64 = std.math.maxInt(i64);
+        var processor = evm.AuthorizationProcessor{ .db = self.database, .chain_id = self.block.chain_id, .gas_remaining = &unmetered, .eips = .{ .hardfork = hardfork } };
+        var applied = try processor.processAuthorizationListWithResults(self.allocator, list);
+        defer applied.deinit(self.allocator);
+        for (applied.results) |tuple| {
+            if (tuple.authority) |authority| try access_list.pre_warm_addresses(&[_]Address{authority});
+        }
+        return std.math.cast(u64, applied.refund) orelse error.AuthorizationRefundOutOfRange;
+    }
+
+    /// One transaction's EVM execution, in the order of execution-specs
+    /// `process_transaction`: intrinsic checks, sender nonce, warm set, authorization
+    /// list, message call, refunds and the EIP-7623 floor. The authorization list is
+    /// applied outside the message call's snapshot, so a reverting call keeps it.
     fn runFrame(self: *Host, comptime spec: OpSpecId, tx: executor.Transaction) !executor.Result {
         const hardfork = comptime spec.toEthHardfork();
-        const Evm = evm.Evm(evmConfig(spec));
+        // `Evm.call` applies Osaka's transaction rules (EIP-7825 gas cap); this path
+        // does not. Add them here before an OP spec maps to Osaka.
+        comptime if (hardfork.isAtLeast(.OSAKA)) @compileError("runFrame does not apply Osaka transaction rules");
+        const config = comptime evmConfig(spec);
+        const Evm = evm.Evm(config);
         const eips = evm.Eips{ .hardfork = hardfork };
         const is_deposit = tx.deposit != null;
         const is_create = !tx.is_call;
         const price = try executor.gasPrice(tx);
         if (tx.base_fee != self.block.base_fee) return error.BaseFeeMismatch;
         if (tx.gas_limit > EVM_GAS_CAPACITY) return error.GasLimitExceedsEvmCapacity;
-        // Limits `CallParams.validate` applies that are not protocol rules on this fork.
-        if (tx.is_call and tx.input.len > EVM_MAX_INPUT) return error.InputExceedsEvmLimit;
-        if (is_create and tx.input.len > EVM_MAX_INITCODE and !hardfork.isAtLeast(.SHANGHAI)) return error.InitCodeExceedsEvmLimit;
+        if (tx.is_call != (tx.to != null)) return error.CallTargetMismatch;
+        if (tx.authorization_list.len != 0 and (comptime !hardfork.isAtLeast(.PRAGUE))) return error.AuthorizationListUnsupported;
 
         var origin = (try self.database.get_account(tx.sender.bytes)) orelse Account.zero();
-        // Transaction validity the EVM reports only as a failed call. For a user
-        // transaction it is a rejection (revm `InvalidTransaction`); for a deposit it is
-        // a failed deposit on every spec (op-revm `catch_error_failed_deposit`).
+        // Transaction validity. For a user transaction it is a rejection (revm
+        // `InvalidTransaction`); for a deposit it is a failed deposit on every spec
+        // (op-revm `catch_error_failed_deposit`).
         const tokens = eips.tokens_in_calldata(tx.input);
-        const intrinsic = eips.intrinsic_gas_cost(is_create) + eips.calldata_gas_cost(tokens, is_create, tx.input.len);
-        const below_intrinsic = tx.gas_limit < intrinsic or tx.gas_limit < eips.floor_gas_cost(tokens);
-        const initcode_too_large = is_create and tx.input.len > EVM_MAX_INITCODE;
+        const intrinsic_wide = @as(u128, eips.intrinsic_gas_cost(is_create)) + eips.calldata_gas_cost(tokens, is_create, tx.input.len) +| listIntrinsicGas(tx);
+        const floor = eips.floor_gas_cost(tokens);
+        const below_intrinsic = tx.gas_limit < intrinsic_wide or tx.gas_limit < floor;
+        // EIP-3860 from Shanghai (Canyon) on; Bedrock and Regolith have no init code limit.
+        const initcode_too_large = (comptime hardfork.isAtLeast(.SHANGHAI)) and is_create and tx.input.len > MAX_INITCODE_SIZE;
         if (is_deposit) {
             if (below_intrinsic or initcode_too_large or tx.value > origin.balance) {
                 return .{ .outcome = .halt, .gas_used = tx.gas_limit, .invalid = true };
@@ -231,25 +286,20 @@ pub const Host = struct {
             if (below_intrinsic) return error.IntrinsicGasTooLow;
             if (initcode_too_large) return error.CreateInitCodeSizeLimit;
             // EIP-3607 (revm `RejectCallerWithCode`): a sender with code cannot originate.
+            // A delegated EOA has no code hash here (`Account.delegated_address`).
             if (!std.mem.allEqual(u8, &origin.code_hash, 0) and !std.mem.eql(u8, &origin.code_hash, &primitives.EMPTY_CODE_HASH)) return error.SenderHasCode;
         }
+        const intrinsic: u64 = @intCast(intrinsic_wide);
+        const execution_gas = tx.gas_limit - intrinsic;
 
-        // `Evm.call` increments the origin nonce. The executor already did so for a CALL
-        // deposit, so undo that one increment first.
-        if (is_deposit and tx.is_call) {
-            origin.nonce = std.math.sub(u64, origin.nonce, 1) catch return error.DepositNonceNotBumped;
+        // Every executed transaction increments the sender nonce once, before the
+        // authorization list (a self-sponsored authorization sees the new nonce). The
+        // executor already did so for a CALL deposit.
+        if (!(is_deposit and tx.is_call)) {
+            if (origin.nonce == std.math.maxInt(u64)) return error.NonceOverflow;
+            origin.nonce += 1;
+            try self.database.set_account(tx.sender.bytes, origin);
         }
-        if (origin.nonce == std.math.maxInt(u64)) return error.NonceOverflow;
-        const nonce_before = origin.nonce;
-
-        // `Evm.call` checks balance >= gas_limit * price + value, buys gas_limit * price
-        // up front, buys back the unused gas after execution, and credits the coinbase
-        // with gas_used * (price - base_fee). The executor already debited
-        // gas_limit * price, so fund the EVM's purchase with it here and reverse the
-        // net transfers afterwards.
-        const gas_money = std.math.mul(u256, tx.gas_limit, price) catch return error.GasCostOverflow;
-        origin.balance = std.math.add(u256, origin.balance, gas_money) catch return error.BalanceOverflow;
-        try self.database.set_account(tx.sender.bytes, origin);
 
         const block_info = evm.BlockInfo{
             .chain_id = self.block.chain_id,
@@ -260,7 +310,7 @@ pub const Host = struct {
             .coinbase = self.block.coinbase,
             .base_fee = self.block.base_fee,
             .prev_randao = self.block.prev_randao,
-            .blob_base_fee = self.block.blob_base_fee,
+            .blob_base_fee = self.block.blob_base_fee orelse if (comptime spec.isAtLeast(.ECOTONE)) 1 else 0,
             .block_hashes = self.block.block_hashes,
         };
         const context = evm.TransactionContext{
@@ -272,24 +322,71 @@ pub const Host = struct {
         };
         var instance = try Evm.init(self.allocator, self.database, block_info, context, price, tx.sender);
         defer instance.deinit();
+        // EIP-1153: transient storage lives in the database and ends with the transaction.
+        defer self.database.clear_transient_storage();
+
+        // EIP-2929 warm set: sender, destination, coinbase (EIP-3651), this spec's
+        // precompiles including the OP overrides, then the EIP-2930 access list.
+        try eips.pre_warm_transaction_addresses(&instance.access_list, tx.sender, tx.to, self.block.coinbase);
+        const last_precompile = comptime evm.precompiles.lastContiguousPrecompile(hardfork);
+        var precompile: u16 = 0x01;
+        while (precompile <= last_precompile) : (precompile += 1) {
+            try instance.access_list.pre_warm_addresses(&[_]Address{Address.fromU256(precompile)});
+        }
+        if (comptime hardfork.isAtLeast(.OSAKA)) try instance.access_list.pre_warm_addresses(&[_]Address{evm.precompiles.P256VERIFY_ADDRESS});
+        if (comptime config.enable_precompiles) {
+            inline for (config.precompile_overrides) |override| {
+                try instance.access_list.pre_warm_addresses(&[_]Address{override.address});
+            }
+        }
+        for (tx.access_list) |entry| {
+            try instance.access_list.pre_warm_addresses(&[_]Address{entry.address});
+            for (entry.storage_keys) |key| _ = try instance.access_list.access_storage_slot(entry.address, key);
+        }
+
+        var authorization_refund: u64 = 0;
+        if (tx.authorization_list.len != 0) {
+            authorization_refund = try self.applyAuthorizations(hardfork, &instance.access_list, tx.authorization_list);
+        }
+        // EIP-7702: the delegate of a delegated destination starts warm. After the
+        // authorization list, which can change the delegation.
+        try instance.warmDelegatedTarget(tx.to);
+
         const params: evm.CallParams = if (tx.to) |to|
-            .{ .call = .{ .caller = tx.sender, .to = to, .value = tx.value, .input = tx.input, .gas = tx.gas_limit } }
+            .{ .call = .{ .caller = tx.sender, .to = to, .value = tx.value, .input = tx.input, .gas = execution_gas } }
         else
-            .{ .create = .{ .caller = tx.sender, .value = tx.value, .init_code = tx.input, .gas = tx.gas_limit } };
-        var result = instance.call(params);
-        defer result.deinit(self.allocator);
+            .{ .create = .{ .caller = tx.sender, .value = tx.value, .init_code = tx.input, .gas = execution_gas } };
+        // The creation transaction's nonce is already incremented and its intrinsic
+        // gas paid CreateGas and the init code words.
+        if (is_create) instance.tx_sender_nonce_incremented = true;
+        self.database.failure = null;
+        const depth = self.database.snapshot_depth();
+        var result = try innerCallOnFrameStack(self.allocator, Evm, &instance, params);
+        defer if (result.trace) |*trace| trace.deinit();
+        if (instance.host_failure) |err| {
+            // Not a transaction outcome. The executor rolls back its checkpoint, which
+            // needs every snapshot the frame opened closed first.
+            if (self.database.snapshot_depth() > depth) self.database.revert_to_depth(depth);
+            return err;
+        }
+        if (self.database.snapshot_depth() != depth) {
+            if (self.database.snapshot_depth() > depth) self.database.revert_to_depth(depth);
+            return error.FrameSnapshotImbalance;
+        }
+        if (result.gas_left > execution_gas) return error.GasAccountingMismatch;
 
-        // Every transaction that reaches execution increments the origin nonce first.
-        // An unchanged nonce means `Evm.call` returned before executing (an internal
-        // failure it reports as a failed call), so the frame result is not trustworthy.
-        const after = (try self.database.get_account(tx.sender.bytes)) orelse return error.EvmAbortedTransaction;
-        if (after.nonce == nonce_before) return error.EvmAbortedTransaction;
-        if (result.gas_left > tx.gas_limit) return error.GasAccountingMismatch;
-        const gas_used = tx.gas_limit - result.gas_left;
+        if (result.success) {
+            // SELFDESTRUCT records the account; the transaction deletes it. From Cancun
+            // (Ecotone, EIP-6780) only contracts created in this transaction are recorded.
+            var destructions = instance.self_destruct.iterator();
+            while (destructions.next()) |entry| try self.database.delete_account(entry.key_ptr.bytes);
+        }
 
-        const used_cost = @as(u256, gas_used) * price;
-        try self.debit(tx.sender, gas_money - used_cost);
-        if (price > self.block.base_fee) try self.debit(self.block.coinbase, @as(u256, gas_used) * (price - self.block.base_fee));
+        // EIP-3529 refund cap on the whole transaction's gas. The authorization refund
+        // counts whatever the outcome; execution refunds only on success.
+        const used_before_refund = tx.gas_limit - result.gas_left;
+        const refund_counter = authorization_refund +| (if (result.success) instance.gas_refund_counter else 0);
+        const gas_used = @max(used_before_refund - eips.eip_3529_gas_refund_cap(used_before_refund, refund_counter), floor);
 
         const outcome: deposits.Outcome = if (result.success) .success else if (result.gas_left > 0) .revert else .halt;
         return .{ .outcome = outcome, .gas_used = gas_used };
@@ -875,5 +972,438 @@ test "rollback restores storage slot counts: re-set and clear after rollback doe
     try db.set_storage(address.bytes, 2, 0);
     try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(address.bytes));
     try testing.expect(!(try db.has_storage(address.bytes)));
+    try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+}
+
+test "EIP-2930 type-1 access list: 2,400 per address, 1,900 per key, duplicates charged, listed slot warm" {
+    const schedule = hardforks.MAINNET;
+    const timestamp = schedule.ecotone;
+    const sender = Address.fromU256(0xA11CE);
+    const listed = Address.fromU256(0x1157);
+    // PUSH1 0 SLOAD STOP
+    const sload = [_]u8{ 0x60, 0x00, 0x54, 0x00 };
+    const reader = Address.fromU256(0xC0DE);
+
+    const keys = [_]u256{ 0, 0 };
+    const one_key = [_]u256{0};
+    const unused = [_]executor.AccessListEntry{.{ .address = listed }};
+    const reader_slot = [_]executor.AccessListEntry{.{ .address = reader, .storage_keys = &one_key }};
+    const duplicates = [_]executor.AccessListEntry{ .{ .address = listed, .storage_keys = &keys }, .{ .address = listed, .storage_keys = &one_key } };
+    const cases = [_]struct { to: Address, list: []const executor.AccessListEntry, gas_used: u64 }{
+        // a. One listed address the transaction never touches: 21,000 + 2,400.
+        .{ .to = listed, .list = &unused, .gas_used = 23_400 },
+        // b. SLOAD of a listed slot is warm: 21,000 + 2,400 + 1,900 + PUSH1 3 + SLOAD 100.
+        .{ .to = reader, .list = &reader_slot, .gas_used = 25_403 },
+        // Without the list the same SLOAD is cold: 21,000 + 3 + 2,100.
+        .{ .to = reader, .list = &.{}, .gas_used = 23_103 },
+        // c. Duplicate entries and keys are each charged: 21,000 + 2 * 2,400 + 3 * 1,900.
+        .{ .to = listed, .list = &duplicates, .gas_used = 31_500 },
+    };
+    for (cases) |case| {
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_account(reader.bytes, .{ .balance = 0, .code_hash = try db.set_code(&sload), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+        try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = timestamp, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+        defer host.deinit();
+        const tx = executor.Transaction{ .sender = sender, .envelope = &.{ 0x01, 0x07 }, .gas_limit = 100_000, .base_fee = 0, .to = case.to, .access_list = case.list };
+        const result = try executor.executeBase(&host, L1BlockInfo.empty(), 8453, timestamp, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try testing.expectEqual(deposits.Outcome.success, result.outcome);
+        try testing.expectEqual(case.gas_used, result.gas_used);
+        try testing.expectEqual(@as(u64, 1), try db.get_nonce(sender.bytes));
+
+        // One gas below the intrinsic cost is a rejection that changes nothing.
+        var short = tx;
+        short.nonce = 1;
+        short.gas_limit = 21_000 + 2_400 * @as(u64, case.list.len) - 1;
+        for (case.list) |entry| short.gas_limit += 1_900 * @as(u64, entry.storage_keys.len);
+        if (case.list.len == 0) continue;
+        try testing.expectError(error.IntrinsicGasTooLow, executor.executeBase(&host, L1BlockInfo.empty(), 8453, timestamp, short, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+        try testing.expectEqual(@as(u64, 1), try db.get_nonce(sender.bytes));
+        try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+}
+
+test "EIP-2930 access list on a type-2 transaction: charged, warmed and paid at the effective price" {
+    const schedule = hardforks.MAINNET;
+    const sender = Address.fromU256(0xA11CE);
+    // PUSH1 0 SLOAD STOP
+    const sload = [_]u8{ 0x60, 0x00, 0x54, 0x00 };
+    const reader = Address.fromU256(0xC0DE);
+    const one_key = [_]u256{0};
+    const list = [_]executor.AccessListEntry{.{ .address = reader, .storage_keys = &one_key }};
+    const cases = [_]struct { timestamp: u64, spec: OpSpecId }{
+        .{ .timestamp = schedule.canyon, .spec = .CANYON },
+        .{ .timestamp = schedule.ecotone, .spec = .ECOTONE },
+        .{ .timestamp = schedule.isthmus, .spec = .ISTHMUS },
+        .{ .timestamp = schedule.jovian, .spec = .JOVIAN },
+    };
+    for (cases) |case| {
+        try testing.expectEqual(case.spec, try schedule.specAt(case.timestamp));
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_account(reader.bytes, .{ .balance = 0, .code_hash = try db.set_code(&sload), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+        try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+        const base_fee: u64 = 1_000;
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = case.timestamp, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = base_fee });
+        defer host.deinit();
+        var info = L1BlockInfo.empty();
+        info.operator_fee_scalar = 0;
+        info.operator_fee_constant = 0;
+        const tx = executor.Transaction{
+            .sender = sender,
+            .envelope = &.{ 0x02, 0x08 },
+            .gas_limit = 100_000,
+            .fee = .{ .dynamic = .{ .max_fee_per_gas = 5_000, .max_priority_fee_per_gas = 500 } },
+            .base_fee = base_fee,
+            .to = reader,
+            .access_list = &list,
+        };
+        const result = try executor.executeBase(&host, info, 8453, case.timestamp, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try testing.expectEqual(deposits.Outcome.success, result.outcome);
+        // 21,000 + 2,400 + 1,900 + PUSH1 3 + warm SLOAD 100.
+        try testing.expectEqual(@as(u64, 25_403), result.gas_used);
+        try testing.expectEqual(ETHER - 25_403 * 1_500, try db.get_balance(sender.bytes));
+        try testing.expectEqual(@as(u256, 25_403 * 500), try db.get_balance(constants.SEQUENCER_FEE_VAULT_ADDRESS.bytes));
+        try testing.expectEqual(@as(u256, 25_403 * 1_000), try db.get_balance(constants.BASE_FEE_VAULT_ADDRESS.bytes));
+    }
+}
+
+test "EIP-7702 type-4 on Isthmus and Jovian: delegation applied, delegated code runs, refund for an existing authority" {
+    const crypto = primitives.crypto.Crypto;
+    const schedule = hardforks.MAINNET;
+    const key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
+    const authority = (try crypto.unaudited_getPublicKey(key)).toAddress();
+    const sponsor = Address.fromU256(0xA11CE);
+    // PUSH1 1 PUSH1 0 SSTORE STOP
+    const store_one = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x00 };
+    const delegate = Address.fromU256(0xDE1E);
+    const cases = [_]struct { timestamp: u64, spec: OpSpecId }{
+        .{ .timestamp = schedule.isthmus, .spec = .ISTHMUS },
+        .{ .timestamp = schedule.jovian, .spec = .JOVIAN },
+    };
+    for (cases) |case| {
+        try testing.expectEqual(case.spec, try schedule.specAt(case.timestamp));
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_account(delegate.bytes, .{ .balance = 0, .code_hash = try db.set_code(&store_one), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+        try db.set_account(sponsor.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+        // The authority exists, so its tuple earns PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST.
+        try db.set_account(authority.bytes, .{ .balance = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 3 });
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = case.timestamp, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+        defer host.deinit();
+        var info = L1BlockInfo.empty();
+        info.operator_fee_scalar = 0;
+        info.operator_fee_constant = 0;
+        var auth = try primitives.Authorization.createAuthorization(testing.allocator, 8453, delegate, 3, key);
+        auth.v -= 27; // voltaire signs with v = 27 + y_parity; the tuple carries y_parity
+        const auths = [_]executor.Authorization{auth};
+        const tx = executor.Transaction{
+            .sender = sponsor,
+            .envelope = &.{ 0x04, 0x09 },
+            .gas_limit = 200_000,
+            .fee = .{ .dynamic = .{ .max_fee_per_gas = 0, .max_priority_fee_per_gas = 0 } },
+            .base_fee = 0,
+            .to = authority,
+            .authorization_list = &auths,
+        };
+        const result = try executor.executeBase(&host, info, 8453, case.timestamp, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try testing.expectEqual(deposits.Outcome.success, result.outcome);
+        // 21,000 + 25,000 + PUSH1 3 + PUSH1 3 + SSTORE 22,100 = 68,106, less the
+        // 12,500 authorization refund (below the 68,106 / 5 cap).
+        try testing.expectEqual(@as(u64, 68_106 - 12_500), result.gas_used);
+        const account = (try db.get_account(authority.bytes)).?;
+        try testing.expectEqual(@as(u64, 4), account.nonce);
+        try testing.expectEqual(delegate, account.delegated_address.?);
+        try testing.expectEqual(@as(u256, 1), try db.get_storage(authority.bytes, 0));
+        try testing.expectEqual(@as(u256, 0), try db.get_storage(delegate.bytes, 0));
+        try testing.expectEqual(@as(u64, 1), try db.get_nonce(sponsor.bytes));
+        try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+}
+
+test "EIP-7702 self-sponsored authorization sees the incremented sender nonce" {
+    const crypto = primitives.crypto.Crypto;
+    const schedule = hardforks.MAINNET;
+    const key: crypto.PrivateKey = @as([32]u8, @splat(0x44));
+    const sender = (try crypto.unaudited_getPublicKey(key)).toAddress();
+    // PUSH1 1 PUSH1 0 SSTORE STOP
+    const store_one = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x00 };
+    const delegate = Address.fromU256(0xDE1E);
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+    try db.set_account(delegate.bytes, .{ .balance = 0, .code_hash = try db.set_code(&store_one), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+    try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 5 });
+    var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = schedule.isthmus, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+    defer host.deinit();
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = 0;
+    info.operator_fee_constant = 0;
+    // Chain ID 0 is valid on every chain. Tuple nonce 6 = transaction nonce 5 + 1.
+    var auth = try primitives.Authorization.createAuthorization(testing.allocator, 0, delegate, 6, key);
+    auth.v -= 27;
+    const auths = [_]executor.Authorization{auth};
+    const tx = executor.Transaction{
+        .sender = sender,
+        .envelope = &.{ 0x04, 0x0a },
+        .gas_limit = 200_000,
+        .fee = .{ .dynamic = .{ .max_fee_per_gas = 0, .max_priority_fee_per_gas = 0 } },
+        .base_fee = 0,
+        .nonce = 5,
+        .to = sender,
+        .authorization_list = &auths,
+    };
+    const result = try executor.executeBase(&host, info, 8453, schedule.isthmus, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+    try testing.expectEqual(deposits.Outcome.success, result.outcome);
+    try testing.expectEqual(@as(u64, 68_106 - 12_500), result.gas_used);
+    const account = (try db.get_account(sender.bytes)).?;
+    try testing.expectEqual(@as(u64, 7), account.nonce);
+    try testing.expectEqual(delegate, account.delegated_address.?);
+    try testing.expectEqual(@as(u256, 1), try db.get_storage(sender.bytes, 0));
+}
+
+test "EIP-7702 invalid authorizations are skipped but still pay intrinsic gas" {
+    const crypto = primitives.crypto.Crypto;
+    const schedule = hardforks.MAINNET;
+    const key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
+    const authority = (try crypto.unaudited_getPublicKey(key)).toAddress();
+    const sponsor = Address.fromU256(0xA11CE);
+    const delegate = Address.fromU256(0xDE1E);
+    const target = Address.fromU256(0xB0B);
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+    try db.set_account(sponsor.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+    try db.set_account(authority.bytes, .{ .balance = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 3 });
+    var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = schedule.jovian, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+    defer host.deinit();
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = 0;
+    info.operator_fee_constant = 0;
+    // Wrong chain ID, then a nonce the authority does not have.
+    var wrong_chain = try primitives.Authorization.createAuthorization(testing.allocator, 999, delegate, 3, key);
+    wrong_chain.v -= 27;
+    var wrong_nonce = try primitives.Authorization.createAuthorization(testing.allocator, 8453, delegate, 4, key);
+    wrong_nonce.v -= 27;
+    const auths = [_]executor.Authorization{ wrong_chain, wrong_nonce };
+    const tx = executor.Transaction{
+        .sender = sponsor,
+        .envelope = &.{ 0x04, 0x0b },
+        .gas_limit = 100_000,
+        .fee = .{ .dynamic = .{ .max_fee_per_gas = 0, .max_priority_fee_per_gas = 0 } },
+        .base_fee = 0,
+        .to = target,
+        .authorization_list = &auths,
+    };
+    const result = try executor.executeBase(&host, info, 8453, schedule.jovian, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+    try testing.expectEqual(deposits.Outcome.success, result.outcome);
+    // 21,000 + 2 * 25,000; a skipped tuple earns no refund.
+    try testing.expectEqual(@as(u64, 71_000), result.gas_used);
+    const account = (try db.get_account(authority.bytes)).?;
+    try testing.expectEqual(@as(u64, 3), account.nonce);
+    try testing.expect(account.delegated_address == null);
+    try testing.expectEqual(@as(u64, 1), try db.get_nonce(sponsor.bytes));
+
+    // One gas below 21,000 + 2 * 25,000 is a rejection.
+    var short = tx;
+    short.nonce = 1;
+    short.gas_limit = 70_999;
+    try testing.expectError(error.IntrinsicGasTooLow, executor.executeBase(&host, info, 8453, schedule.jovian, short, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    try testing.expectEqual(@as(u64, 1), try db.get_nonce(sponsor.bytes));
+}
+
+test "EIP-7702 delegation and authority nonce persist when the execution reverts" {
+    const crypto = primitives.crypto.Crypto;
+    const schedule = hardforks.MAINNET;
+    const key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
+    const authority = (try crypto.unaudited_getPublicKey(key)).toAddress();
+    const sponsor = Address.fromU256(0xA11CE);
+    // PUSH1 1 PUSH1 0 SSTORE PUSH1 0 PUSH1 0 REVERT
+    const store_then_revert = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xfd };
+    const delegate = Address.fromU256(0xDE1E);
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+    try db.set_account(delegate.bytes, .{ .balance = 0, .code_hash = try db.set_code(&store_then_revert), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+    try db.set_account(sponsor.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+    try db.set_account(authority.bytes, .{ .balance = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 3 });
+    var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = schedule.isthmus, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+    defer host.deinit();
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = 0;
+    info.operator_fee_constant = 0;
+    var auth = try primitives.Authorization.createAuthorization(testing.allocator, 8453, delegate, 3, key);
+    auth.v -= 27;
+    const auths = [_]executor.Authorization{auth};
+    const tx = executor.Transaction{
+        .sender = sponsor,
+        .envelope = &.{ 0x04, 0x0c },
+        .gas_limit = 200_000,
+        .fee = .{ .dynamic = .{ .max_fee_per_gas = 0, .max_priority_fee_per_gas = 0 } },
+        .base_fee = 0,
+        .value = 7,
+        .to = authority,
+        .authorization_list = &auths,
+    };
+    const result = try executor.executeBase(&host, info, 8453, schedule.isthmus, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+    try testing.expectEqual(deposits.Outcome.revert, result.outcome);
+    // 21,000 + 25,000 + 3 + 3 + 22,100 + 3 + 3 = 68,112. The authorization refund
+    // applies to a reverted transaction too.
+    try testing.expectEqual(@as(u64, 68_112 - 12_500), result.gas_used);
+    const account = (try db.get_account(authority.bytes)).?;
+    try testing.expectEqual(@as(u64, 4), account.nonce);
+    try testing.expectEqual(delegate, account.delegated_address.?);
+    // The frame's storage write and value transfer are undone.
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(authority.bytes, 0));
+    try testing.expectEqual(@as(u256, 1), account.balance);
+    try testing.expectEqual(ETHER, try db.get_balance(sponsor.bytes));
+    try testing.expectEqual(@as(u64, 1), try db.get_nonce(sponsor.bytes));
+    try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+}
+
+test "EIP-7702 type-4 is rejected before Isthmus without touching state" {
+    const crypto = primitives.crypto.Crypto;
+    const schedule = hardforks.MAINNET;
+    const key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
+    const authority = (try crypto.unaudited_getPublicKey(key)).toAddress();
+    const sponsor = Address.fromU256(0xA11CE);
+    const delegate = Address.fromU256(0xDE1E);
+    var auth = try primitives.Authorization.createAuthorization(testing.allocator, 8453, delegate, 0, key);
+    auth.v -= 27;
+    const auths = [_]executor.Authorization{auth};
+    const cases = [_]struct { timestamp: u64, spec: OpSpecId }{
+        .{ .timestamp = schedule.ecotone, .spec = .ECOTONE },
+        .{ .timestamp = schedule.fjord, .spec = .FJORD },
+        .{ .timestamp = schedule.granite, .spec = .GRANITE },
+        .{ .timestamp = schedule.holocene, .spec = .HOLOCENE },
+    };
+    for (cases) |case| {
+        try testing.expectEqual(case.spec, try schedule.specAt(case.timestamp));
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_account(sponsor.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = case.timestamp, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+        defer host.deinit();
+        const tx = executor.Transaction{
+            .sender = sponsor,
+            .envelope = &.{ 0x04, 0x0d },
+            .gas_limit = 200_000,
+            .fee = .{ .dynamic = .{ .max_fee_per_gas = 0, .max_priority_fee_per_gas = 0 } },
+            .base_fee = 0,
+            .to = authority,
+            .authorization_list = &auths,
+        };
+        try testing.expectError(error.TxTypeNotSupported, executor.executeBase(&host, L1BlockInfo.empty(), 8453, case.timestamp, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+        try testing.expect(!db.account_exists(authority.bytes));
+        try testing.expectEqual(@as(u64, 0), try db.get_nonce(sponsor.bytes));
+        try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+}
+
+test "EIP-3860 init code limit applies from Canyon only; calldata has no size cap" {
+    const sender = Address.fromU256(0xA11CE);
+    // 49,153 zero bytes: STOP at once, deploying empty code.
+    const oversized = try testing.allocator.alloc(u8, 49_153);
+    defer testing.allocator.free(oversized);
+    @memset(oversized, 0);
+    const cases = [_]struct { spec: OpSpecId, len: usize, gas_used: ?u64 }{
+        // Regolith (Ethereum MERGE) has no init code limit or word cost:
+        // 53,000 + 49,153 * 4.
+        .{ .spec = .REGOLITH, .len = 49_153, .gas_used = 249_612 },
+        .{ .spec = .CANYON, .len = 49_153, .gas_used = null },
+        // Jovian (Prague) checks the limit, not just the 21,000 + 49,153 * 10 floor.
+        .{ .spec = .JOVIAN, .len = 49_153, .gas_used = null },
+        // At the limit Canyon pays the EIP-3860 words: 53,000 + 49,152 * 4 + 1,536 * 2.
+        .{ .spec = .CANYON, .len = 49_152, .gas_used = 252_680 },
+    };
+    for (cases) |case| {
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 10, .number = 1, .timestamp = 1, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+        defer host.deinit();
+        var info = L1BlockInfo.empty();
+        info.operator_fee_scalar = 0;
+        info.operator_fee_constant = 0;
+        const tx = executor.Transaction{ .sender = sender, .envelope = &.{ 0x01, 0x0e }, .gas_limit = 600_000, .base_fee = 0, .is_call = false, .input = oversized[0..case.len] };
+        if (case.gas_used) |gas_used| {
+            const result = try executor.execute(&host, info, case.spec, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+            try testing.expectEqual(deposits.Outcome.success, result.outcome);
+            try testing.expectEqual(gas_used, result.gas_used);
+            try testing.expectEqual(@as(u64, 1), try db.get_nonce(sender.bytes));
+        } else {
+            try testing.expectError(error.CreateInitCodeSizeLimit, executor.execute(&host, info, case.spec, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+            try testing.expectEqual(@as(u64, 0), try db.get_nonce(sender.bytes));
+        }
+        try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+
+    // Calldata above 4 MiB executes: 21,000 + 4,194,305 * 4 (no EIP-7623 floor on Ecotone).
+    const calldata = try testing.allocator.alloc(u8, 4 * 1024 * 1024 + 1);
+    defer testing.allocator.free(calldata);
+    @memset(calldata, 0);
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+    try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+    var host = Host.init(testing.allocator, &db, .{ .chain_id = 10, .number = 1, .timestamp = 1, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+    defer host.deinit();
+    const tx = executor.Transaction{ .sender = sender, .envelope = &.{ 0x01, 0x0f }, .gas_limit = 17_000_000, .base_fee = 0, .to = Address.fromU256(0xB0B), .input = calldata };
+    const result = try executor.execute(&host, L1BlockInfo.empty(), .ECOTONE, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+    try testing.expectEqual(deposits.Outcome.success, result.outcome);
+    try testing.expectEqual(@as(u64, 21_000 + 4_194_305 * 4), result.gas_used);
+}
+
+test "BLOBBASEFEE defaults to 1 from Ecotone on; an explicit block value wins" {
+    const schedule = hardforks.MAINNET;
+    // BLOBBASEFEE PUSH1 0 SSTORE STOP
+    const code = [_]u8{ 0x4a, 0x60, 0x00, 0x55, 0x00 };
+    const target = Address.fromU256(0xC0DE);
+    const sender = Address.fromU256(0xA11CE);
+    const cases = [_]struct { timestamp: u64, spec: OpSpecId, block_value: ?u64, expected: u256 }{
+        .{ .timestamp = schedule.ecotone, .spec = .ECOTONE, .block_value = null, .expected = 1 },
+        .{ .timestamp = schedule.fjord, .spec = .FJORD, .block_value = null, .expected = 1 },
+        .{ .timestamp = schedule.isthmus, .spec = .ISTHMUS, .block_value = null, .expected = 1 },
+        .{ .timestamp = schedule.jovian, .spec = .JOVIAN, .block_value = null, .expected = 1 },
+        .{ .timestamp = schedule.jovian, .spec = .JOVIAN, .block_value = 7, .expected = 7 },
+    };
+    for (cases) |case| {
+        try testing.expectEqual(case.spec, try schedule.specAt(case.timestamp));
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_account(target.bytes, .{ .balance = 0, .code_hash = try db.set_code(&code), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+        try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = case.timestamp, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0, .blob_base_fee = case.block_value });
+        defer host.deinit();
+        var info = L1BlockInfo.empty();
+        info.operator_fee_scalar = 0;
+        info.operator_fee_constant = 0;
+        const tx = executor.Transaction{ .sender = sender, .envelope = &.{ 0x01, 0x10 }, .gas_limit = 100_000, .base_fee = 0, .to = target };
+        const result = try executor.executeBase(&host, info, 8453, case.timestamp, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try testing.expectEqual(deposits.Outcome.success, result.outcome);
+        try testing.expectEqual(case.expected, try db.get_storage(target.bytes, 0));
+    }
+}
+
+test "a recursive call chain runs on the frame stack and keeps every frame's write" {
+    // SLOAD(0) + 1 -> SSTORE(0); CALL(GAS, ADDRESS, 0, 0, 0, 0, 0); STOP
+    const code = [_]u8{
+        0x60, 0x00, 0x54, 0x60, 0x01, 0x01, 0x60, 0x00, 0x55,
+        0x60, 0x00, 0x80, 0x80, 0x80, 0x80, 0x30, 0x5a, 0xf1,
+        0x00,
+    };
+    const target = Address.fromU256(0xC0DE);
+    const sender = Address.fromU256(0xA11CE);
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+    try db.set_account(target.bytes, .{ .balance = 0, .code_hash = try db.set_code(&code), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+    try db.set_account(sender.bytes, .{ .balance = ETHER, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .nonce = 0 });
+    var host = Host.init(testing.allocator, &db, .{ .chain_id = 10, .number = 1, .timestamp = 1, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 0 });
+    defer host.deinit();
+    // Each frame reserves its EVM memory buffer; the Debug test allocator commits all
+    // of it, so the chain is kept short here.
+    const tx = executor.Transaction{ .sender = sender, .envelope = &.{ 0x01, 0x11 }, .gas_limit = 60_000, .base_fee = 0, .to = target };
+    const result = try executor.execute(&host, L1BlockInfo.empty(), .ECOTONE, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+    try testing.expectEqual(deposits.Outcome.success, result.outcome);
+    // EIP-150 forwards 63/64 of the gas at each level; 60,000 gas runs out after
+    // 32 frames, each of which incremented the counter.
+    try testing.expectEqual(@as(u256, 32), try db.get_storage(target.bytes, 0));
     try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
 }
