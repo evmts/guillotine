@@ -37,25 +37,38 @@ git clone https://github.com/evmts/guillotine
 cd guillotine
 zig build
 
-# Run all tests (no output = all passed)
+# Run all self-contained suites (no output = all passed)
 zig build test
 
-# Run Ethereum spec tests
-zig build specs
+# Run official EEST state tests (66,652/66,652 Frontier -> Osaka; fetch fixtures first)
+./scripts/fetch-eest-fixtures.sh && zig build state-tests -Doptimize=ReleaseSafe
 
-# Build with specific hardfork
-zig build -Devm-hardfork=CANCUN
+# Run formal verification (SMT, LLVM IR, Lean 4) & Lean differential fuzzer
+zig build verify
+zig build test-lean-diff -Doptimize=ReleaseSafe
+
+# Run benchmarks (in-repo ReleaseFast runner or cross-EVM apples-to-apples suite)
+zig build bench
+node bench/compare/run.mjs
+
+# Build with specific hardfork (default: OSAKA)
+zig build -Devm-hardfork=OSAKA
 ```
 
 ## Documentation Quick Navigation
 
+The public documentation site is live at **[guillotine.tevm.sh](https://guillotine.tevm.sh)** (Vocs 2 sources in `docs/src/pages/`).
+
 | I want to... | Go to |
 |--------------|-------|
+| Browse the full docs site | [guillotine.tevm.sh](https://guillotine.tevm.sh) (`docs/src/pages/`) |
+| Read testing, fuzzing, E2E & formal verification docs | [src/pages/guides/testing-and-verification.mdx](./src/pages/guides/testing-and-verification.mdx) |
+| Read in-repo & cross-EVM benchmarks + JIT docs | [src/pages/guides/benchmarks-and-jit.mdx](./src/pages/guides/benchmarks-and-jit.mdx) · [bench/compare/RESULTS.md](../bench/compare/RESULTS.md) |
 | Understand the architecture | [dev/ARCHITECTURE.md](./dev/ARCHITECTURE.md) |
 | Compare MinimalEvm vs Performance | [dev/EXECUTION-MODELS.md](./dev/EXECUTION-MODELS.md) |
 | Learn about storage/state | [dev/STATE-MANAGEMENT.md](./dev/STATE-MANAGEMENT.md) |
 | Understand gas calculation | [dev/GAS-METERING.md](./dev/GAS-METERING.md) |
-| Run or write tests | [dev/TESTING.md](./dev/TESTING.md) |
+| Run or write tests (developer deep dive) | [dev/TESTING.md](./dev/TESTING.md) |
 | Check hardfork/opcode support | [dev/HARDFORKS.md](./dev/HARDFORKS.md) |
 | Build a custom language SDK | [building-custom-sdks.md](./building-custom-sdks.md) |
 | Contribute code | [dev/CONTRIBUTING.md](./dev/CONTRIBUTING.md) |
@@ -173,9 +186,14 @@ docs/
 
 | Command | Description |
 |---------|-------------|
-| `zig build` | Build the project |
-| `zig build test` | Run all tests |
-| `zig build specs` | Run Ethereum spec tests |
+| `zig build` | Build the project (requires stock Zig `0.17.1`) |
+| `zig build test` | Run self-contained suites (unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz, jit) |
+| `zig build state-tests -Doptimize=ReleaseSafe` | Run official EEST state tests (`66,652 / 66,652` Frontier → Osaka) |
+| `zig build verify` | Run formal verification (`verify-ir`, `verify-smt`, `verify-lean`) |
+| `zig build test-lean-diff -Doptimize=ReleaseSafe` | Run Zig↔Lean 4.32.0 differential fuzzer (`116,384 / 116,384`) |
+| `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8` | Run multi-threaded structure-aware + havoc fuzzer |
+| `zig build bench` | Run in-repo ReleaseFast benchmarks |
+| `node bench/compare/run.mjs` | Run cross-EVM apples-to-apples benchmarks (`evm2`, `revm`, `evmone`, `ethrex`, `gevm`, `geth`, JITs) |
 | `zig build test-unit` | Run unit tests |
 | `zig build test-opcodes` | Run opcode differential tests |
 

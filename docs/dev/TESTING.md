@@ -22,27 +22,27 @@ zig build test-unit -Dtest-filter='stack'
 
 ## Test Organization
 
+> For the full verification matrix — including official EEST state tests (`66,652/66,652`), formal verification (`verify-smt`, `verify-ir`, `verify-lean`, `test-lean-diff`), multi-layer fuzzing (`fuzz.yml`), SDK E2E suites, and cross-EVM benchmarks — see [Testing, fuzzing, and formal verification](../src/pages/guides/testing-and-verification.mdx) (live at [guillotine.tevm.sh/guides/testing-and-verification](https://guillotine.tevm.sh/guides/testing-and-verification)).
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          TEST HIERARCHY                                     │
+│                          TEST & VERIFICATION LAYERS                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   zig build test                                                            │
-│   │                                                                         │
-│   ├── specs           Ethereum execution spec tests (~5000 cases)          │
-│   │   └── test/specs/ethereum_specs_test.zig                               │
-│   │                                                                         │
-│   ├── test-integration  Integration tests                                   │
-│   │   └── test/**/*.zig (aggregated via test/root.zig)                     │
-│   │       ├── differential/   Compare with revm reference                   │
-│   │       ├── fixtures/       JSON test fixtures                            │
-│   │       └── evm/            Cross-module tests                            │
-│   │                                                                         │
-│   └── test-unit        Unit tests in source files                           │
-│       └── src/**/*.zig (aggregated via src/root.zig)                       │
-│           ├── frame.zig        Frame tests                                  │
-│           ├── stack.zig        Stack tests                                  │
-│           └── handlers_*.zig   Opcode tests                                 │
+│   zig build state-tests   Official EEST state tests (66,652/66,652)        │
+│   zig build verify        SMT (32/32) + LLVM IR + Lean 4.32.0 proofs       │
+│   zig build test-lean-diff Zig↔Lean differential fuzzer (116,384/116,384)  │
+│   zig build fuzz-campaign Multi-threaded havoc fuzzer (.fuzz-crashes/)     │
+│                                                                             │
+│   zig build test          Self-contained Zig suites                         │
+│   ├── test-unit           src/**/*.zig (aggregated via src/root.zig)       │
+│   ├── test-opcodes        Per-opcode differential tests (+ test-modexp)    │
+│   ├── test-fusions        Fusion unit + dispatch + differential tests      │
+│   ├── test-precompiles    SHA256..KZG & BLS12-381 integration vectors      │
+│   ├── test-layer2         Base & OP Stack L2 suite (154/154)               │
+│   ├── test-integration    test/**/*.zig (aggregated via test/root.zig)     │
+│   ├── test-fuzz           10 Zig fuzz target corpora                       │
+│   └── test-jit            Standalone ARM64 JIT library (src/jit/)          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -51,14 +51,20 @@ zig build test-unit -Dtest-filter='stack'
 
 | Command | What it runs | Use when |
 |---------|--------------|----------|
-| `zig build test` | All tests (specs → integration → unit) | CI, final check |
-| `zig build specs` | Ethereum execution spec tests | Spec compliance |
-| `zig build test-integration` | Integration tests | Cross-module testing |
-| `zig build test-unit` | Unit tests in src/ | Quick iteration |
-| `zig build test-lib` | Library tests in lib/ | External wrappers |
-| `zig build test-opcodes` | Per-opcode differential tests | Opcode correctness |
-| `zig build test-synthetic` | Synthetic opcode tests | Fusion testing |
-| `zig build test-fusions` | Fusion optimization tests | Optimization testing |
+| `zig build test` | Self-contained suites (unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz, jit) | CI, final check |
+| `zig build state-tests -Doptimize=ReleaseSafe` | Official EEST state tests (`66,652 / 66,652` Frontier → Osaka; fetch fixtures first) | Spec compliance |
+| `zig build verify` | Formal verification (`verify-ir`, `verify-smt`, `verify-lean`) | Fast-path & fusion changes |
+| `zig build test-lean-diff -Doptimize=ReleaseSafe` | Zig↔Lean `4.32.0` differential fuzzer (`116,384 / 116,384`) | Consensus & L2 changes |
+| `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8` | Multi-threaded structure-aware + havoc fuzzer | Deep invariant testing |
+| `zig build test-integration` | Integration tests (`test/root.zig`) | Cross-module testing |
+| `zig build test-unit` | Unit tests in `src/` | Quick iteration |
+| `zig build test-lib` | Library tests in `lib/` | External wrappers |
+| `zig build test-opcodes` | Per-opcode differential tests (`+ test-modexp`) | Opcode correctness |
+| `zig build test-fusions` | Fusion optimization tests (unit + dispatch + differential) | Fusion changes |
+| `zig build test-precompiles` | Precompile integration vectors (`0x01`–`0x11`, `0x100`) | Precompile changes |
+| `zig build test-layer2` | Base & OP Stack L2 unit tests (`154 / 154`) | Layer 2 changes |
+| `zig build test-bench` | Benchmark harness statistics & CLI tests | Benchmark changes |
+| `zig build specs` | Legacy filler specs under `specs/cases/` (superseded by `state-tests`) | Legacy reference |
 
 ### Test Filtering
 
