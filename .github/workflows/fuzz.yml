@@ -116,6 +116,10 @@ jobs:
       - name: Build native FFI shared library
         run: zig build shared -Doptimize=ReleaseFast
 
+      - name: Install TypeScript SDK dependencies
+        working-directory: sdks/typescript
+        run: bun install --frozen-lockfile
+
       - name: Run TypeScript feedback-guided fuzz tests & campaign
         working-directory: sdks/typescript
         run: |
