@@ -2266,9 +2266,9 @@ pub fn Evm(config: EvmConfig) type {
         /// victims most of the cycle stays cached. The generator has a fixed seed:
         /// the cache changes how fast a call runs, never its result.
         pub const DispatchCache = struct {
-            pub const max_entries = 256;
+            pub const max_entries = config.dispatch_cache_entries;
             /// Most bytes of code and analysis the cache keeps.
-            pub const max_bytes = 32 * 1024 * 1024;
+            pub const max_bytes = config.dispatch_cache_bytes;
             /// Random slots probed for a victim before the sweep.
             const eviction_probes = 16;
 

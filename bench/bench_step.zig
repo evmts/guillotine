@@ -73,6 +73,28 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
     if (options.target.result.os.tag == .linux) compare_exe.root_module.linkSystemLibrary("unwind", .{});
     const compare_build = b.step("bench-compare-build", "Build the Guillotine cross-EVM comparison runner (ReleaseFast)");
     compare_build.dependOn(&b.addInstallArtifact(compare_exe, .{}).step);
+
+    // 100-block Ethereum mainnet replay benchmark (bench/blocks/main.zig)
+    const blocks_mod = b.createModule(.{
+        .root_source_file = directory.path(b, "blocks/main.zig"),
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+    blocks_mod.addImport("guillotine", evm);
+    if (evm.import_table.get("voltaire")) |voltaire_mod| {
+        blocks_mod.addImport("voltaire", voltaire_mod);
+    }
+    const blocks_exe = b.addExecutable(.{ .name = "guillotine-bench-blocks", .root_module = blocks_mod, .use_llvm = true });
+    blocks_exe.root_module.link_libc = true;
+    if (options.target.result.os.tag == .linux) blocks_exe.root_module.linkSystemLibrary("unwind", .{});
+    const blocks_run = b.addRunArtifact(blocks_exe);
+    blocks_run.setCwd(repository);
+    blocks_run.has_side_effects = true;
+    blocks_run.addPassthruArgs();
+    const blocks_step = b.step("bench-blocks", "Replay 100 pinned Ethereum mainnet blocks (ReleaseFast)");
+    blocks_step.dependOn(&blocks_run.step);
+    const blocks_build = b.step("bench-blocks-build", "Build the 100-block Ethereum mainnet replay benchmark");
+    blocks_build.dependOn(&b.addInstallArtifact(blocks_exe, .{}).step);
     const tests = b.addTest(.{
         .root_module = b.createModule(.{ .root_source_file = directory.path(b, "tests.zig"), .target = options.target, .optimize = .debug }),
         .use_llvm = true,

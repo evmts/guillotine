@@ -48,6 +48,10 @@ pub const EvmConfig = struct {
     /// Enable bytecode fusion optimizations (default: true)
     /// When enabled, common opcode patterns like PUSH+ADD are fused into single operations
     enable_fusion: bool = true,
+    /// Maximum cached analyzed bytecode entries in DispatchCache (default 256).
+    dispatch_cache_entries: usize = 256,
+    /// Maximum total bytes kept by DispatchCache (default 32 MiB).
+    dispatch_cache_bytes: usize = 32 * 1024 * 1024,
 
     /// Disable gas checks for testing/development (default: false)
     /// When enabled, gas consumption methods become no-ops

@@ -1,0 +1,17 @@
+{
+  "schema": "guillotine-mainnet-blocks-manifest-v1",
+  "chain_id": 1,
+  "hardfork": "OSAKA",
+  "start_block": 26498000,
+  "end_block": 26498099,
+  "block_count": 100,
+  "first_block_hash": "0x688ea72c8b02837892f49c41be465195e76dac633ff9e38b5a21ebc09c65f550",
+  "last_block_hash": "0x0c3a2e4eca3fe7868df49b8f196a72bd1733d77ee29aa719d95065f5e256f227",
+  "first_timestamp": 1795679591,
+  "last_timestamp": 1795680779,
+  "total_transactions": 29560,
+  "total_gas_used": 2973053521,
+  "prestate_accounts": 25919,
+  "unique_contracts": 5026,
+  "bundle_sha256": "45318de9f5dc7e7ce958d3b5a6e48a44fbdf57f1765d02814a9bde0046e1ed84"
+}

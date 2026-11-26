@@ -58,11 +58,22 @@ Measured with `zig build bench -- --iterations 5 --warmup 1` in `ReleaseFast` on
 | `precompile/BN254-mul` | Osaka | `8.16 µs` | `3.35 GGas/s` | GLV scalar multiplication |
 | `precompile/ECRECOVER` | Osaka | `0.171 ms` | `146.99 MGas/s` | Pure-Zig secp256k1 Jacobian + Shamir |
 
+### 100-Block Mainnet Replay (`26,498,000`–`26,498,099`)
+
+Single-threaded offline replay of 100 contiguous recent Ethereum mainnet blocks (Osaka / BPO2, `29,560` transactions, `2.973B` gas, `5,026` unique contracts, pinned in [`bench/blocks/manifest.json`](bench/blocks/manifest.json)) on x86_64 Linux (`ReleaseFast`, node-sized 8,192-entry `DispatchCache`), including EIP-4788/EIP-2935 system calls, EIP-2930/4844/7702 transactions, and EIP-4895 withdrawals:
+
+| Mode | Total (100 blocks) | Per block | Throughput | Tx rate | Receipt parity |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cold bytecode cache | `5.35 s` | `53.54 ms` | `555.3 MGas/s` | `5,521 tx/s` | `99.92%` exact gas+status (`99.98%` status) |
+| Warm bytecode cache (median, 5 runs) | `3.81 s` | `38.10 ms` | `780.2 MGas/s` | `7,758 tx/s` | `99.92%` exact gas+status (`99.98%` status) |
+
 Reproduce locally:
 
 ```console
 $ zig build bench                                # in-repo ReleaseFast suite
 $ ./bench/compare/build-all.sh && node bench/compare/run.mjs  # cross-EVM suite
+$ ETHEREUM_RPC_URL=https://... node bench/blocks/fetch.mjs --start 26498000 --count 100
+$ zig build bench-blocks -- --iterations 5 --warmup 1         # 100-block mainnet replay
 ```
 
 ## Verification & Testing
