@@ -1,6 +1,7 @@
 const std = @import("std");
 const crypto = @import("crypto");
 const PrecompileError = @import("common.zig").PrecompileError;
+pub const backend_error = @import("bls12_backend_error.zig");
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas cost for BLS12-381 G1 addition
@@ -22,8 +23,8 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 128);
     errdefer allocator.free(output);
-    crypto.Crypto.bls12_381.g1Add(input, output) catch {
-        return error.InvalidPoint;
+    crypto.Crypto.bls12_381.g1Add(input, output) catch |err| {
+        return backend_error.precompileError(err, error.InvalidPoint);
     };
 
     return PrecompileResult{
@@ -295,4 +296,8 @@ test "EIP-2537 g1_add rejects padding and noncanonical field elements without le
         try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, 1_000_000));
         @memset(input[offset..][0..64], 0);
     }
+}
+
+test {
+    _ = backend_error;
 }

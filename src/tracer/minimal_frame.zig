@@ -1215,16 +1215,19 @@ pub const MinimalFrame = struct {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const push_size = opcode - 0x5f;
 
-                // Check bounds - need to read push_size bytes after the opcode
-                if (self.pc + push_size >= self.bytecode.len) {
-                    return error.InvalidPush;
-                }
-
-                // Read immediate value from bytecode
+                // Yellow Paper 9.4.1: bytes read past the end of the code are zero, so
+                // a PUSH whose immediate is cut off by the end of the code pushes the
+                // bytes that exist, padded on the right with zeros.
+                const first: usize = @min(@as(usize, self.pc) + 1, self.bytecode.len);
+                const available = self.bytecode[first..@min(first + push_size, self.bytecode.len)];
                 var value: u256 = 0;
-                for (0..push_size) |i| {
-                    value = (value << 8) | self.bytecode[self.pc + 1 + i];
+                for (available) |byte| {
+                    value = (value << 8) | byte;
                 }
+                // With no byte available the value is already zero; a shift by all
+                // 256 bits is not representable.
+                const missing: usize = @as(usize, push_size) - available.len;
+                if (available.len != 0) value <<= @intCast(8 * missing);
 
                 try self.pushStack(value);
                 self.pc += 1 + push_size;

@@ -80,8 +80,23 @@ pub fn FrameMemoryPool(comptime memory_limit: usize) type {
             self.in_use = 0;
         }
 
+        /// Reserve `reserve` bytes of address space without touching them.
+        ///
+        /// This calls the page allocator's raw entry points. `Allocator.alloc` and
+        /// `Allocator.free` fill the block with `undefined` (0xAA) in Debug and
+        /// ReleaseSafe, which writes every page: each buffer would then commit its
+        /// whole reservation when mapped and again when unmapped.
+        fn map() ?[]u8 {
+            const pointer = std.heap.page_allocator.rawAlloc(reserve, .of(u8), @returnAddress()) orelse return null;
+            return pointer[0..reserve];
+        }
+
+        fn unmap(mapping: []u8) void {
+            std.heap.page_allocator.rawFree(mapping, .of(u8), @returnAddress());
+        }
+
         fn destroy(self: *Self, slot: *Slot) void {
-            std.heap.page_allocator.free(slot.list.allocatedSlice());
+            unmap(slot.list.allocatedSlice());
             self.allocator.destroy(slot);
         }
 
@@ -100,8 +115,8 @@ pub fn FrameMemoryPool(comptime memory_limit: usize) type {
             if (self.in_use == self.buffers.items.len) {
                 const slot = try self.allocator.create(Slot);
                 errdefer self.allocator.destroy(slot);
-                const mapping = try std.heap.page_allocator.alloc(u8, reserve);
-                errdefer std.heap.page_allocator.free(mapping);
+                const mapping = map() orelse return error.OutOfMemory;
+                errdefer unmap(mapping);
                 slot.* = .{ .list = std.ArrayList(u8).initBuffer(mapping), .dirty = 0, .recent = 0 };
                 try self.buffers.append(self.allocator, slot);
             }
@@ -348,4 +363,49 @@ test "trim leaves live and small buffers alone and unmaps large extra free buffe
     try std.testing.expect(&pool.buffers.items[1].list == small);
     live.items.len = 0;
     try std.testing.expect(pool.release(live));
+}
+
+test "a deep call chain reserves address space without committing it" {
+    const Pool = FrameMemoryPool(0xFFFFFF);
+    if (!Pool.enabled) return;
+    if (builtin.os.tag != .linux and !builtin.os.tag.isDarwin()) return;
+    var pool = Pool.init(std.testing.allocator);
+    defer pool.deinit();
+
+    const depth = 64;
+    const page = std.heap.pageSize();
+    const residency = try std.testing.allocator.alloc(u8, Pool.reserve / page + 1);
+    defer std.testing.allocator.free(residency);
+    const faults_before = std.posix.getrusage(std.posix.rusage.SELF).minflt;
+
+    var live: [depth]*std.ArrayList(u8) = undefined;
+    for (&live) |*buffer| buffer.* = try pool.acquire();
+
+    // No page of a fresh reservation is resident.
+    var resident: usize = 0;
+    for (live) |buffer| {
+        const mapping = buffer.allocatedSlice();
+        try std.testing.expectEqual(Pool.reserve, mapping.len);
+        const pages = std.mem.alignForward(usize, mapping.len, page) / page;
+        @memset(residency[0..pages], 0);
+        try std.posix.mincore(@alignCast(mapping.ptr), mapping.len, residency.ptr);
+        for (residency[0..pages]) |state| resident += state & 1;
+    }
+    try std.testing.expectEqual(@as(usize, 0), resident);
+
+    // Each frame touches one word: one page per buffer becomes resident.
+    for (live) |buffer| {
+        buffer.items.len = 32;
+        @memset(buffer.items, 0x5A);
+    }
+    var index: usize = depth;
+    while (index > 0) {
+        index -= 1;
+        try std.testing.expect(pool.release(live[index]));
+    }
+
+    // Mapping, using and unmapping 64 buffers faults a few pages each, not the
+    // 4096 pages of each 16 MiB reservation.
+    const faults = std.posix.getrusage(std.posix.rusage.SELF).minflt - faults_before;
+    try std.testing.expect(faults < depth * 32);
 }

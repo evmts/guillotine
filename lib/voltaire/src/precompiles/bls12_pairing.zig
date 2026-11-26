@@ -1,6 +1,7 @@
 const std = @import("std");
 const crypto = @import("crypto");
 const PrecompileError = @import("common.zig").PrecompileError;
+const backend_error = @import("bls12_backend_error.zig");
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas costs for BLS12-381 pairing
@@ -29,8 +30,8 @@ pub fn execute(
     errdefer allocator.free(output);
     @memset(output, 0);
 
-    const success = crypto.Crypto.bls12_381.pairingCheck(input) catch {
-        return error.InvalidPairing;
+    const success = crypto.Crypto.bls12_381.pairingCheck(input) catch |err| {
+        return backend_error.precompileError(err, error.InvalidPairing);
     };
 
     if (success) {

@@ -1336,3 +1336,640 @@ test "R2A R2-19: a call accepts more than 4 MiB of input" {
     try std.testing.expect(result.success);
     try std.testing.expectEqual(@as(u64, 17_000_000 - 21_000 - 4 * (4 * 1024 * 1024 + 1)), result.gas_left);
 }
+
+// ---------------------------------------------------------------------------
+// Round 3 core findings (lane R3-A).
+// ---------------------------------------------------------------------------
+
+// R3 P1-2: a full dispatch cache used to drop every entry. Code that is called
+// all the time was analyzed again after every 256 other contracts.
+test "R3A P1-2: a full dispatch cache evicts one entry and keeps code that is called again" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA3)) };
+    const hot = Address{ .bytes = @as([20]u8, @splat(0xB3)) };
+
+    // return 42
+    const hot_code = [_]u8{ 0x60, 0x2A, 0x5F, 0x52, 0x60, 0x20, 0x5F, 0xF3 };
+    var hot_account = evm.Account.zero();
+    hot_account.code_hash = try db.set_code(&hot_code);
+    try db.set_account(hot.bytes, hot_account);
+
+    var vm = try Vm.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    {
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = hot, .value = 0, .input = &.{}, .gas = 100_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+    }
+
+    // 300 contracts that are each called once, with a call to the hot contract
+    // after every one of them.
+    const cold_contracts = 300;
+    var index: u16 = 0;
+    while (index < cold_contracts) : (index += 1) {
+        const code = [_]u8{ 0x61, @intCast(index >> 8), @intCast(index & 0xFF), 0x5F, 0x52, 0x60, 0x20, 0x5F, 0xF3 };
+        var address = Address{ .bytes = @as([20]u8, @splat(0xE3)) };
+        std.mem.writeInt(u16, address.bytes[18..20], index, .big);
+        var account = evm.Account.zero();
+        account.code_hash = try db.set_code(&code);
+        try db.set_account(address.bytes, account);
+
+        var cold_result = vm.call(.{ .call = .{ .caller = origin, .to = address, .value = 0, .input = &.{}, .gas = 100_000 } });
+        defer cold_result.deinit(allocator);
+        try std.testing.expect(cold_result.success);
+        try std.testing.expectEqual(@as(u256, index), std.mem.readInt(u256, cold_result.output[0..32], .big));
+
+        var hot_result = vm.call(.{ .call = .{ .caller = origin, .to = hot, .value = 0, .input = &.{}, .gas = 100_000 } });
+        defer hot_result.deinit(allocator);
+        try std.testing.expect(hot_result.success);
+        try std.testing.expectEqual(@as(u256, 42), std.mem.readInt(u256, hot_result.output[0..32], .big));
+        try std.testing.expect(vm.dispatch_cache.contains(hot_account.code_hash));
+    }
+
+    const max_entries = Vm.DispatchCache.max_entries;
+    // The hot contract was analyzed once and served from the cache ever after.
+    try std.testing.expectEqual(@as(u64, cold_contracts), vm.dispatch_cache.hits);
+    try std.testing.expectEqual(@as(u64, cold_contracts + 1), vm.dispatch_cache.misses);
+    // Each analysis beyond the capacity removed exactly one entry.
+    try std.testing.expectEqual(@as(usize, max_entries), vm.dispatch_cache.count());
+    try std.testing.expectEqual(@as(u64, cold_contracts + 1 - max_entries), vm.dispatch_cache.evictions);
+}
+
+// R3 P1-2: 300 contracts called in a cycle. Dropping the whole cache, or evicting
+// in insertion order, makes every call of every round a miss.
+test "R3A P1-2: contracts called in a cycle longer than the dispatch cache mostly hit" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA4)) };
+    const contracts = 300;
+    var deploy: u16 = 0;
+    while (deploy < contracts) : (deploy += 1) {
+        const code = [_]u8{ 0x61, @intCast(deploy >> 8), @intCast(deploy & 0xFF), 0x5F, 0x52, 0x60, 0x20, 0x5F, 0xF3 };
+        var address = Address{ .bytes = @as([20]u8, @splat(0xE4)) };
+        std.mem.writeInt(u16, address.bytes[18..20], deploy, .big);
+        var account = evm.Account.zero();
+        account.code_hash = try db.set_code(&code);
+        try db.set_account(address.bytes, account);
+    }
+
+    var vm = try Vm.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    const rounds = 4;
+    var misses_after_first_round: u64 = 0;
+    var round: usize = 0;
+    while (round < rounds) : (round += 1) {
+        var index: u16 = 0;
+        while (index < contracts) : (index += 1) {
+            var address = Address{ .bytes = @as([20]u8, @splat(0xE4)) };
+            std.mem.writeInt(u16, address.bytes[18..20], index, .big);
+            var result = vm.call(.{ .call = .{ .caller = origin, .to = address, .value = 0, .input = &.{}, .gas = 100_000 } });
+            defer result.deinit(allocator);
+            try std.testing.expect(result.success);
+            try std.testing.expectEqual(@as(u256, index), std.mem.readInt(u256, result.output[0..32], .big));
+            try std.testing.expect(vm.dispatch_cache.count() <= Vm.DispatchCache.max_entries);
+        }
+        if (round == 0) misses_after_first_round = vm.dispatch_cache.misses;
+    }
+
+    // The first round analyzes every contract. After it more than half of the
+    // calls are served from the cache.
+    try std.testing.expectEqual(@as(u64, contracts), misses_after_first_round);
+    const later_calls: u64 = contracts * (rounds - 1);
+    const later_misses = vm.dispatch_cache.misses - misses_after_first_round;
+    try std.testing.expect(later_misses * 2 < later_calls);
+}
+
+// R3 P1-2: the cache is bounded in bytes, not only in entries. 256 analyses of
+// 24 KiB contracts would hold far more than the budget.
+test "R3A P1-2: the dispatch cache stays within its byte budget" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA5)) };
+    var vm = try Vm.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 1_000_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    // PUSH2 <n>; POP; JUMPDEST x 24571; STOP: the largest deployable code, with
+    // the densest analysis.
+    const code = try allocator.alloc(u8, 24_576);
+    defer allocator.free(code);
+    @memset(code, 0x5B);
+    code[0] = 0x61;
+    code[3] = 0x50;
+    code[code.len - 1] = 0x00;
+
+    const contracts = 128;
+    var index: u16 = 0;
+    while (index < contracts) : (index += 1) {
+        std.mem.writeInt(u16, code[1..3], index, .big);
+        var address = Address{ .bytes = @as([20]u8, @splat(0xE5)) };
+        std.mem.writeInt(u16, address.bytes[18..20], index, .big);
+        var account = evm.Account.zero();
+        account.code_hash = try db.set_code(code);
+        try db.set_account(address.bytes, account);
+
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = address, .value = 0, .input = &.{}, .gas = 1_000_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+        try std.testing.expect(vm.dispatch_cache.bytes <= Vm.DispatchCache.max_bytes);
+    }
+
+    // The budget, not the entry limit, forced evictions.
+    try std.testing.expect(vm.dispatch_cache.evictions > 0);
+    try std.testing.expect(vm.dispatch_cache.count() < contracts);
+    try std.testing.expect(vm.dispatch_cache.count() < Vm.DispatchCache.max_entries);
+    try std.testing.expect(vm.dispatch_cache.bytes > Vm.DispatchCache.max_bytes / 2);
+}
+
+// R3 P1-3: crediting an account that holds 2^256 - 1 used to overflow: a panic in
+// Debug and ReleaseSafe, undefined behavior in ReleaseFast.
+test "R3A P1-3: a transfer that overflows the recipient's balance fails its call" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA6)) };
+    const full = Address{ .bytes = @as([20]u8, @splat(0xB6)) };
+    const caller_contract = Address{ .bytes = @as([20]u8, @splat(0xC6)) };
+    const max_balance: u256 = std.math.maxInt(u256);
+
+    var origin_account = evm.Account.zero();
+    origin_account.balance = 100;
+    try db.set_account(origin.bytes, origin_account);
+    var full_account = evm.Account.zero();
+    full_account.balance = max_balance;
+    try db.set_account(full.bytes, full_account);
+
+    // MSTORE(0, CALL(gas, full, 1, 0, 0, 0, 0)); RETURN(0, 32)
+    const code = [_]u8{ 0x5F, 0x5F, 0x5F, 0x5F, 0x60, 0x01, 0x73 } ++ full.bytes ++ [_]u8{ 0x5A, 0xF1, 0x5F, 0x52, 0x60, 0x20, 0x5F, 0xF3 };
+    var contract_account = evm.Account.zero();
+    contract_account.balance = 7;
+    contract_account.code_hash = try db.set_code(&code);
+    try db.set_account(caller_contract.bytes, contract_account);
+
+    var vm = try Vm.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 200_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    // A transaction that sends 1 wei to the full account fails and moves nothing.
+    {
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = full, .value = 1, .input = &.{}, .gas = 200_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(!result.success);
+        try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+        try std.testing.expectEqual(@as(u256, 100), (try db.get_account(origin.bytes)).?.balance);
+        try std.testing.expectEqual(max_balance, (try db.get_account(full.bytes)).?.balance);
+        try std.testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+
+    // A CALL opcode that sends 1 wei pushes 0; its caller carries on.
+    {
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = caller_contract, .value = 0, .input = &.{}, .gas = 200_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(@as(u256, 0), std.mem.readInt(u256, result.output[0..32], .big));
+        try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+        try std.testing.expectEqual(@as(u256, 7), (try db.get_account(caller_contract.bytes)).?.balance);
+        try std.testing.expectEqual(max_balance, (try db.get_account(full.bytes)).?.balance);
+        try std.testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+}
+
+// R3 P1-3: from Cancun a SELFDESTRUCT of an existing contract only moves its
+// balance. That credit used to wrap around.
+test "R3A P1-3: a SELFDESTRUCT that overflows the beneficiary's balance halts its frame (Cancun rule)" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA7)) };
+    const doomed = Address{ .bytes = @as([20]u8, @splat(0xB7)) };
+    const beneficiary = Address{ .bytes = @as([20]u8, @splat(0xC7)) };
+    const max_balance: u256 = std.math.maxInt(u256);
+
+    // SELFDESTRUCT(beneficiary)
+    const code = [_]u8{0x73} ++ beneficiary.bytes ++ [_]u8{0xFF};
+    var account = evm.Account.zero();
+    account.balance = 9;
+    account.code_hash = try db.set_code(&code);
+    try db.set_account(doomed.bytes, account);
+    var beneficiary_account = evm.Account.zero();
+    beneficiary_account.balance = max_balance;
+    try db.set_account(beneficiary.bytes, beneficiary_account);
+
+    try std.testing.expect(evm.Hardfork.DEFAULT.isAtLeast(.CANCUN));
+    var vm = try Vm.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    var result = vm.call(.{ .call = .{ .caller = origin, .to = doomed, .value = 0, .input = &.{}, .gas = 100_000 } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+    try std.testing.expectEqual(@as(usize, 0), result.selfdestructs.len);
+    try std.testing.expectEqual(@as(u256, 9), (try db.get_account(doomed.bytes)).?.balance);
+    try std.testing.expectEqual(max_balance, (try db.get_account(beneficiary.bytes)).?.balance);
+    try std.testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+}
+
+test "R3A P1-3: a SELFDESTRUCT that overflows the beneficiary's balance halts its frame (before Cancun)" {
+    const allocator = std.testing.allocator;
+    const Shanghai = evm.Evm(.{ .eips = .{ .hardfork = .SHANGHAI } });
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA8)) };
+    const doomed = Address{ .bytes = @as([20]u8, @splat(0xB8)) };
+    const beneficiary = Address{ .bytes = @as([20]u8, @splat(0xC8)) };
+    const max_balance: u256 = std.math.maxInt(u256);
+
+    // SELFDESTRUCT(beneficiary)
+    const code = [_]u8{0x73} ++ beneficiary.bytes ++ [_]u8{0xFF};
+    var account = evm.Account.zero();
+    account.balance = 9;
+    account.code_hash = try db.set_code(&code);
+    try db.set_account(doomed.bytes, account);
+    var beneficiary_account = evm.Account.zero();
+    beneficiary_account.balance = max_balance;
+    try db.set_account(beneficiary.bytes, beneficiary_account);
+
+    var vm = try Shanghai.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    var result = vm.call(.{ .call = .{ .caller = origin, .to = doomed, .value = 0, .input = &.{}, .gas = 100_000 } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+    try std.testing.expectEqual(@as(usize, 0), result.selfdestructs.len);
+    try std.testing.expect(db.account_exists(doomed.bytes));
+    try std.testing.expectEqual(@as(u256, 9), (try db.get_account(doomed.bytes)).?.balance);
+    try std.testing.expectEqual(max_balance, (try db.get_account(beneficiary.bytes)).?.balance);
+    try std.testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+}
+
+// R3 P2-1: an error that is the host's failure must not be reported as the
+// precompile rejecting its input. `TrustedSetupNotLoaded` reaches this mapping
+// when the host unloads the KZG setup while the precompile runs; the BLS12-381
+// backend reports a caught panic or a failed allocation as `ComputationFailed`.
+test "R3A P2-1: precompile backend failures are host failures, rejected inputs are not" {
+    const backend_error = evm.precompiles.bls12_g1_add.backend_error;
+    const PrecompileError = evm.precompiles.PrecompileError;
+
+    try std.testing.expectEqual(@as(?anyerror, error.TrustedSetupNotLoaded), Vm.precompileHostFailure(error.TrustedSetupNotLoaded));
+    try std.testing.expectEqual(@as(?anyerror, error.OutOfMemory), Vm.precompileHostFailure(error.OutOfMemory));
+
+    // BLS12-381: FFI code 4 through the precompile's error to the EVM's.
+    for ([_]PrecompileError{ error.InvalidPoint, error.InvalidPairing }) |rejected| {
+        const failed: PrecompileError = switch (rejected) {
+            error.InvalidPairing => backend_error.precompileError(error.ComputationFailed, error.InvalidPairing),
+            else => backend_error.precompileError(error.ComputationFailed, error.InvalidPoint),
+        };
+        try std.testing.expectEqual(@as(?anyerror, error.PrecompileBackendFailure), Vm.precompileHostFailure(failed));
+    }
+    try std.testing.expectEqual(@as(?anyerror, null), Vm.precompileHostFailure(backend_error.precompileError(error.InvalidPoint, error.InvalidPoint)));
+    try std.testing.expectEqual(@as(?anyerror, null), Vm.precompileHostFailure(backend_error.precompileError(error.InvalidInput, error.InvalidPoint)));
+    try std.testing.expectEqual(@as(?anyerror, null), Vm.precompileHostFailure(backend_error.precompileError(error.InvalidScalar, error.InvalidPairing)));
+
+    // What a precompile reports for a bad input or too little gas fails the call.
+    for ([_]anyerror{ error.InvalidInput, error.InvalidSignature, error.InvalidPoint, error.InvalidPairing, error.OutOfGas }) |rejection| {
+        try std.testing.expectEqual(@as(?anyerror, null), Vm.precompileHostFailure(rejection));
+    }
+}
+
+// R3 P2-1: an invalid BLS12-381 point still fails only its call.
+test "R3A P2-1: an invalid BLS12-381 point fails the call without a host failure" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xA9)) };
+    var vm = try Vm.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 200_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    // (1, 2) is not on the curve.
+    var input = @as([256]u8, @splat(0));
+    input[63] = 1;
+    input[127] = 2;
+    var result = vm.call(.{ .call = .{ .caller = origin, .to = Address.fromU256(0x0B), .value = 0, .input = &input, .gas = 200_000 } });
+    defer result.deinit(allocator);
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(origin.bytes)).?.nonce);
+
+    // Two points at infinity add up.
+    const infinity = @as([256]u8, @splat(0));
+    var valid = vm.call(.{ .call = .{ .caller = origin, .to = Address.fromU256(0x0B), .value = 0, .input = &infinity, .gas = 200_000 } });
+    defer valid.deinit(allocator);
+    try std.testing.expect(valid.success);
+    try std.testing.expectEqual(@as(usize, 128), valid.output.len);
+}
+
+// R3 P2-2 (trace): a creation that failed after its init code ran dropped the
+// trace of that init code without freeing it. The testing allocator reports the
+// leak.
+test "R3A P2-2: a failed creation hands its trace on and frees it" {
+    const allocator = std.testing.allocator;
+    const Traced = evm.Evm(.{ .tracer_config = .{ .enabled = true, .enable_step_capture = true } });
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xAA)) };
+    var vm = try Traced.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 200_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    defer vm.deinit();
+
+    // MSTORE8(0, 0xEF); RETURN(0, 1): code that EIP-3541 refuses.
+    const refused = [_]u8{ 0x60, 0xEF, 0x5F, 0x53, 0x60, 0x01, 0x5F, 0xF3 };
+    {
+        var result = vm.call(.{ .create = .{ .caller = origin, .value = 0, .init_code = &refused, .gas = 200_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(!result.success);
+        try std.testing.expect(result.trace != null);
+        try std.testing.expect(result.trace.?.steps.len > 0);
+    }
+
+    // MSTORE8(0, 0x00); RETURN(0, 1) with too little gas left for the deposit.
+    const stop = [_]u8{ 0x60, 0x00, 0x5F, 0x53, 0x60, 0x01, 0x5F, 0xF3 };
+    {
+        var result = vm.call(.{ .create = .{ .caller = origin, .value = 0, .init_code = &stop, .gas = 53_300 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(!result.success);
+        try std.testing.expect(result.trace != null);
+    }
+
+    // A creation that succeeds still reports its trace.
+    {
+        var result = vm.call(.{ .create = .{ .caller = origin, .value = 0, .init_code = &stop, .gas = 200_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+        try std.testing.expect(result.trace != null);
+    }
+}
+
+// R3 P2-2 (trace): a frame that had built its trace and then failed to build its
+// result leaked the trace. Failing every allocation of a traced transaction in
+// turn reaches those points; the testing allocator reports any leak.
+test "R3A P2-2: an allocation failure after the trace is built frees the trace" {
+    const Traced = evm.Evm(.{ .tracer_config = .{ .enabled = true, .enable_step_capture = true } });
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xAB)) };
+    const reverting = Address{ .bytes = @as([20]u8, @splat(0xBB)) };
+
+    // MSTORE(0, 42); REVERT(0, 32)
+    const reverting_code = [_]u8{ 0x60, 0x2A, 0x5F, 0x52, 0x60, 0x20, 0x5F, 0xFD };
+    // MSTORE8(0, 0x00); RETURN(0, 1)
+    const init_code = [_]u8{ 0x60, 0x00, 0x5F, 0x53, 0x60, 0x01, 0x5F, 0xF3 };
+
+    // Every injected failure is reported as a warning; keep them out of the output.
+    const log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = log_level;
+
+    for ([_]bool{ false, true }) |create| {
+        var allocations: usize = std.math.maxInt(usize);
+        var fail_at: usize = 0;
+        var first_run = true;
+        while (first_run or fail_at < allocations) {
+            var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+            const allocator = failing.allocator();
+            var db = evm.Database.init(std.testing.allocator);
+            defer db.deinit();
+            var account = evm.Account.zero();
+            account.code_hash = try db.set_code(&reverting_code);
+            try db.set_account(reverting.bytes, account);
+
+            var vm = try Traced.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 200_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+            defer vm.deinit();
+
+            const before_call = failing.alloc_index;
+            if (!first_run) failing.fail_index = before_call + fail_at;
+            var result = if (create)
+                vm.call(.{ .create = .{ .caller = origin, .value = 0, .init_code = &init_code, .gas = 200_000 } })
+            else
+                vm.call(.{ .call = .{ .caller = origin, .to = reverting, .value = 0, .input = &.{}, .gas = 200_000 } });
+            failing.fail_index = std.math.maxInt(usize);
+            defer result.deinit(allocator);
+
+            if (first_run) {
+                allocations = failing.alloc_index - before_call;
+                first_run = false;
+                try std.testing.expectEqual(create, result.success);
+                try std.testing.expect(result.trace != null);
+                try std.testing.expect(allocations > 0);
+            } else {
+                fail_at += 1;
+            }
+            try std.testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+        }
+    }
+}
+
+// R3 P2-2 (order): the destroyed accounts are deleted after the fee is paid. A
+// coinbase that destroyed itself used to be deleted first and then recreated by
+// its own fee.
+test "R3A P2-2: a coinbase that destroys itself is deleted after it is paid" {
+    const allocator = std.testing.allocator;
+    const Shanghai = evm.Evm(.{ .eips = .{ .hardfork = .SHANGHAI } });
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xAC)) };
+    const coinbase = Address{ .bytes = @as([20]u8, @splat(0xBC)) };
+    const beneficiary = Address{ .bytes = @as([20]u8, @splat(0xCC)) };
+    const initial_balance: u256 = 1_000_000_000;
+    const gas_limit: u64 = 100_000;
+    const gas_price: u256 = 10;
+
+    var origin_account = evm.Account.zero();
+    origin_account.balance = initial_balance;
+    try db.set_account(origin.bytes, origin_account);
+
+    // SELFDESTRUCT(beneficiary)
+    const code = [_]u8{0x73} ++ beneficiary.bytes ++ [_]u8{0xFF};
+    var coinbase_account = evm.Account.zero();
+    coinbase_account.balance = 5;
+    coinbase_account.code_hash = try db.set_code(&code);
+    try db.set_account(coinbase.bytes, coinbase_account);
+    try db.set_storage(coinbase.bytes, 1, 11);
+
+    var block = evm.BlockInfo.init();
+    block.coinbase = coinbase;
+    var vm = try Shanghai.init(allocator, &db, block, .{ .gas_limit = gas_limit, .coinbase = coinbase, .chain_id = 1 }, gas_price, origin);
+    defer vm.deinit();
+
+    var result = vm.call(.{ .call = .{ .caller = origin, .to = coinbase, .value = 0, .input = &.{}, .gas = gas_limit } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(usize, 1), result.selfdestructs.len);
+    // The fee was charged, and the account that earned it is gone with it.
+    const gas_used: u256 = gas_limit - result.gas_left;
+    try std.testing.expect(gas_used > 0);
+    try std.testing.expectEqual(initial_balance - gas_used * gas_price, (try db.get_account(origin.bytes)).?.balance);
+    try std.testing.expect(!db.account_exists(coinbase.bytes));
+    try std.testing.expect(!(try db.has_storage(coinbase.bytes)));
+    // The beneficiary received what the coinbase held when it ran, not the fee.
+    try std.testing.expectEqual(@as(u256, 5), (try db.get_account(beneficiary.bytes)).?.balance);
+}
+
+// R3 P2-8: a transaction whose fee cap cannot pay the base fee, or whose tip
+// exceeds its cap, is invalid from London on. It used to run at a gas price
+// below the base fee.
+test "R3A P2-8: invalid EIP-1559 fee caps are refused" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+
+    const origin = Address{ .bytes = @as([20]u8, @splat(0xAD)) };
+    const target = Address{ .bytes = @as([20]u8, @splat(0xBD)) };
+    const initial_balance: u256 = 1_000_000_000;
+    var origin_account = evm.Account.zero();
+    origin_account.balance = initial_balance;
+    try db.set_account(origin.bytes, origin_account);
+
+    var block = evm.BlockInfo.init();
+    block.base_fee = 100;
+
+    const Case = struct { max_fee: u256, max_priority_fee: u256, reason: ?[]const u8 };
+    const cases = [_]Case{
+        .{ .max_fee = 99, .max_priority_fee = 0, .reason = "invalid transaction: max fee per gas is below the block base fee (EIP-1559)" },
+        .{ .max_fee = 0, .max_priority_fee = 0, .reason = "invalid transaction: max fee per gas is below the block base fee (EIP-1559)" },
+        .{ .max_fee = 200, .max_priority_fee = 201, .reason = "invalid transaction: max priority fee per gas exceeds max fee per gas (EIP-1559)" },
+        .{ .max_fee = 100, .max_priority_fee = 100, .reason = null },
+        .{ .max_fee = 200, .max_priority_fee = 5, .reason = null },
+    };
+    var nonce: u64 = 0;
+    for (cases) |case| {
+        var vm = try Vm.init(allocator, &db, block, .{
+            .gas_limit = 100_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .chain_id = 1,
+            .max_fee_per_gas = case.max_fee,
+            .max_priority_fee_per_gas = case.max_priority_fee,
+        }, null, origin);
+        defer vm.deinit();
+
+        const balance_before = (try db.get_account(origin.bytes)).?.balance;
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = target, .value = 0, .input = &.{}, .gas = 100_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+
+        const after = (try db.get_account(origin.bytes)).?;
+        if (case.reason) |reason| {
+            // Refused before anything changed.
+            try std.testing.expect(!result.success);
+            try std.testing.expectEqualStrings(reason, result.error_info.?);
+            try std.testing.expectEqual(balance_before, after.balance);
+        } else {
+            try std.testing.expect(result.success);
+            nonce += 1;
+            const price = @min(case.max_fee, block.base_fee + case.max_priority_fee);
+            try std.testing.expectEqual(balance_before - 21_000 * price, after.balance);
+        }
+        try std.testing.expectEqual(nonce, after.nonce);
+    }
+
+    // A context without fee caps has none to check: a call priced below the base
+    // fee, as tests and simulations make, still runs.
+    {
+        var vm = try Vm.init(allocator, &db, block, .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+        defer vm.deinit();
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = target, .value = 0, .input = &.{}, .gas = 100_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+    }
+
+    // Before London there is no base fee to compare with.
+    {
+        const Berlin = evm.Evm(.{ .eips = .{ .hardfork = .BERLIN } });
+        var vm = try Berlin.init(allocator, &db, block, .{
+            .gas_limit = 100_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .chain_id = 1,
+            .max_fee_per_gas = 1,
+            .max_priority_fee_per_gas = 5,
+        }, null, origin);
+        defer vm.deinit();
+        var result = vm.call(.{ .call = .{ .caller = origin, .to = target, .value = 0, .input = &.{}, .gas = 100_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+    }
+}
+
+// R3 P2-10: the reference interpreter refused a PUSH whose immediate is cut off
+// by the end of the code. Such a PUSH reads zeros past the end.
+test "R3A P2-10: the reference interpreter zero-pads a PUSH cut off by the end of the code" {
+    const allocator = std.testing.allocator;
+    const caller = Address{ .bytes = @as([20]u8, @splat(0xAE)) };
+    const contract = Address{ .bytes = @as([20]u8, @splat(0xBE)) };
+    const gas_limit: u64 = 100_000;
+
+    const Case = struct { code: []const u8, execution_gas: u64 };
+    const cases = [_]Case{
+        // PUSH1 1; POP; PUSH32 with one byte of immediate
+        .{ .code = &.{ 0x60, 0x01, 0x50, 0x7F, 0xAB }, .execution_gas = 3 + 2 + 3 },
+        // PUSH2 with one byte of immediate
+        .{ .code = &.{ 0x61, 0xAB }, .execution_gas = 3 },
+        // PUSH1 and PUSH32 with no immediate at all
+        .{ .code = &.{0x60}, .execution_gas = 3 },
+        .{ .code = &.{ 0x5F, 0x7F }, .execution_gas = 2 + 3 },
+    };
+    for (cases) |case| {
+        const minimal = try evm.MinimalEvm.initPtr(allocator);
+        defer minimal.deinitPtr(allocator);
+        minimal.setHardfork(.CANCUN);
+        try minimal.setCode(contract, case.code);
+        const reference = try minimal.execute(case.code, @intCast(gas_limit), caller, contract, 0, &.{});
+        try std.testing.expect(reference.success);
+        try std.testing.expectEqual(gas_limit - 21_000 - case.execution_gas, @as(u64, @intCast(reference.gas_left)));
+
+        // The optimized interpreter agrees.
+        var db = evm.Database.init(allocator);
+        defer db.deinit();
+        var account = evm.Account.zero();
+        account.code_hash = try db.set_code(case.code);
+        try db.set_account(contract.bytes, account);
+        var vm = try evm.Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = gas_limit, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
+        defer vm.deinit();
+        var result = vm.call(.{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = &.{}, .gas = gas_limit } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(gas_limit - 21_000 - case.execution_gas, result.gas_left);
+    }
+}
+
+// R3 P2-10: with validation on, the tracer runs the reference interpreter beside
+// every instruction and compares the stacks, so the padded value itself is
+// checked: PUSH3 0xABCD?? must push 0xABCD00.
+test "R3A P2-10: the padded PUSH value matches the optimized interpreter's" {
+    const allocator = std.testing.allocator;
+    const Validated = evm.Evm(.{
+        .eips = .{ .hardfork = .CANCUN },
+        .enable_fusion = false,
+        .tracer_config = .{ .enabled = true, .enable_validation = true },
+    });
+    const caller = Address{ .bytes = @as([20]u8, @splat(0xAF)) };
+    const contract = Address{ .bytes = @as([20]u8, @splat(0xBF)) };
+
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+    // PUSH1 1; POP; PUSH3 0xAB 0xCD
+    const code = [_]u8{ 0x60, 0x01, 0x50, 0x62, 0xAB, 0xCD };
+    var account = evm.Account.zero();
+    account.code_hash = try db.set_code(&code);
+    try db.set_account(contract.bytes, account);
+
+    var vm = try Validated.init(allocator, &db, evm.BlockInfo.init(), .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
+    defer vm.deinit();
+    var result = vm.call(.{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = &.{}, .gas = 100_000 } });
+    defer result.deinit(allocator);
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u64, 100_000 - 21_000 - 8), result.gas_left);
+    try std.testing.expectEqual(@as(u64, 0), vm.tracer.failed_checks);
+}

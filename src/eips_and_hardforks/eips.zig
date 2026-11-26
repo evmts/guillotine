@@ -639,19 +639,22 @@ pub const Eips = struct {
             // Only transfer balance, don't destroy the contract
             const contract_account = try database.get_account(contract_address.bytes);
             if (contract_account) |account| {
-                if (account.balance > 0) {
-                    // Transfer balance to recipient
-                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
-                    try journal.record_balance_change(snapshot_id, recipient, 0);
+                // A contract that names itself keeps its balance: nothing moves.
+                if (account.balance > 0 and !contract_address.equals(recipient)) {
+                    const Account = @import("../storage/database_interface_account.zig").Account;
+                    var recipient_account = (try database.get_account(recipient.bytes)) orelse Account.zero();
+                    // A balance above 2^256 - 1 cannot exist. The SELFDESTRUCT halts
+                    // its frame before it changes anything.
+                    const credited = std.math.add(u256, recipient_account.balance, account.balance) catch return error.BalanceOverflow;
 
-                    // Update balances
+                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
+                    try journal.record_balance_change(snapshot_id, recipient, recipient_account.balance);
+
                     var sender_account = account;
                     sender_account.balance = 0;
                     try database.set_account(contract_address.bytes, sender_account);
 
-                    const Account = @import("../storage/database_interface_account.zig").Account;
-                    var recipient_account = (try database.get_account(recipient.bytes)) orelse Account.zero();
-                    recipient_account.balance +%= account.balance;
+                    recipient_account.balance = credited;
                     try database.set_account(recipient.bytes, recipient_account);
                 }
             }
@@ -805,6 +808,14 @@ pub const Eips = struct {
     pub fn floor_gas_cost(self: Self, calldata_tokens: u64) u64 {
         if (!self.is_eip_active(7623)) return 0;
         return GasConstants.TxGas + calldata_tokens * GasConstants.TxDataFloorTokenGas;
+    }
+
+    /// Check the fee caps of a transaction against the block base fee (EIP-1559).
+    /// Before London there are no caps to check.
+    pub fn validate_fee_caps(self: Self, base_fee_per_gas: u256, max_fee_per_gas: u256, max_priority_fee_per_gas: u256) error{ MaxFeeBelowBaseFee, PriorityFeeAboveMaxFee }!void {
+        if (!self.is_eip_active(1559)) return;
+        if (max_fee_per_gas < base_fee_per_gas) return error.MaxFeeBelowBaseFee;
+        if (max_priority_fee_per_gas > max_fee_per_gas) return error.PriorityFeeAboveMaxFee;
     }
 
     /// Calculate the effective gas price and miner tip for a transaction.

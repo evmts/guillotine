@@ -509,6 +509,9 @@ pub fn Evm(config: EvmConfig) type {
             }
             if (from.equals(to)) return;
             var to_account = try self.database.get_account(to.bytes) orelse Account.zero();
+            // A balance above 2^256 - 1 cannot exist. The transfer fails before it
+            // changes anything, and its call fails with it.
+            const credited = std.math.add(u256, to_account.balance, value) catch return error.BalanceOverflow;
             try self.journal.record_balance_change(snapshot_id, from, from_account.balance);
             try self.journal.record_balance_change(snapshot_id, to, to_account.balance);
 
@@ -517,7 +520,7 @@ pub fn Evm(config: EvmConfig) type {
             try self.touchAddress(to);
 
             from_account.balance -= value;
-            to_account.balance += value;
+            to_account.balance = credited;
             try self.database.set_account(from.bytes, from_account);
             try self.database.set_account(to.bytes, to_account);
         }
@@ -794,6 +797,8 @@ pub fn Evm(config: EvmConfig) type {
                 error.AllocationError,
                 // The point evaluation precompile cannot run without its setup.
                 error.TrustedSetupNotLoaded,
+                // A precompile's backend failed without judging its input.
+                error.PrecompileBackendFailure,
                 // The database lost or refused data it must have.
                 error.CodeNotFound,
                 error.StorageNotFound,
@@ -1028,6 +1033,18 @@ pub fn Evm(config: EvmConfig) type {
             }
             const execution_gas_limit = gas_limit - initial_gas_cost;
 
+            // EIP-1559: a transaction that states its fee caps must be able to pay the
+            // base fee, and cannot tip more than its cap. A context without
+            // `max_fee_per_gas` carries no caps to check.
+            if (comptime !config.disable_gas_checks) {
+                if (self.context.max_fee_per_gas) |max_fee_per_gas| {
+                    config.eips.validate_fee_caps(self.block_info.base_fee, max_fee_per_gas, self.context.max_priority_fee_per_gas) catch |err| switch (err) {
+                        error.MaxFeeBelowBaseFee => return self.rejectTransaction("max fee per gas is below the block base fee (EIP-1559)"),
+                        error.PriorityFeeAboveMaxFee => return self.rejectTransaction("max priority fee per gas exceeds max fee per gas (EIP-1559)"),
+                    };
+                }
+            }
+
             const blob_versioned_hashes = self.context.blob_versioned_hashes;
             const blob_count = if (self.context.is_blob_transaction) blob_versioned_hashes.len else 0;
             config.eips.validate_blob_gas(
@@ -1124,26 +1141,24 @@ pub fn Evm(config: EvmConfig) type {
             modified_params.setGas(execution_gas_limit);
 
             var arena_result = self.inner_call(modified_params);
-            // The trace is allocated with `self.allocator`, not the call arena;
-            // `toOwnedResult` deep-copies it, so the original is freed here.
-            defer if (arena_result.trace) |*trace| trace.deinit();
+            // The trace is allocated with `self.allocator`, not the call arena, so
+            // it moves into the owned result as it is. Until then it is freed here.
+            var trace = arena_result.trace;
+            arena_result.trace = null;
+            defer if (trace) |*unclaimed| unclaimed.deinit();
             if (self.host_failure) |err| {
                 // The host failed somewhere in the call tree. Whatever the frames
                 // made of it is not the transaction's outcome.
                 log.warn("Transaction aborted by a host failure: {s}", .{@errorName(err)});
                 return self.abortTransaction(tx_snapshot_depth, err);
             }
-            if (arena_result.success) {
-                self.finalizeDestructions() catch |err| {
-                    log.warn("Failed to finalize selfdestructions: {s}", .{@errorName(err)});
-                    return self.abortTransaction(tx_snapshot_depth, err);
-                };
-            }
             // Clone result to main allocator since we're at depth 0 (top-level call)
             var result = arena_result.toOwnedResult(self.allocator) catch |err| {
                 log.warn("Failed to clone call result: {s}", .{@errorName(err)});
                 return self.abortTransaction(tx_snapshot_depth, err);
             };
+            result.trace = trace;
+            trace = null;
 
             self.tracer.onCallComplete(result.success, @as(i64, @intCast(result.gas_left)), result.output.len);
 
@@ -1216,6 +1231,17 @@ pub fn Evm(config: EvmConfig) type {
                 coinbase_account.balance = rewarded_balance[0];
                 self.database.set_account(self.block_info.coinbase.bytes, coinbase_account) catch |err| {
                     log.warn("Failed to pay the coinbase reward: {s}", .{@errorName(err)});
+                    result.deinit(self.allocator);
+                    return self.abortTransaction(tx_snapshot_depth, err);
+                };
+            }
+
+            // Delete the destroyed accounts last, after the gas refund and the fee
+            // payment (execution-specs `process_transaction`): a coinbase that
+            // destroyed itself in this transaction is deleted with the fee it earned.
+            if (result.success) {
+                self.finalizeDestructions() catch |err| {
+                    log.warn("Failed to finalize selfdestructions: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
                     return self.abortTransaction(tx_snapshot_depth, err);
                 };
@@ -1985,6 +2011,13 @@ pub fn Evm(config: EvmConfig) type {
             return result;
         }
 
+        /// A failed result that hands `trace` on to the caller.
+        fn failedWithTrace(trace: ?call_result_module.ExecutionTrace) CallResult {
+            var failure = CallResult.failed(0);
+            failure.trace = trace;
+            return failure;
+        }
+
         fn executeCreateInternal(self: *Self, args: struct {
             caller: primitives.Address,
             value: u256,
@@ -2027,6 +2060,9 @@ pub fn Evm(config: EvmConfig) type {
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
                 return CallResult.failed(0);
             };
+            // The trace of the init code is allocated with `self.allocator`. Every
+            // result returned below carries it; an error frees it.
+            errdefer if (result.trace) |*trace| trace.deinit();
             if (!result.success) {
                 log.debug("Init code execution failed, success=false", .{});
                 self.journal.revert_to_snapshot(args.snapshot_id);
@@ -2037,7 +2073,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
-                return CallResult.failed(0);
+                return failedWithTrace(result.trace);
             } orelse Account.zero();
             if (!args.existed_before) {
                 try self.journal.record_account_created(args.snapshot_id, args.contract_address);
@@ -2047,14 +2083,14 @@ pub fn Evm(config: EvmConfig) type {
                 if (config.eips.eip_3541_should_reject_create_with_ef_bytecode(result.output)) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failed(0);
+                    return failedWithTrace(result.trace);
                 }
                 // EIP-170: reject deployed code exceeding the max code size (Spurious Dragon+;
                 // eip_170_max_code_size returns 0xFFFFFF on earlier forks => no limit).
                 if (result.output.len > config.eips.eip_170_max_code_size()) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failed(0);
+                    return failedWithTrace(result.trace);
                 }
                 // EIP-2: charge code-deposit gas (200 per byte of deployed code). When the
                 // remaining gas cannot cover it, Homestead+ fails the creation; Frontier
@@ -2066,21 +2102,21 @@ pub fn Evm(config: EvmConfig) type {
                         self.noteHostFailure(err);
                         self.journal.revert_to_snapshot(args.snapshot_id);
                         try self.database.revert_to_snapshot(args.db_snapshot_id);
-                        return CallResult.failed(0);
+                        return failedWithTrace(result.trace);
                     };
                     try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
                     contract_account.code_hash = stored_hash;
                 } else if (config.eips.hardfork.isAtLeast(.HOMESTEAD)) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failed(0);
+                    return failedWithTrace(result.trace);
                 }
             }
             self.database.set_account(args.contract_address.bytes, contract_account) catch |err| {
                 self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
-                return CallResult.failed(0);
+                return failedWithTrace(result.trace);
             };
 
             // The creation's snapshot stays open: `inner_call` commits it once the
@@ -2125,15 +2161,20 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             for (tracer_steps, 0..) |tracer_step, i| {
+                // A step is counted, and freed by the cleanup above, only once it is
+                // complete. Until then its parts are freed here.
+                const opcode_name = try allocator.dupe(u8, tracer_step.opcode_name);
+                errdefer allocator.free(opcode_name);
+                const stack = try allocator.dupe(u256, tracer_step.stack_before);
                 trace_steps[i] = call_result.TraceStep{
                     .pc = @intCast(tracer_step.pc),
                     .opcode = tracer_step.opcode,
-                    .opcode_name = try allocator.dupe(u8, tracer_step.opcode_name),
+                    .opcode_name = opcode_name,
                     .gas = @intCast(tracer_step.gas_before),
                     .depth = tracer_step.depth,
                     .mem_size = @intCast(tracer_step.memory_size_before),
                     .gas_cost = tracer_step.gas_cost,
-                    .stack = try allocator.dupe(u256, tracer_step.stack_before),
+                    .stack = stack,
                     .memory = &.{}, // Memory capture omitted for performance - add if debugging requires it
                     .storage_reads = &.{},
                     .storage_writes = &.{},
@@ -2204,11 +2245,32 @@ pub fn Evm(config: EvmConfig) type {
         /// deployment, a discarded simulation).
         ///
         /// Init code and code without a stored hash (an EIP-7702 designator) are never
-        /// cached. The cache holds at most `max_entries` analyses. When it is full, all
-        /// entries that no running frame uses are dropped; if every entry is in use,
-        /// the new code is analyzed in the call arena for this one frame.
+        /// cached.
+        ///
+        /// The cache holds at most `max_entries` analyses and `max_bytes` bytes of
+        /// them. A new analysis that does not fit evicts one entry at a time, never
+        /// the whole cache, so code that is called again and again stays cached
+        /// while other code passes through:
+        /// - A hit marks its entry as referenced.
+        /// - Eviction probes random slots. A referenced entry loses its mark and is
+        ///   spared by that eviction (second chance); an unreferenced entry that no
+        ///   frame runs is the victim. When the probes find none, one sweep takes
+        ///   the first evictable entry, sparing referenced entries while it can.
+        /// - An entry that a running frame uses (`pins != 0`) is never evicted. When
+        ///   every entry is in use, the new code is analyzed in the call arena for
+        ///   its one frame.
+        ///
+        /// Random victims matter for code that is called in a cycle longer than the
+        /// cache. Evicting in insertion or least-recently-used order then removes
+        /// each entry just before its next call, and every call misses. With random
+        /// victims most of the cycle stays cached. The generator has a fixed seed:
+        /// the cache changes how fast a call runs, never its result.
         pub const DispatchCache = struct {
             pub const max_entries = 256;
+            /// Most bytes of code and analysis the cache keeps.
+            pub const max_bytes = 32 * 1024 * 1024;
+            /// Random slots probed for a victim before the sweep.
+            const eviction_probes = 16;
 
             pub const Entry = struct {
                 /// Copy of the code the analysis points into.
@@ -2216,17 +2278,49 @@ pub fn Evm(config: EvmConfig) type {
                 analysis: Analysis,
                 /// Number of running frames that execute this entry.
                 pins: u32,
+                /// Hash the entry is stored under.
+                hash: [32]u8,
+                /// Bytes of code and analysis the entry holds.
+                bytes: usize,
+                /// Index in `slots`. Null for an analysis that was too large to
+                /// cache: `release` destroys it when its last frame ends.
+                slot: ?usize,
+                /// Set by a hit, cleared when eviction passes the entry over.
+                referenced: bool,
+                /// Number of the eviction that last cleared `referenced`. That
+                /// eviction does not take the entry, however often it probes it.
+                spared_by: u64,
             };
 
             entries: std.AutoHashMapUnmanaged([32]u8, *Entry),
+            /// Every cached entry, at the index its `slot` names.
+            slots: [max_entries]?*Entry,
+            /// Sum of `bytes` over the cached entries.
+            bytes: usize,
+            /// State of the xorshift64 generator that picks eviction probes.
+            random_state: u64,
             allocator: std.mem.Allocator,
             /// Calls served from the cache.
             hits: u64,
             /// Calls that had to analyze their code.
             misses: u64,
+            /// Entries removed to make room for another.
+            evictions: u64,
+            /// Calls of `evictOne`; numbers the evictions for `Entry.spared_by`.
+            eviction_attempts: u64,
 
             pub fn init(allocator: std.mem.Allocator) DispatchCache {
-                return .{ .entries = .empty, .allocator = allocator, .hits = 0, .misses = 0 };
+                return .{
+                    .entries = .empty,
+                    .slots = @splat(null),
+                    .bytes = 0,
+                    .random_state = 0x9E3779B97F4A7C15,
+                    .allocator = allocator,
+                    .hits = 0,
+                    .misses = 0,
+                    .evictions = 0,
+                    .eviction_attempts = 0,
+                };
             }
 
             pub fn deinit(self: *DispatchCache) void {
@@ -2246,15 +2340,84 @@ pub fn Evm(config: EvmConfig) type {
                 return self.entries.count();
             }
 
-            /// Drop every entry that no running frame uses.
-            pub fn evictUnpinned(self: *DispatchCache) void {
-                var it = self.entries.iterator();
-                while (it.next()) |slot| {
-                    const entry = slot.value_ptr.*;
+            /// True when an analysis is cached under `hash`.
+            pub fn contains(self: *const DispatchCache, hash: [32]u8) bool {
+                return self.entries.contains(hash);
+            }
+
+            fn nextRandom(self: *DispatchCache) u64 {
+                var state = self.random_state;
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                self.random_state = state;
+                return state;
+            }
+
+            /// Remove the cached entry in `index` from the cache and free it.
+            fn evictSlot(self: *DispatchCache, index: usize) void {
+                const entry = self.slots[index].?;
+                self.slots[index] = null;
+                self.bytes -= entry.bytes;
+                self.evictions += 1;
+                const removed = self.entries.remove(entry.hash);
+                // Every slot's entry is in the map under its own hash.
+                if (!removed) log.warn("Dispatch cache: slot {d} held an entry the map did not", .{index});
+                self.destroyEntry(entry);
+            }
+
+            /// Evict one entry that no running frame uses. Returns false when every
+            /// entry is in use.
+            fn evictOne(self: *DispatchCache) bool {
+                self.eviction_attempts += 1;
+                const attempt = self.eviction_attempts;
+                var probe: usize = 0;
+                while (probe < eviction_probes) : (probe += 1) {
+                    const index: usize = @intCast(self.nextRandom() % max_entries);
+                    const entry = self.slots[index] orelse continue;
                     if (entry.pins != 0) continue;
-                    self.entries.removeByPtr(slot.key_ptr);
-                    self.destroyEntry(entry);
+                    if (entry.referenced) {
+                        entry.referenced = false;
+                        entry.spared_by = attempt;
+                        continue;
+                    }
+                    if (entry.spared_by == attempt) continue;
+                    self.evictSlot(index);
+                    return true;
                 }
+                // The probes met only empty, pinned or spared slots. Sweep once for
+                // an entry this eviction has not spared, then for any entry that is
+                // not in use.
+                const first: usize = @intCast(self.nextRandom() % max_entries);
+                for ([_]bool{ false, true }) |take_spared| {
+                    var offset: usize = 0;
+                    while (offset < max_entries) : (offset += 1) {
+                        const index = (first + offset) % max_entries;
+                        const entry = self.slots[index] orelse continue;
+                        if (entry.pins != 0) continue;
+                        if (!take_spared and (entry.referenced or entry.spared_by == attempt)) continue;
+                        self.evictSlot(index);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            fn freeSlot(self: *const DispatchCache) ?usize {
+                for (self.slots, 0..) |slot, index| {
+                    if (slot == null) return index;
+                }
+                return null;
+            }
+
+            /// Bytes `analysis` and its copy of the code hold.
+            fn analysisBytes(code: []const u8, analysis: *const Analysis) usize {
+                return @sizeOf(Entry) + code.len +
+                    std.mem.sliceAsBytes(analysis.bytecode.packed_bitmap).len +
+                    std.mem.sliceAsBytes(analysis.schedule.items).len +
+                    std.mem.sliceAsBytes(analysis.schedule.jumpdests).len +
+                    analysis.schedule.push_values_arena.queryCapacity() +
+                    std.mem.sliceAsBytes(analysis.jump_table.entries).len;
             }
 
             /// The pinned analysis of `code`, stored under `hash`: the cached one, or a
@@ -2268,15 +2431,16 @@ pub fn Evm(config: EvmConfig) type {
                     // this code; such code is not served from, or added to, the cache.
                     if (entry.code.len != code.len) return null;
                     entry.pins += 1;
+                    entry.referenced = true;
                     self.hits += 1;
                     return entry;
                 }
                 self.misses += 1;
 
-                if (self.entries.count() >= max_entries) {
-                    self.evictUnpinned();
-                    if (self.entries.count() >= max_entries) return null;
-                }
+                // One entry makes room for one entry. Evict before analyzing, so that
+                // a cache full of entries in use costs no analysis here.
+                if (self.entries.count() >= max_entries and !self.evictOne()) return null;
+                const slot = self.freeSlot() orelse return null;
 
                 const entry = self.allocator.create(Entry) catch return error.AllocationError;
                 errdefer self.allocator.destroy(entry);
@@ -2285,14 +2449,26 @@ pub fn Evm(config: EvmConfig) type {
                 var analysis = try Analysis.init(self.allocator, owned_code, tracer);
                 errdefer analysis.deinit();
 
-                entry.* = .{ .code = owned_code, .analysis = analysis, .pins = 1 };
+                const bytes = analysisBytes(owned_code, &analysis);
+                entry.* = .{ .code = owned_code, .analysis = analysis, .pins = 1, .hash = hash, .bytes = bytes, .slot = null, .referenced = false, .spared_by = 0 };
+
+                // Keep the cache within its byte budget. An analysis that still does
+                // not fit runs its frame uncached and is freed by `release`.
+                while (self.bytes + bytes > max_bytes) {
+                    if (bytes > max_bytes or !self.evictOne()) return entry;
+                }
+
                 self.entries.put(self.allocator, hash, entry) catch return error.AllocationError;
+                entry.slot = slot;
+                self.slots[slot] = entry;
+                self.bytes += bytes;
                 return entry;
             }
 
             /// Unpin an entry returned by `acquire`.
-            fn release(_: *DispatchCache, entry: *Entry) void {
+            fn release(self: *DispatchCache, entry: *Entry) void {
                 entry.pins -= 1;
+                if (entry.pins == 0 and entry.slot == null) self.destroyEntry(entry);
             }
         };
 
@@ -2362,7 +2538,10 @@ pub fn Evm(config: EvmConfig) type {
             };
             const code_bytes: []const u8 = if (cached) |entry| entry.code else code.bytes;
 
+            // The trace is allocated with `self.allocator`. Until it is returned inside
+            // a result it belongs to this function.
             var execution_trace: ?@import("frame/call_result.zig").ExecutionTrace = null;
+            errdefer if (execution_trace) |*trace| trace.deinit();
             const Termination = error{ Stop, Return, SelfDestruct };
             var termination_reason: ?Termination = null;
 
@@ -2461,6 +2640,23 @@ pub fn Evm(config: EvmConfig) type {
             return result;
         }
 
+        /// The host failure behind a standard precompile's error, or null when the
+        /// precompile rejected its input or its gas.
+        ///
+        /// - `OutOfMemory`: the host ran out of memory.
+        /// - `TrustedSetupNotLoaded`: the host unloaded the KZG setup after
+        ///   `executePrecompileInline` checked it, while the precompile ran.
+        /// - `ExecutionError`: the BLS12-381 backend failed (a caught panic or a
+        ///   failed allocation, FFI code 4). No standard precompile reports a
+        ///   rejected input with this error.
+        pub fn precompileHostFailure(err: anyerror) ?anyerror {
+            return switch (err) {
+                error.OutOfMemory, error.TrustedSetupNotLoaded => err,
+                error.ExecutionError => error.PrecompileBackendFailure,
+                else => null,
+            };
+        }
+
         /// Execute a precompile call (inlined)
         fn executePrecompileInline(self: *Self, address: primitives.Address, input: []const u8, gas: u64, is_static: bool, snapshot_id: Journal.SnapshotIdType) !CallResult {
             _ = snapshot_id;
@@ -2477,12 +2673,11 @@ pub fn Evm(config: EvmConfig) type {
                 }
             }
 
-            const result = precompiles.execute(self.getCallArenaAllocator(), address, input, gas, config.eips.hardfork) catch |err| switch (err) {
-                // The host ran out of memory; the input was not judged.
-                error.OutOfMemory => return err,
+            const result = precompiles.execute(self.getCallArenaAllocator(), address, input, gas, config.eips.hardfork) catch |err| {
+                if (precompileHostFailure(err)) |failure| return failure;
                 // Every other error is the precompile rejecting its input or its
                 // gas: the call fails and consumes all of its gas.
-                else => return CallResult.failed(0),
+                return CallResult.failed(0);
             };
 
             // A precompile that reports using more gas than it was given has failed.

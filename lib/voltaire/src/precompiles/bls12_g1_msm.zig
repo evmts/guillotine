@@ -2,6 +2,7 @@ const std = @import("std");
 const crypto = @import("crypto");
 const utils = @import("utils.zig");
 const PrecompileError = @import("common.zig").PrecompileError;
+const backend_error = @import("bls12_backend_error.zig");
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas costs for BLS12-381 G1 MSM
@@ -27,8 +28,8 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 128);
     errdefer allocator.free(output);
-    crypto.Crypto.bls12_381.g1Msm(input, output) catch {
-        return error.InvalidPoint;
+    crypto.Crypto.bls12_381.g1Msm(input, output) catch |err| {
+        return backend_error.precompileError(err, error.InvalidPoint);
     };
 
     return PrecompileResult{
