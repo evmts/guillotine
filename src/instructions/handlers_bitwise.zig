@@ -16,19 +16,21 @@ pub fn Handlers(FrameType: type) type {
 
         /// CLZ (0x1e), EIP-7939: replace one word with its leading-zero count.
         /// Available from Osaka; zero produces 256. Dispatch charges five gas.
-        pub fn clz(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            if (FrameType.config.hardfork.isBefore(.OSAKA)) {
-                self.gas_remaining = 0;
-                return error.InvalidOpcode;
+        pub fn clz(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            if (comptime FrameType.config.hardfork.isBefore(.OSAKA)) {
+                N.flush(self, s, 0);
+                return .invalid_opcode;
             }
-            if (self.stack.size() < 1) {
-                self.gas_remaining = 0;
-                return error.StackUnderflow;
+            if (s.size(self) < 1) {
+                @branchHint(.unlikely);
+                N.flush(self, s, 0);
+                return .stack_underflow;
             }
-            self.beforeInstruction(.CLZ, cursor);
+            N.before(self, .CLZ, cursor, s, gas);
             // `verified_ops.clzFast` is the form the proofs cover (`clz_fast_equiv`): 256 for zero.
-            self.stack.set_top_unsafe(verified_ops.clzFast(self.stack.peek_unsafe()));
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .CLZ);
+            s.set_top_unsafe(verified_ops.clzFast(s.peek_unsafe()));
+            return N.next(self, .CLZ, cursor, s, gas);
         }
 
         /// AND opcode (0x16) - Bitwise AND operation.

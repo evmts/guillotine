@@ -3,11 +3,13 @@ const Address = @import("voltaire").Address;
 
 /// Convert Address to WordType (zero-extended to word size)
 pub fn toWord(comptime WordType: type, addr: Address) WordType {
-    const bytes = addr.bytes;
-    var value: u256 = 0;
-    for (bytes) |byte| {
-        value = (value << 8) | @as(u256, byte);
-    }
+    // Three big-endian limb loads (4 + 8 + 8 bytes) instead of a 20-step shift chain:
+    // LLVM lowers these to byte-swapped loads, where the u256 loop becomes byte shuffling.
+    const bytes = &addr.bytes;
+    const high: u256 = std.mem.readInt(u32, bytes[0..4], .big);
+    const middle: u256 = std.mem.readInt(u64, bytes[4..12], .big);
+    const low: u256 = std.mem.readInt(u64, bytes[12..20], .big);
+    const value = (high << 128) | (middle << 64) | low;
     return @as(WordType, @truncate(value));
 }
 

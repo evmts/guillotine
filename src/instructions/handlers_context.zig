@@ -29,6 +29,29 @@ pub fn Handlers(FrameType: type) type {
         const dispatch_next = @import("dispatch_next.zig");
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
         const address_utils = @import("address_utils.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
+
+        /// Push `value` and continue with the handler after `opcode`. The handlers that
+        /// only read frame or block context are native: they keep the stack pointer and
+        /// gas counter in registers. Stack bounds are validated per basic block, so the
+        /// check here is a development aid that exists only in traced builds.
+        inline fn pushWord(
+            self: *FrameType,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            cursor: [*]const Dispatch.Item,
+            s_in: N.StackView,
+            gas_left: FrameType.GasType,
+            value: WordType,
+            comptime message: []const u8,
+        ) handler_abi.ExitCode {
+            var s = s_in;
+            if (comptime N.traced) {
+                (&self.getEvm().tracer).assert(s.size(self) < FrameType.Stack.stack_capacity, message);
+            }
+            s.push_unsafe(value);
+            return N.next(self, opcode, cursor, s, gas_left);
+        }
 
         /// Write `length` bytes of `source`, starting at `offset`, to memory at `dest`.
         /// Bytes past the end of `source` read as zero, including every byte when
@@ -48,16 +71,22 @@ pub fn Handlers(FrameType: type) type {
             return true;
         }
 
+        /// The word CALLDATALOAD reads from the last `tail.len` (< 32) bytes of calldata,
+        /// zero-padded on the right. Kept out of line so the common full-word load needs
+        /// no stack frame.
+        noinline fn loadCalldataTail(tail: []const u8) u256 {
+            @branchHint(.cold);
+            var padded: [32]u8 = @splat(0);
+            @memcpy(padded[0..tail.len], tail);
+            return memory_mod.loadWordBigEndian(&padded);
+        }
+
         /// ADDRESS opcode (0x30) - Get address of currently executing account.
         /// Stack: [] → [address]
-        pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.ADDRESS, cursor);
-            const addr_u256 = address_utils.toWord(WordType, self.contract_address);
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ADDRESS requires stack space");
-            }
-            self.stack.push_unsafe(addr_u256);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADDRESS);
+        pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .ADDRESS, cursor, s, gas_left);
+            return pushWord(self, .ADDRESS, cursor, s, gas_left, address_utils.toWord(WordType, self.contract_address), "ADDRESS requires stack space");
         }
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
@@ -95,93 +124,62 @@ pub fn Handlers(FrameType: type) type {
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
         /// Stack: [] → [origin]
-        pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.ORIGIN, cursor);
-            const tx_origin = self.getEvm().get_tx_origin();
-            const origin_u256 = address_utils.toWord(WordType,tx_origin);
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ORIGIN requires stack space");
-            }
-            self.stack.push_unsafe(origin_u256);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .ORIGIN);
+        pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .ORIGIN, cursor, s, gas_left);
+            return pushWord(self, .ORIGIN, cursor, s, gas_left, address_utils.toWord(WordType, self.getEvm().get_tx_origin()), "ORIGIN requires stack space");
         }
 
         /// CALLER opcode (0x33) - Get caller address.
         /// Stack: [] → [caller]
-        pub fn caller(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.CALLER, cursor);
-            const caller_u256 = address_utils.toWord(WordType,self.caller);
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLER requires stack space");
-            }
-            self.stack.push_unsafe(caller_u256);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLER);
+        pub fn caller(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .CALLER, cursor, s, gas_left);
+            return pushWord(self, .CALLER, cursor, s, gas_left, address_utils.toWord(WordType, self.caller), "CALLER requires stack space");
         }
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
         /// Stack: [] → [value]
-        pub fn callvalue(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.CALLVALUE, cursor);
-            const value = self.value;
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLVALUE requires stack space");
-            }
-            self.stack.push_unsafe(value);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLVALUE);
+        pub fn callvalue(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .CALLVALUE, cursor, s, gas_left);
+            return pushWord(self, .CALLVALUE, cursor, s, gas_left, self.value, "CALLVALUE requires stack space");
         }
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
         /// Stack: [offset] → [data]
-        pub fn calldataload(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.CALLDATALOAD, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "CALLDATALOAD requires 1 stack item");
+        pub fn calldataload(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .CALLDATALOAD, cursor, s, gas_left);
+            if (comptime N.traced) {
+                (&self.getEvm().tracer).assert(s.size(self) >= 1, "CALLDATALOAD requires 1 stack item");
             }
-            const offset = self.stack.peek_unsafe();
-            // Convert u256 to usize, checking for overflow
-            if (offset > std.math.maxInt(usize)) {
-                self.stack.set_top_unsafe(0);
-                const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
-                return op_data.next_cursor.cursor;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
+            const offset = s.peek_unsafe();
             const calldata = self.calldata_slice;
-            // Load 32 bytes from calldata, zero-padding if needed
+            // Load 32 bytes big-endian. Bytes past the end of calldata read as zero, so an
+            // offset at or beyond its length (including one wider than usize) loads zero.
             var word: u256 = 0;
-            for (0..32) |i| {
-                // Saturating add: a near-usize-max offset must not overflow-panic; it lands
-                // past calldata.len and zero-pads.
-                const byte_index = offset_usize +| i;
-                if (byte_index < calldata.len) {
-                    const byte_val = calldata[byte_index];
-                    word = (word << 8) | @as(u256, byte_val);
+            if (offset < calldata.len) {
+                const start: usize = @intCast(offset);
+                const available = calldata.len - start;
+                if (available >= 32) {
+                    @branchHint(.likely);
+                    word = memory_mod.loadWordBigEndian(calldata[start..][0..32]);
                 } else {
-                    word = word << 8; // Zero padding
+                    word = loadCalldataTail(calldata[start..]);
                 }
             }
-            // Convert to WordType (truncate if necessary for smaller word types)
-            const word_typed = @as(WordType, @truncate(word));
-            log.debug("[CALLDATALOAD] offset=0x{x}, loaded=0x{x:0>64}, calldata_len={d}", .{ offset, word_typed, calldata.len });
-            self.stack.set_top_unsafe(word_typed);
-            const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+            // Truncates for word types narrower than 256 bits.
+            s.set_top_unsafe(@truncate(word));
+            return N.next(self, .CALLDATALOAD, cursor, s, gas_left);
         }
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
         /// Stack: [] → [size]
-        pub fn calldatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.CALLDATASIZE, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            const calldata = self.calldata_slice;
-            const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLDATASIZE requires stack space");
-            }
-            self.stack.push_unsafe(calldata_len);
-            const op_data = dispatch.getOpData(.CALLDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+        pub fn calldatasize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .CALLDATASIZE, cursor, s, gas_left);
+            return pushWord(self, .CALLDATASIZE, cursor, s, gas_left, @truncate(@as(u256, self.calldata_slice.len)), "CALLDATASIZE requires stack space");
         }
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
@@ -252,16 +250,10 @@ pub fn Handlers(FrameType: type) type {
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
         /// Stack: [] → [size]
-        pub fn codesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.CODESIZE, cursor);
-            // Get codesize from frame's code
-            const bytecode_len = @as(WordType, @intCast(self.code.len));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CODESIZE requires stack space");
-            }
-            self.stack.push_unsafe(bytecode_len);
-            const op_data = dispatch_opcode_data.getOpData(.CODESIZE, Dispatch, Dispatch.Item, cursor);
-            return op_data.next_cursor.cursor;
+        pub fn codesize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .CODESIZE, cursor, s, gas_left);
+            return pushWord(self, .CODESIZE, cursor, s, gas_left, @intCast(self.code.len), "CODESIZE requires stack space");
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
@@ -331,15 +323,10 @@ pub fn Handlers(FrameType: type) type {
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
         /// Stack: [] → [gas_price]
-        pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.GASPRICE, cursor);
-            const gas_price = self.getEvm().get_gas_price();
-            const gas_price_truncated = @as(WordType, @truncate(gas_price));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GASPRICE requires stack space");
-            }
-            self.stack.push_unsafe(gas_price_truncated);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .GASPRICE);
+        pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .GASPRICE, cursor, s, gas_left);
+            return pushWord(self, .GASPRICE, cursor, s, gas_left, @truncate(self.getEvm().get_gas_price()), "GASPRICE requires stack space");
         }
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
@@ -549,16 +536,12 @@ pub fn Handlers(FrameType: type) type {
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
         /// Stack: [] → [size]
-        pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.RETURNDATASIZE, cursor);
+        pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .RETURNDATASIZE, cursor, s, gas_left);
             // Return data from the last call is stored in the EVM's return_data field
             const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
-            const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(return_data.len))));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "RETURNDATASIZE requires stack space");
-            }
-            self.stack.push_unsafe(return_data_len);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .RETURNDATASIZE);
+            return pushWord(self, .RETURNDATASIZE, cursor, s, gas_left, @truncate(@as(u256, return_data.len)), "RETURNDATASIZE requires stack space");
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
@@ -682,98 +665,64 @@ pub fn Handlers(FrameType: type) type {
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
         /// Stack: [] → [coinbase]
-        pub fn coinbase(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.COINBASE, cursor);
+        pub fn coinbase(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .COINBASE, cursor, s, gas_left);
             // COINBASE's 2 gas is static and charged with the basic block.
-
-            const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
-            const coinbase_u256 = address_utils.toWord(WordType,block_info.coinbase);
-            const coinbase_word = @as(WordType, @truncate(coinbase_u256));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "COINBASE requires stack space");
-            }
-            self.stack.push_unsafe(coinbase_word);
-            const op_data = dispatch.getOpData(.COINBASE); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+            return pushWord(self, .COINBASE, cursor, s, gas_left, address_utils.toWord(WordType, block_info.coinbase), "COINBASE requires stack space");
         }
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
         /// Stack: [] → [timestamp]
-        pub fn timestamp(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.TIMESTAMP, cursor);
+        pub fn timestamp(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .TIMESTAMP, cursor, s, gas_left);
             const block_info = self.getEvm().get_block_info();
-            const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "TIMESTAMP requires stack space");
-            }
-            self.stack.push_unsafe(timestamp_word);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .TIMESTAMP);
+            return pushWord(self, .TIMESTAMP, cursor, s, gas_left, @truncate(@as(u256, block_info.timestamp)), "TIMESTAMP requires stack space");
         }
 
         /// NUMBER opcode (0x43) - Get the current block's number.
         /// Stack: [] → [number]
-        pub fn number(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.NUMBER, cursor);
+        pub fn number(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .NUMBER, cursor, s, gas_left);
             const block_info = self.getEvm().get_block_info();
-            const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "NUMBER requires stack space");
-            }
-            self.stack.push_unsafe(block_number_word);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .NUMBER);
+            return pushWord(self, .NUMBER, cursor, s, gas_left, @truncate(@as(u256, block_info.number)), "NUMBER requires stack space");
         }
 
         /// DIFFICULTY/PREVRANDAO opcode (0x44) - Get difficulty before Merge, randomness after.
         /// Stack: [] → [difficulty]
-        pub fn difficulty(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.PREVRANDAO, cursor);
+        pub fn difficulty(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .PREVRANDAO, cursor, s, gas_left);
             const block_info = self.getEvm().get_block_info();
             const value = if (comptime FrameType.config.hardfork.isAtLeast(.MERGE))
                 std.mem.readInt(u256, &block_info.prev_randao, .big)
             else
                 block_info.difficulty;
-            const difficulty_word = @as(WordType, @truncate(value));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "DIFFICULTY requires stack space");
-            }
-            self.stack.push_unsafe(difficulty_word);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PREVRANDAO);
+            return pushWord(self, .PREVRANDAO, cursor, s, gas_left, @truncate(value), "DIFFICULTY requires stack space");
         }
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
         /// Stack: [] → [prevrandao]
-        pub fn prevrandao(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            // Don't call beforeInstruction here - difficulty will call it
-            return difficulty(self, cursor);
-        }
+        pub const prevrandao = difficulty;
 
         /// GASLIMIT opcode (0x45) - Get the current block's gas limit.
         /// Stack: [] → [gas_limit]
-        pub fn gaslimit(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.GASLIMIT, cursor);
+        pub fn gaslimit(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .GASLIMIT, cursor, s, gas_left);
             const block_info = self.getEvm().get_block_info();
-            const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GASLIMIT requires stack space");
-            }
-            self.stack.push_unsafe(gas_limit_word);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .GASLIMIT);
+            return pushWord(self, .GASLIMIT, cursor, s, gas_left, @truncate(@as(u256, block_info.gas_limit)), "GASLIMIT requires stack space");
         }
 
         /// CHAINID opcode (0x46) - Get the chain ID.
         /// Stack: [] → [chain_id]
-        pub fn chainid(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.CHAINID, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            const chain_id = self.getEvm().get_chain_id();
-            const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CHAINID requires stack space");
-            }
-            self.stack.push_unsafe(chain_id_word);
-            const op_data = dispatch.getOpData(.CHAINID); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+        pub fn chainid(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .CHAINID, cursor, s, gas_left);
+            return pushWord(self, .CHAINID, cursor, s, gas_left, @truncate(@as(u256, self.getEvm().get_chain_id())), "CHAINID requires stack space");
         }
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
@@ -791,15 +740,11 @@ pub fn Handlers(FrameType: type) type {
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
         /// Stack: [] → [base_fee]
-        pub fn basefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.BASEFEE, cursor);
+        pub fn basefee(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .BASEFEE, cursor, s, gas_left);
             const block_info = self.getEvm().get_block_info();
-            const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "BASEFEE requires stack space");
-            }
-            self.stack.push_unsafe(base_fee_word);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .BASEFEE);
+            return pushWord(self, .BASEFEE, cursor, s, gas_left, @truncate(block_info.base_fee), "BASEFEE requires stack space");
         }
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
@@ -836,36 +781,24 @@ pub fn Handlers(FrameType: type) type {
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
         /// Stack: [] → [blob_base_fee]
-        pub fn blobbasefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.BLOBBASEFEE, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
+        pub fn blobbasefee(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .BLOBBASEFEE, cursor, s, gas_left);
             const block_info = self.getEvm().get_block_info();
-            const blob_base_fee = block_info.blob_base_fee;
-            const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "BLOBBASEFEE requires stack space");
-            }
-            self.stack.push_unsafe(blob_base_fee_word);
-            const op_data = dispatch.getOpData(.BLOBBASEFEE); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+            return pushWord(self, .BLOBBASEFEE, cursor, s, gas_left, @truncate(block_info.blob_base_fee), "BLOBBASEFEE requires stack space");
         }
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
         /// Stack: [] → [gas]
-        pub fn gas(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.GAS, cursor);
-            // Note: The gas value pushed should be after the gas for this instruction is consumed
-            // The dispatch system handles the gas consumption before calling this handler
-            //
-            // gas_remaining is signed (GasType = i32 or i64) for efficient out-of-gas detection
-            // The GAS opcode should never be reached if gas is negative, but if it somehow is, return 0
-            const gas_u64: u64 = if (self.gas_remaining < 0) 0 else @as(u64, @intCast(self.gas_remaining));
-            const gas_value = @as(WordType, gas_u64);
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GAS requires stack space");
-            }
-            self.stack.push_unsafe(gas_value);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .GAS);
+        pub fn gas(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .GAS, cursor, s, gas_left);
+            // Dispatch charges this instruction's gas with its basic block before the handler
+            // runs, so the live gas register (`gas_left`) is the value to push. `frame.gas_remaining` is
+            // stale here. GasType is signed for cheap out-of-gas detection: a negative counter
+            // never reaches GAS, and reads as zero if it somehow does.
+            const gas_u64: u64 = if (gas_left < 0) 0 else @intCast(gas_left);
+            return pushWord(self, .GAS, cursor, s, gas_left, @as(WordType, gas_u64), "GAS requires stack space");
         }
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.
@@ -876,15 +809,13 @@ pub fn Handlers(FrameType: type) type {
         /// reveals low-level EVM implementation details that make bytecode position-dependent,
         /// preventing code reuse and optimization. Solidity now uses relative jumps and
         /// PC-free patterns for better portability across EVM implementations.
-        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             @branchHint(.cold);
-            self.beforeInstruction(.PC, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            // Get PC value from metadata
-            const op_data = dispatch.getOpData(.PC);
-            // Stack validation happens in JUMPDEST/first_block handlers
-            self.stack.push_unsafe(op_data.metadata.value);
-            return op_data.next_cursor.cursor;
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .PC, cursor, s, gas_left);
+            // The PC value is schedule metadata. Stack bounds are validated per basic block.
+            const op_data = dispatch_opcode_data.getOpData(.PC, Dispatch, Dispatch.Item, cursor);
+            return pushWord(self, .PC, cursor, s, gas_left, op_data.metadata.value, "PC requires stack space");
         }
     };
 }

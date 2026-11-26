@@ -20,6 +20,9 @@ pub fn Handlers(FrameType: type) type {
         const push_mload_inline_general_handler = handler_abi.wrap(FrameType, push_mload_inline_general);
         const push_mstore_inline_general_handler = handler_abi.wrap(FrameType, push_mstore_inline_general);
         const push_mstore8_inline_general_handler = handler_abi.wrap(FrameType, push_mstore8_inline_general);
+        const push_mload_pointer_general_handler = handler_abi.wrap(FrameType, push_mload_pointer_general);
+        const push_mstore_pointer_general_handler = handler_abi.wrap(FrameType, push_mstore_pointer_general);
+        const push_mstore8_pointer_general_handler = handler_abi.wrap(FrameType, push_mstore8_pointer_general);
 
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (fits in 8 bytes).
         pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
@@ -55,6 +58,42 @@ pub fn Handlers(FrameType: type) type {
                 return N.next(self, .PUSH_MSTORE8_INLINE, cursor, s, gas);
             }
             return @call(handler_abi.tail_mod, push_mstore8_inline_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+        }
+
+        /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
+        pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.word_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |word| {
+                @branchHint(.likely);
+                var s = N.StackView.init(sp, t0, t1, t2, t3);
+                N.before(self, .PUSH_MLOAD_POINTER, cursor, s, gas);
+                s.push_unsafe(@truncate(memory_mod.loadWordBigEndian(word)));
+                return N.next(self, .PUSH_MLOAD_POINTER, cursor, s, gas);
+            }
+            return @call(handler_abi.tail_mod, push_mload_pointer_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+        }
+
+        /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
+        pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.word_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |word| {
+                @branchHint(.likely);
+                var s = N.StackView.init(sp, t0, t1, t2, t3);
+                N.before(self, .PUSH_MSTORE_POINTER, cursor, s, gas);
+                memory_mod.storeWordBigEndian(word, s.pop_unsafe());
+                return N.next(self, .PUSH_MSTORE_POINTER, cursor, s, gas);
+            }
+            return @call(handler_abi.tail_mod, push_mstore_pointer_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+        }
+
+        /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
+        pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.byte_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |byte| {
+                @branchHint(.likely);
+                var s = N.StackView.init(sp, t0, t1, t2, t3);
+                N.before(self, .PUSH_MSTORE8_POINTER, cursor, s, gas);
+                byte.* = @truncate(s.pop_unsafe());
+                return N.next(self, .PUSH_MSTORE8_POINTER, cursor, s, gas);
+            }
+            return @call(handler_abi.tail_mod, push_mstore8_pointer_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
         }
 
         /// Memory never grows past this many bytes: the frame's configured memory limit,
@@ -139,7 +178,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
         /// Dispatch charges static gas; the handler charges memory expansion.
-        pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+        pub fn push_mload_pointer_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.PUSH_MLOAD_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_POINTER, Dispatch, Dispatch.Item, cursor);
@@ -243,7 +282,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
         /// Dispatch charges static gas; the handler charges memory expansion.
-        pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+        pub fn push_mstore_pointer_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.PUSH_MSTORE_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_POINTER, Dispatch, Dispatch.Item, cursor);
@@ -349,7 +388,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
         /// Dispatch charges static gas; the handler charges memory expansion.
-        pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+        pub fn push_mstore8_pointer_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.PUSH_MSTORE8_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_POINTER, Dispatch, Dispatch.Item, cursor);
