@@ -146,7 +146,7 @@ jobs:
           bun install --frozen-lockfile
           bun scripts/copy-native.ts
           test -f "prebuilds/${{ matrix.platform }}/${{ matrix.shared }}"
-          GUILLOTINE_LIB_PATH="$PWD/prebuilds/linux-x64/libguillotine_ffi.so" bun test
+          GUILLOTINE_LIB_PATH="$PWD/prebuilds/${{ matrix.platform }}/${{ matrix.shared }}" bun test
       - name: Upload the ${{ matrix.platform }} shared library
         uses: actions/upload-artifact@v4
         with:
