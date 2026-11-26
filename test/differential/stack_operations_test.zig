@@ -26,7 +26,7 @@ test "differential: stack POP, DUP, SWAP basics" {
         var testor = try DifferentialTestor.init(allocator);
         defer testor.deinit();
 
-        var bc = std.ArrayList(u8){};
+        var bc = std.ArrayList(u8).empty;
         defer bc.deinit(allocator);
 
         try push1(&bc, allocator, 0x2a); // PUSH1 42
@@ -42,7 +42,7 @@ test "differential: stack POP, DUP, SWAP basics" {
         var testor = try DifferentialTestor.init(allocator);
         defer testor.deinit();
 
-        var bc = std.ArrayList(u8){};
+        var bc = std.ArrayList(u8).empty;
         defer bc.deinit(allocator);
 
         try push1(&bc, allocator, 0x01);
@@ -60,7 +60,7 @@ test "differential: stack POP, DUP, SWAP basics" {
         var testor = try DifferentialTestor.init(allocator);
         defer testor.deinit();
 
-        var bc = std.ArrayList(u8){};
+        var bc = std.ArrayList(u8).empty;
         defer bc.deinit(allocator);
 
         try push1(&bc, allocator, 0x01);
@@ -82,7 +82,7 @@ test "differential: DUP1..DUP16 sweep" {
     // For each DUPk, build a tiny bytecode and verify top value duplicated
     var k: u8 = 1;
     while (k <= 16) : (k += 1) {
-        var bc = std.ArrayList(u8){};
+        var bc = std.ArrayList(u8).empty;
         defer bc.deinit(allocator);
 
         // Push 1..k
@@ -107,7 +107,7 @@ test "differential: SWAP1..SWAP16 sweep" {
     // Stack: push 1..(n+1), then SWAPn -> top becomes value at depth n+1 (which is 1)
     var n: u8 = 1;
     while (n <= 16) : (n += 1) {
-        var bc = std.ArrayList(u8){};
+        var bc = std.ArrayList(u8).empty;
         defer bc.deinit(allocator);
 
         // Push 1..(n+1)

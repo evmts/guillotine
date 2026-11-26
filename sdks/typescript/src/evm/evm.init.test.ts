@@ -95,18 +95,18 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 
 		it("should handle maximum values in block info", async () => {
 			const maxU64 = (1n << 64n) - 1n;
-			const maxU16 = (1n << 16n) - 1n; // 65535 - maximum supported chain ID
 			const blockInfo: BlockInfo = {
 				number: maxU64,
 				timestamp: maxU64,
 				gasLimit: maxU64,
 				baseFee: maxU64,
-				chainId: maxU16, // Use valid chain ID within u16 range
+				chainId: maxU64,
 				difficulty: maxU64,
 			};
 
+			// TransactionContext.chain_id is u64, so u64::MAX is accepted as is.
 			evm = await GuillotineEvm.create(blockInfo);
-			expect(evm).toBeDefined();
+			expect(evm.isOpen).toBe(true);
 		});
 	});
 

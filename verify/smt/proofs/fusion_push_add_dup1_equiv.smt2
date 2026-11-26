@@ -8,25 +8,25 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:381 (push_add_dup1)
-;;   |         pub fn push_add_dup1(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_ADD_DUP1, cursor);
-;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_DUP1, Dispatch, Dispatch.Item, cursor);
-;;   | 
-;;   |             // Peak stack growth is +1 (PUSH -> s+1, ADD -> s, DUP1 -> s+1), requires depth >= 1.
-;;   |             (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_ADD_DUP1: Stack underflow (need 1 item for ADD)");
-;;   |             (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_ADD_DUP1: Stack overflow (need 1 free slot)");
-;;   | 
-;;   |             const push_item = op_data.items[0];
-;;   |             const push_value: WordType = push_item.push_pointer.value_ptr.*;
-;;   | 
-;;   |             const result = self.stack.peek_unsafe() +% push_value;
-;;   |             self.stack.set_top_unsafe(result);
-;;   |             self.stack.push_unsafe(result);
-;;   | 
-;;   |             self.afterInstruction(.PUSH_ADD_DUP1, op_data.next_handler, op_data.next_cursor.cursor);
-;;   |             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+;; --- src/instructions/handlers_advanced_synthetic.zig:52 (push_add_dup1)
+;;   |         inline fn push_add_dup1(s: *N.StackView, push_value: WordType) void {
+;;   |             const result = s.peek_unsafe() +% push_value;
+;;   |             s.set_top_unsafe(result);
+;;   |             s.push_unsafe(result);
+;;   |         }
+;; --- src/instructions/handlers_advanced_synthetic.zig:34 (push_add_dup1_inline)
+;;   |         pub fn push_add_dup1_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             N.before(self, .PUSH_ADD_DUP1_INLINE, cursor, sp, gas);
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             push_add_dup1(&s, cursor[1].push_inline.value);
+;;   |             return N.next(self, .PUSH_ADD_DUP1_INLINE, cursor, s.sp, gas);
+;;   |         }
+;; --- src/instructions/handlers_advanced_synthetic.zig:42 (push_add_dup1_pointer)
+;;   |         pub fn push_add_dup1_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             N.before(self, .PUSH_ADD_DUP1_POINTER, cursor, sp, gas);
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             push_add_dup1(&s, cursor[1].push_pointer.value_ptr.*);
+;;   |             return N.next(self, .PUSH_ADD_DUP1_POINTER, cursor, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

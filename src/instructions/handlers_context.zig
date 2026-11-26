@@ -1,5 +1,4 @@
 const std = @import("std");
-const limits = @import("evm_limits");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
@@ -8,6 +7,7 @@ const GasConstants = primitives.GasConstants;
 // u256 is a built-in type in Zig 0.14+
 const keccak_asm = @import("crypto").keccak_asm;
 const memory_mod = @import("../memory/memory.zig");
+const eips = @import("../eips_and_hardforks/eips.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 
@@ -30,9 +30,27 @@ pub fn Handlers(FrameType: type) type {
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
         const address_utils = @import("address_utils.zig");
 
+        /// Write `length` bytes of `source`, starting at `offset`, to memory at `dest`.
+        /// Bytes past the end of `source` read as zero, including every byte when
+        /// `offset` lies beyond it. The caller has charged gas and grown memory over
+        /// `[dest, dest + length)`. False when that range is not inside memory.
+        fn copyPadded(self: *FrameType, dest: usize, source: []const u8, offset: usize, length: usize) bool {
+            const base: usize = self.memory.checkpoint;
+            const bytes = self.memory.get_buffer_ref().items;
+            const start = std.math.add(usize, base, dest) catch return false;
+            const end = std.math.add(usize, start, length) catch return false;
+            if (end > bytes.len) return false;
+            const target = bytes[start..end];
+            const copied = if (offset < source.len) @min(source.len - offset, length) else 0;
+            // @memmove, like MCOPY: correct even if `source` were a view of this buffer.
+            if (copied != 0) @memmove(target[0..copied], source[offset..][0..copied]);
+            @memset(target[copied..], 0);
+            return true;
+        }
+
         /// ADDRESS opcode (0x30) - Get address of currently executing account.
         /// Stack: [] → [address]
-        pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.ADDRESS, cursor);
             const addr_u256 = address_utils.toWord(WordType, self.contract_address);
             {
@@ -44,7 +62,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
         /// Stack: [address] → [balance]
-        pub fn balance(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn balance(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.BALANCE, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BALANCE requires 1 stack item");
@@ -69,10 +87,7 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            const bal = evm.get_balance(addr) catch {
-                self.afterComplete(.BALANCE);
-                return Error.AllocationError;
-            };
+            const bal = evm.get_balance(addr);
             const balance_word = @as(WordType, @truncate(bal));
             self.stack.set_top_unsafe(balance_word);
             return dispatch_next.nextInstruction(FrameType, self, cursor, .BALANCE);
@@ -80,7 +95,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
         /// Stack: [] → [origin]
-        pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.ORIGIN, cursor);
             const tx_origin = self.getEvm().get_tx_origin();
             const origin_u256 = address_utils.toWord(WordType,tx_origin);
@@ -93,7 +108,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// CALLER opcode (0x33) - Get caller address.
         /// Stack: [] → [caller]
-        pub fn caller(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn caller(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CALLER, cursor);
             const caller_u256 = address_utils.toWord(WordType,self.caller);
             {
@@ -105,7 +120,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
         /// Stack: [] → [value]
-        pub fn callvalue(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn callvalue(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CALLVALUE, cursor);
             const value = self.value;
             {
@@ -117,7 +132,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
         /// Stack: [offset] → [data]
-        pub fn calldataload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn calldataload(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CALLDATALOAD, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             {
@@ -128,22 +143,22 @@ pub fn Handlers(FrameType: type) type {
             if (offset > std.math.maxInt(usize)) {
                 self.stack.set_top_unsafe(0);
                 const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
             const offset_usize = @as(usize, @intCast(offset));
 
             const calldata = self.calldata_slice;
-            // Load 32 bytes from calldata, zero-padding past the end
+            // Load 32 bytes from calldata, zero-padding if needed
             var word: u256 = 0;
-            if (offset_usize < calldata.len) {
-                const avail = calldata.len - offset_usize;
-                if (avail >= 32) {
-                    @branchHint(.likely);
-                    word = std.mem.readInt(u256, calldata[offset_usize..][0..32], .big);
+            for (0..32) |i| {
+                // Saturating add: a near-usize-max offset must not overflow-panic; it lands
+                // past calldata.len and zero-pads.
+                const byte_index = offset_usize +| i;
+                if (byte_index < calldata.len) {
+                    const byte_val = calldata[byte_index];
+                    word = (word << 8) | @as(u256, byte_val);
                 } else {
-                    var buf = [_]u8{0} ** 32;
-                    @memcpy(buf[0..avail], calldata[offset_usize..]);
-                    word = std.mem.readInt(u256, &buf, .big);
+                    word = word << 8; // Zero padding
                 }
             }
             // Convert to WordType (truncate if necessary for smaller word types)
@@ -151,12 +166,12 @@ pub fn Handlers(FrameType: type) type {
             log.debug("[CALLDATALOAD] offset=0x{x}, loaded=0x{x:0>64}, calldata_len={d}", .{ offset, word_typed, calldata.len });
             self.stack.set_top_unsafe(word_typed);
             const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
         /// Stack: [] → [size]
-        pub fn calldatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn calldatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CALLDATASIZE, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             const calldata = self.calldata_slice;
@@ -166,12 +181,12 @@ pub fn Handlers(FrameType: type) type {
             }
             self.stack.push_unsafe(calldata_len);
             const op_data = dispatch.getOpData(.CALLDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
         /// Stack: [destOffset, offset, length] → []
-        pub fn calldatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn calldatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CALLDATACOPY, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             {
@@ -186,7 +201,7 @@ pub fn Handlers(FrameType: type) type {
             // the offsets are.
             if (length == 0) {
                 const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             // Memory cannot reach beyond usize: such a copy could never pay for expansion.
@@ -205,7 +220,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > limits.max_memory_size) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             }
@@ -227,23 +242,17 @@ pub fn Handlers(FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const calldata = self.calldata_slice;
-
-            // Copy calldata to memory with proper zero-padding
-            var i: usize = 0;
-            while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize +| i;
-                const byte_val = if (src_index < calldata.len) calldata[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+            if (!copyPadded(self, dest_offset_usize, self.calldata_slice, offset_usize, length_usize)) {
+                return Error.OutOfBounds;
             }
 
             const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
         /// Stack: [] → [size]
-        pub fn codesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn codesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CODESIZE, cursor);
             // Get codesize from frame's code
             const bytecode_len = @as(WordType, @intCast(self.code.len));
@@ -252,12 +261,12 @@ pub fn Handlers(FrameType: type) type {
             }
             self.stack.push_unsafe(bytecode_len);
             const op_data = dispatch_opcode_data.getOpData(.CODESIZE, Dispatch, Dispatch.Item, cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
         /// Stack: [destOffset, offset, length] → []
-        pub fn codecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn codecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CODECOPY, cursor);
             // EVM stack order: [destOffset, offset, length] with dest on top
             {
@@ -271,7 +280,7 @@ pub fn Handlers(FrameType: type) type {
             // the offsets are.
             if (length == 0) {
                 const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             // Memory cannot reach beyond usize: such a copy could never pay for expansion.
@@ -282,7 +291,7 @@ pub fn Handlers(FrameType: type) type {
 
             const dest_offset_usize = @as(usize, @intCast(dest_offset));
             const length_usize = @as(usize, @intCast(length));
-            // Any source offset is legal; bytes past the end of code read as zero.
+            // Any source offset is legal; bytes past the end of the code read as zero.
             const offset_usize: usize = std.math.cast(usize, offset) orelse std.math.maxInt(usize);
 
             // Calculate gas cost for memory expansion and copy operation
@@ -290,7 +299,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.CODECOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > limits.max_memory_size) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.CODECOPY);
                 return Error.OutOfBounds;
             }
@@ -312,24 +321,17 @@ pub fn Handlers(FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Get bytecode from frame
-            const code_data = self.code;
-
-            // Copy code to memory with proper zero-padding
-            var i: usize = 0;
-            while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize +| i;
-                const byte_val = if (src_index < code_data.len) code_data[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+            if (!copyPadded(self, dest_offset_usize, self.code, offset_usize, length_usize)) {
+                return Error.OutOfBounds;
             }
 
             const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
         /// Stack: [] → [gas_price]
-        pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.GASPRICE, cursor);
             const gas_price = self.getEvm().get_gas_price();
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
@@ -342,7 +344,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
         /// Stack: [address] → [size]
-        pub fn extcodesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn extcodesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.EXTCODESIZE, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODESIZE requires 1 stack item");
@@ -380,7 +382,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
         /// Stack: [address, destOffset, offset, length] → []
-        pub fn extcodecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn extcodecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.EXTCODECOPY, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 4, "EXTCODECOPY requires 4 stack items");
@@ -430,7 +432,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > limits.max_memory_size) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
@@ -466,15 +468,9 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Copy external code to memory with proper zero-padding
-            var i: usize = 0;
-            while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize +| i;
-                const byte_val = if (src_index < code.len) code[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch {
-                    self.afterComplete(.EXTCODECOPY);
-                    return Error.OutOfBounds;
-                };
+            if (!copyPadded(self, dest_offset_usize, code, offset_usize, length_usize)) {
+                self.afterComplete(.EXTCODECOPY);
+                return Error.OutOfBounds;
             }
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODECOPY);
@@ -482,7 +478,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
         /// Stack: [address] → [hash]
-        pub fn extcodehash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn extcodehash(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.EXTCODEHASH, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODEHASH requires 1 stack item");
@@ -507,65 +503,53 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Read the stored code hash directly: no bytecode fetch, no rehash.
-            // Every writer of Account.code_hash stores keccak256(code) from Database.set_code.
-            const maybe_account = evm.database.get_account(addr.bytes) catch |err| switch (err) {
+            const account = self.getDatabase().get_account(addr.bytes) catch |err| switch (err) {
                 else => {
                     self.afterComplete(.EXTCODEHASH);
                     return Error.AllocationError;
                 },
             };
-            const account = maybe_account orelse {
-                // Non-existent account returns 0 per EIP-1052
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            };
+            // The account record already stores keccak256(code): `Database.set_code`
+            // derives the hash when the code is written. Reading it is O(1). Rehashing
+            // the code here would cost up to 24 KB of keccak for a 100-gas warm access.
+            const hash_u256: u256 = blk: {
+                // EIP-1052: the hash is 0 for an account that does not exist.
+                const existing = account orelse break :blk 0;
 
-            const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-            const stored_hash = std.mem.readInt(u256, &account.code_hash, .big);
-            const has_code = stored_hash != 0 and stored_hash != empty_hash_u256;
-
-            if (has_code) {
-                @branchHint(.likely);
-                self.stack.set_top_unsafe(@as(WordType, @truncate(stored_hash)));
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            }
-
-            if (account.delegated_address == null) {
-                if (account.balance == 0 and account.nonce == 0) {
-                    // EIP-161 empty account (no balance, nonce, or code) returns 0 per EIP-1052
-                    self.stack.set_top_unsafe(0);
-                    return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
+                // EIP-7702: a delegated EOA's code is the 23-byte designator
+                // `0xef0100 || delegate`. It is not stored as code, so hash it here.
+                if (existing.get_effective_code_address()) |delegate| {
+                    var designator: [eips.DELEGATION_DESIGNATOR_LENGTH]u8 = undefined;
+                    @memcpy(designator[0..3], &eips.DELEGATION_PREFIX);
+                    @memcpy(designator[3..], &delegate.bytes);
+                    var hash: [32]u8 = undefined;
+                    keccak_asm.keccak256(&designator, &hash) catch {
+                        self.afterComplete(.EXTCODEHASH);
+                        return Error.OutOfBounds;
+                    };
+                    break :blk std.mem.readInt(u256, &hash, .big);
                 }
-                // Existing non-empty account with empty code returns keccak256("")
-                self.stack.set_top_unsafe(@as(WordType, @truncate(empty_hash_u256)));
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            }
 
-            // EIP-7702 delegated EOA: resolve code through the delegation, as before.
-            const code = evm.get_code(addr) catch |err| switch (err) {
-                else => {
-                    self.afterComplete(.EXTCODEHASH);
-                    return Error.AllocationError;
-                },
+                // An unset (all-zero) code hash means the account has no code.
+                const has_code = !std.mem.eql(u8, &existing.code_hash, &@as([32]u8, @splat(0))) and
+                    !std.mem.eql(u8, &existing.code_hash, &primitives.EMPTY_CODE_HASH);
+                if (!has_code) {
+                    // Empty in the EIP-161 sense (no nonce, no balance, no code): 0.
+                    // Otherwise the account exists with empty code: keccak256("").
+                    if (existing.nonce == 0 and existing.balance == 0) break :blk 0;
+                    break :blk std.mem.readInt(u256, &primitives.EMPTY_CODE_HASH, .big);
+                }
+                break :blk std.mem.readInt(u256, &existing.code_hash, .big);
             };
-            if (code.len == 0) {
-                self.stack.set_top_unsafe(@as(WordType, @truncate(empty_hash_u256)));
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            }
-            var hash: [32]u8 = undefined;
-            keccak_asm.keccak256(code, &hash) catch {
-                self.afterComplete(.EXTCODEHASH);
-                return Error.OutOfBounds;
-            };
-            self.stack.set_top_unsafe(@as(WordType, @truncate(std.mem.readInt(u256, &hash, .big))));
+            const hash_word = @as(WordType, @truncate(hash_u256));
+            self.stack.set_top_unsafe(hash_word);
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
         /// Stack: [] → [size]
-        pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.RETURNDATASIZE, cursor);
             // Return data from the last call is stored in the EVM's return_data field
             const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
@@ -579,7 +563,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
         /// Stack: [destOffset, offset, length] → []
-        pub fn returndatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn returndatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.RETURNDATACOPY, cursor);
             // EVM stack order: [destOffset, offset, length] with dest on top
             {
@@ -593,9 +577,12 @@ pub fn Handlers(FrameType: type) type {
             const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
 
             // EIP-211: reading past the end of return data is an exceptional halt, even for
-            // a zero-length copy (offset + size > len). A sum that overflows u256 is out of bounds.
-            const read_end = @addWithOverflow(@as(u256, offset), @as(u256, length));
-            if (read_end[1] != 0 or read_end[0] > return_data.len) {
+            // a zero-length copy (offset + size > len). Reject overflowing operands too.
+            const read_end = std.math.add(u256, offset, length) catch {
+                self.afterComplete(.RETURNDATACOPY);
+                return Error.OutOfBounds;
+            };
+            if (@as(u256, offset) > return_data.len or read_end > return_data.len) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
@@ -619,7 +606,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > limits.max_memory_size) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
@@ -660,7 +647,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
         /// Stack: [block_number] → [hash]
-        pub fn blockhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn blockhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.BLOCKHASH, cursor);
             // BLOCKHASH's 20 gas is static and charged with the basic block.
 
@@ -669,16 +656,12 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BLOCKHASH requires 1 stack item");
             }
             const block_number = self.stack.peek_unsafe();
-            // A number above u64 max is never a recent block. Saturate instead of truncating
-            // so 2^64 + k cannot alias block k.
-            if (block_number > std.math.maxInt(u64)) {
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .BLOCKHASH);
-            }
-            const block_hash_opt = self.getEvm().get_block_hash(@as(u64, @intCast(block_number))) catch {
-                self.afterComplete(.BLOCKHASH);
-                return Error.AllocationError;
-            };
+            // Block numbers are u64, so a larger operand can never name a recent block.
+            // Truncating it instead would alias 2^64 + n onto block n.
+            const block_hash_opt = if (std.math.cast(u64, block_number)) |requested|
+                self.getEvm().get_block_hash(requested)
+            else
+                null;
 
             // Push hash or zero if not available
             if (block_hash_opt) |hash| {
@@ -694,12 +677,12 @@ pub fn Handlers(FrameType: type) type {
             }
 
             const op_data = dispatch.getOpData(.BLOCKHASH); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
         /// Stack: [] → [coinbase]
-        pub fn coinbase(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn coinbase(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.COINBASE, cursor);
             // COINBASE's 2 gas is static and charged with the basic block.
 
@@ -712,12 +695,12 @@ pub fn Handlers(FrameType: type) type {
             }
             self.stack.push_unsafe(coinbase_word);
             const op_data = dispatch.getOpData(.COINBASE); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
         /// Stack: [] → [timestamp]
-        pub fn timestamp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn timestamp(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.TIMESTAMP, cursor);
             const block_info = self.getEvm().get_block_info();
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
@@ -730,7 +713,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// NUMBER opcode (0x43) - Get the current block's number.
         /// Stack: [] → [number]
-        pub fn number(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn number(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.NUMBER, cursor);
             const block_info = self.getEvm().get_block_info();
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
@@ -741,12 +724,16 @@ pub fn Handlers(FrameType: type) type {
             return dispatch_next.nextInstruction(FrameType, self, cursor, .NUMBER);
         }
 
-        /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
+        /// DIFFICULTY/PREVRANDAO opcode (0x44) - Get difficulty before Merge, randomness after.
         /// Stack: [] → [difficulty]
-        pub fn difficulty(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn difficulty(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.PREVRANDAO, cursor);
             const block_info = self.getEvm().get_block_info();
-            const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
+            const value = if (comptime FrameType.config.hardfork.isAtLeast(.MERGE))
+                std.mem.readInt(u256, &block_info.prev_randao, .big)
+            else
+                block_info.difficulty;
+            const difficulty_word = @as(WordType, @truncate(value));
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "DIFFICULTY requires stack space");
             }
@@ -756,14 +743,14 @@ pub fn Handlers(FrameType: type) type {
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
         /// Stack: [] → [prevrandao]
-        pub fn prevrandao(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn prevrandao(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             // Don't call beforeInstruction here - difficulty will call it
             return difficulty(self, cursor);
         }
 
         /// GASLIMIT opcode (0x45) - Get the current block's gas limit.
         /// Stack: [] → [gas_limit]
-        pub fn gaslimit(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn gaslimit(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.GASLIMIT, cursor);
             const block_info = self.getEvm().get_block_info();
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
@@ -776,7 +763,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// CHAINID opcode (0x46) - Get the chain ID.
         /// Stack: [] → [chain_id]
-        pub fn chainid(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn chainid(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CHAINID, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             const chain_id = self.getEvm().get_chain_id();
@@ -786,17 +773,14 @@ pub fn Handlers(FrameType: type) type {
             }
             self.stack.push_unsafe(chain_id_word);
             const op_data = dispatch.getOpData(.CHAINID); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
         /// Stack: [] → [balance]
-        pub fn selfbalance(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn selfbalance(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.SELFBALANCE, cursor);
-            const bal = self.getEvm().get_balance(self.contract_address) catch {
-                self.afterComplete(.SELFBALANCE);
-                return Error.AllocationError;
-            };
+            const bal = self.getEvm().get_balance(self.contract_address);
             const balance_word = @as(WordType, @truncate(bal));
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "SELFBALANCE requires stack space");
@@ -807,7 +791,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
         /// Stack: [] → [base_fee]
-        pub fn basefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn basefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.BASEFEE, cursor);
             const block_info = self.getEvm().get_block_info();
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
@@ -820,7 +804,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
         /// Stack: [index] → [hash]
-        pub fn blobhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn blobhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.BLOBHASH, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             {
@@ -831,7 +815,7 @@ pub fn Handlers(FrameType: type) type {
             if (index > std.math.maxInt(usize)) {
                 self.stack.set_top_unsafe(0);
                 const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
             // Versioned hashes are transaction-level context, not block data.
             if (self.getEvm().get_blob_hash(index)) |hash| {
@@ -847,12 +831,12 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.set_top_unsafe(0);
             }
             const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
         /// Stack: [] → [blob_base_fee]
-        pub fn blobbasefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn blobbasefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.BLOBBASEFEE, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
@@ -863,12 +847,12 @@ pub fn Handlers(FrameType: type) type {
             }
             self.stack.push_unsafe(blob_base_fee_word);
             const op_data = dispatch.getOpData(.BLOBBASEFEE); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
         /// Stack: [] → [gas]
-        pub fn gas(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn gas(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.GAS, cursor);
             // Note: The gas value pushed should be after the gas for this instruction is consumed
             // The dispatch system handles the gas consumption before calling this handler
@@ -892,7 +876,7 @@ pub fn Handlers(FrameType: type) type {
         /// reveals low-level EVM implementation details that make bytecode position-dependent,
         /// preventing code reuse and optimization. Solidity now uses relative jumps and
         /// PC-free patterns for better portability across EVM implementations.
-        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             @branchHint(.cold);
             self.beforeInstruction(.PC, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
@@ -900,7 +884,7 @@ pub fn Handlers(FrameType: type) type {
             const op_data = dispatch.getOpData(.PC);
             // Stack validation happens in JUMPDEST/first_block handlers
             self.stack.push_unsafe(op_data.metadata.value);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
     };
 }
@@ -989,7 +973,7 @@ const MockEvm = struct {
         return self.gas_price;
     }
 
-    pub fn get_balance(self: *const MockEvm, address: Address) error{}!u256 {
+    pub fn get_balance(self: *const MockEvm, address: Address) u256 {
         _ = self;
         _ = address;
         return 1_000_000_000_000_000_000; // 1 ETH
@@ -1007,7 +991,7 @@ const MockEvm = struct {
     pub fn account_exists(self: *const MockEvm, address: Address) bool {
         _ = self;
         // Mock: all addresses exist except 0xFFFF...
-        const all_f = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable;
+        const all_f = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable;
         return !address.eql(all_f);
     }
 
@@ -1015,7 +999,7 @@ const MockEvm = struct {
         return self.return_data;
     }
 
-    pub fn get_block_hash(self: *const MockEvm, block_number: u64) error{}!?[32]u8 {
+    pub fn get_block_hash(self: *const MockEvm, block_number: u256) ?[32]u8 {
         _ = self;
         // Mock: return a hash for blocks within 256 of current
         const current_block = 12345678;
@@ -1105,7 +1089,7 @@ test "ADDRESS opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const test_address = Address.fromBytes([_]u8{0x12} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x12} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.contract_address = test_address;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1139,7 +1123,7 @@ test "ORIGIN opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const origin = Address.fromBytes([_]u8{0xAB} ++ [_]u8{0} ** 19) catch unreachable;
+    const origin = Address.fromBytes([_]u8{0xAB} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.origin_address = origin;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1156,7 +1140,7 @@ test "CALLER opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const caller = Address.fromBytes([_]u8{0xCD} ++ [_]u8{0} ** 19) catch unreachable;
+    const caller = Address.fromBytes([_]u8{0xCD} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.caller_address = caller;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1188,7 +1172,7 @@ test "CALLDATALOAD opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const calldata = [_]u8{ 0xFF, 0xEE, 0xDD, 0xCC } ++ [_]u8{0} ** 28;
+    const calldata = [_]u8{ 0xFF, 0xEE, 0xDD, 0xCC } ++ @as([28]u8, @splat(0));
     evm.input_data = &calldata;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1316,7 +1300,7 @@ test "EXTCODESIZE opcode" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x50 };
-    const test_address = Address.fromBytes([_]u8{0x99} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x99} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1337,7 +1321,7 @@ test "EXTCODECOPY opcode" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE };
-    const test_address = Address.fromBytes([_]u8{0x88} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x88} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1362,7 +1346,7 @@ test "EXTCODEHASH opcode - existing account with code" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0x60, 0x00 }; // PUSH1 0x00
-    const test_address = Address.fromBytes([_]u8{0x77} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x77} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1491,7 +1475,7 @@ test "COINBASE opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const coinbase = Address.fromBytes([_]u8{0xF0} ++ [_]u8{0} ** 19) catch unreachable;
+    const coinbase = Address.fromBytes([_]u8{0xF0} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.block_info.coinbase = coinbase;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1673,10 +1657,10 @@ test "Address conversion helpers - boundary values" {
     // Test to_u256 and from_u256 roundtrip
     const test_addresses = [_]Address{
         Address.zero(),
-        Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
-        Address.fromBytes([_]u8{ 0x12, 0x34 } ++ [_]u8{0} ** 18) catch unreachable,
-        Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{0xFF}) catch unreachable,
-        Address.fromBytes([_]u8{0x80} ++ [_]u8{0} ** 19) catch unreachable,
+        Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable,
+        Address.fromBytes([_]u8{ 0x12, 0x34 } ++ @as([18]u8, @splat(0))) catch unreachable,
+        Address.fromBytes(@as([19]u8, @splat(0)) ++ [_]u8{0xFF}) catch unreachable,
+        Address.fromBytes([_]u8{0x80} ++ @as([19]u8, @splat(0))) catch unreachable,
     };
 
     for (test_addresses) |addr| {
@@ -1692,9 +1676,9 @@ test "ADDRESS opcode - various contract addresses" {
 
     const test_cases = [_]Address{
         Address.zero(),
-        Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
+        Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable,
         Address.fromBytes([_]u8{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 }) catch unreachable,
-        Address.fromBytes([_]u8{ 0xDE, 0xAD, 0xBE, 0xEF } ++ [_]u8{0} ** 16) catch unreachable,
+        Address.fromBytes([_]u8{ 0xDE, 0xAD, 0xBE, 0xEF } ++ @as([16]u8, @splat(0))) catch unreachable,
     };
 
     const host = evm.to_host();
@@ -1912,7 +1896,7 @@ test "EXTCODECOPY opcode - boundary conditions" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0x11, 0x22, 0x33 };
-    const test_address = Address.fromBytes([_]u8{0x99} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x99} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     const host = evm.to_host();
@@ -2156,7 +2140,7 @@ test "Block info opcodes - various values" {
 
     // Set extreme values
     evm.block_info = .{
-        .coinbase = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
+        .coinbase = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable,
         .timestamp = std.math.maxInt(u64),
         .number = std.math.maxInt(u64),
         .difficulty = std.math.maxInt(u256),

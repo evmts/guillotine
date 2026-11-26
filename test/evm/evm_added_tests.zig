@@ -28,14 +28,14 @@ fn setup_evm(allocator: std.mem.Allocator) !struct {
         .gas_limit = 30_000_000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const tx_context = TransactionContext{
         .gas_limit = 1_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
     };
-    var instance = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, ZERO_ADDRESS);
+    const instance = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, ZERO_ADDRESS);
 
     return .{ .evm = instance, .db = &memory_db };
 }
@@ -50,15 +50,15 @@ test "CALL to precompile with value transfers balance" {
     var ctx = try setup_evm(allocator);
     defer teardown_evm(&ctx);
 
-    const caller: Address = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+    const caller: Address = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
     const precompile_addr = Precompiles.IDENTITY_ADDRESS; // 0x04
 
     // Fund caller account
     try ctx.db.set_account(caller, Account{
         .balance = 10_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const params = DefaultEvm.CallParams{ .call = .{
@@ -78,8 +78,8 @@ test "CALL to precompile with value transfers balance" {
     const pc_acc = (try ctx.db.get_account(precompile_addr)) orelse Account{
         .balance = 0,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try std.testing.expectEqual(@as(u256, 10_000 - 1234), caller_acc.balance);
     try std.testing.expectEqual(@as(u256, 1234), pc_acc.balance);
@@ -97,18 +97,18 @@ test "CALL to precompile failure reverts value transfer" {
     var ctx = try setup_evm(allocator);
     defer teardown_evm(&ctx);
 
-    const caller: Address = [_]u8{0xBB} ++ [_]u8{0} ** 19;
+    const caller: Address = [_]u8{0xBB} ++ @as([19]u8, @splat(0));
     const blake2f_addr = Precompiles.BLAKE2F_ADDRESS; // 0x09
 
     try ctx.db.set_account(caller, Account{
         .balance = 5_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Invalid length input for blake2f (must be 213 bytes)
-    var bad_input: [10]u8 = [_]u8{0} ** 10;
+    var bad_input: [10]u8 = @as([10]u8, @splat(0));
 
     const params = DefaultEvm.CallParams{ .call = .{
         .caller = caller,
@@ -139,14 +139,14 @@ test "CALL to empty code transfers value and succeeds" {
     var ctx = try setup_evm(allocator);
     defer teardown_evm(&ctx);
 
-    const caller: Address = [_]u8{0xCC} ++ [_]u8{0} ** 19;
-    const target: Address = [_]u8{0xDD} ++ [_]u8{0} ** 19;
+    const caller: Address = [_]u8{0xCC} ++ @as([19]u8, @splat(0));
+    const target: Address = [_]u8{0xDD} ++ @as([19]u8, @splat(0));
 
     try ctx.db.set_account(caller, Account{
         .balance = 42_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const params = DefaultEvm.CallParams{ .call = .{
@@ -170,7 +170,7 @@ test "staticcall to precompile updates return_data" {
     var ctx = try setup_evm(allocator);
     defer teardown_evm(&ctx);
 
-    const caller: Address = [_]u8{0xEE} ++ [_]u8{0} ** 19;
+    const caller: Address = [_]u8{0xEE} ++ @as([19]u8, @splat(0));
     const identity_addr = Precompiles.IDENTITY_ADDRESS; // 0x04
 
     // No need to precreate accounts for staticcall
@@ -194,10 +194,10 @@ test "transfer_value journaling reverts correctly" {
     var ctx = try setup_evm(allocator);
     defer teardown_evm(&ctx);
 
-    const a: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const b: Address = [_]u8{0x02} ++ [_]u8{0} ** 19;
-    try ctx.db.set_account(a, Account{ .balance = 1000, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 });
-    try ctx.db.set_account(b, Account{ .balance = 50, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 });
+    const a: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const b: Address = [_]u8{0x02} ++ @as([19]u8, @splat(0));
+    try ctx.db.set_account(a, Account{ .balance = 1000, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
+    try ctx.db.set_account(b, Account{ .balance = 50, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
 
     // Create a snapshot and bind it to EVM
     const snap = ctx.evm.create_snapshot();

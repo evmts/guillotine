@@ -2,6 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const memory_mod = @import("../memory/memory.zig");
 const stack_mod = @import("../stack/stack.zig");
+const opcode_data = @import("../opcodes/opcode_data.zig");
+const Opcode = opcode_data.Opcode;
+const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 pub const FrameConfig = @import("frame_config.zig").FrameConfig;
 const Database = @import("../storage/database.zig").Database;
 const Account = @import("../storage/database.zig").Account;
@@ -18,6 +21,7 @@ const SelfDestruct = @import("../storage/self_destruct.zig").SelfDestruct;
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
+const handler_abi = @import("../preprocessor/handler_abi.zig");
 
 /// The core most important datastructure of the entire EVM
 /// Holds the StackFrame state along with an `interpret` method for executing a stack frame
@@ -51,6 +55,8 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             GasOverflow,
             InvalidAmount,
             WriteProtection,
+            /// A safety counter reached its limit. Returned instead of aborting.
+            SafetyLimitExceeded,
             ReturnDataNotAvailable,
             // Success termination cases (not actually errors)
             // We treat every exit as errors in the low level interpreter while evm.zig catches them and returns them as success
@@ -63,7 +69,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
 
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         /// Takes cursor pointer with jump table available through dispatch metadata when needed
-        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item) Error!noreturn;
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Preprocessor(Self);
@@ -82,8 +88,13 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         };
         /// The type used to measure gas. Unsigned integer for perf reasons
         pub const GasType = config.GasType();
-        /// The type used to index into bytecode or instructions. Determined by config.max_bytecode_size
-        pub const PcType = config.PcType();
+        /// The type used to index into bytecode or instructions. It is the bytecode
+        /// analyzer's program counter type, sized for the larger of max_bytecode_size and
+        /// max_initcode_size, so frame and analyzer always agree and initcode PCs never truncate.
+        pub const PcType = (BytecodeConfig{
+            .max_bytecode_size = config.max_bytecode_size,
+            .max_initcode_size = config.max_initcode_size,
+        }).PcType();
 
         // Compile-time check: PcType must be at least u8 for dispatch cache optimization
         comptime {
@@ -110,6 +121,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,
             .fusions_enabled = true,
+            .hardfork = config.hardfork,
         });
 
         /// A fixed size array of opcode handlers indexed by opcode number
@@ -150,7 +162,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         calldata_slice: []const u8, // 16B - Only for CALLDATALOAD/COPY (per-call, cannot cache)
         // TODO: We should be able to remove this in favor of storing pointer as metadata
         code: []const u8 = &[_]u8{}, // 16B - Only for CODESIZE/CODECOPY
-        authorized_address: ?Address = null, // 21B - EIP-3074 (per-call auth, cannot cache)
         // TODO: We should be able to remove this in favor of storing pointer as metadata
         jump_table: *const Dispatch.JumpTable, // 8B - Jump table for JUMP/JUMPI
         dispatch: Dispatch, // 16B
@@ -180,12 +191,15 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         ///   AllocationError: Failed to allocate stack or memory
         ///   InvalidAmount: Gas value out of range
         pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, caller: Address, value: WordType, calldata_input: []const u8, evm_ptr: *anyopaque) Error!Self {
-            var stack = Stack.init(allocator, null) catch return Error.AllocationError;
-            errdefer stack.deinit(allocator);
-            var memory = Memory.init(allocator) catch return Error.AllocationError;
-            errdefer memory.deinit(allocator);
             // Resolve the database pointer immediately from the provided EVM pointer
             const evm = @as(*EvmType, @ptrCast(@alignCast(evm_ptr)));
+            var stack = Stack.init(allocator, null) catch return Error.AllocationError;
+            errdefer stack.deinit(allocator);
+            var memory = if (comptime pooled_memory)
+                Memory.init_borrowed(evm.frame_memory.acquire() catch return Error.AllocationError, 0) catch return Error.AllocationError
+            else
+                Memory.init(allocator) catch return Error.AllocationError;
+            errdefer releaseMemory(evm, &memory, allocator);
 
             return Self{
                 .stack = stack,
@@ -200,58 +214,28 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 .value = value,
                 .calldata_slice = calldata_input,
                 .code = &[_]u8{}, // Will be set during interpret
-                .authorized_address = null,
                 .instruction_counter = config.createLoopSafetyCounter().init(config.loop_quota orelse 0),
                 .output_data = &[_]u8{},
             };
         }
 
-        /// Initialize a frame over caller-owned (pooled) stack and memory buffers.
-        ///
-        /// `stack_buf` must hold at least `Stack.stack_capacity` words. `mem_buf` is emptied
-        /// (capacity retained) and grows only through `pool_allocator`, which must own it.
-        /// Release with `deinitPooled`; the pool keeps ownership of both buffers.
-        pub fn initPooled(
-            stack_buf: [*]align(64) WordType,
-            mem_buf: *std.ArrayList(u8),
-            pool_allocator: std.mem.Allocator,
-            gas_remaining: GasType,
-            caller: Address,
-            value: WordType,
-            calldata_input: []const u8,
-            evm_ptr: *anyopaque,
-        ) Error!Self {
-            const evm = @as(*EvmType, @ptrCast(@alignCast(evm_ptr)));
-            return Self{
-                .stack = Stack.initBorrowed(stack_buf, null),
-                .gas_remaining = std.math.cast(GasType, @max(gas_remaining, 0)) orelse return Error.InvalidAmount,
-                .dispatch = Dispatch{ .cursor = undefined }, // Will be set during interpret
-                .memory = Memory.init_pooled(mem_buf, pool_allocator),
-                .evm_ptr = evm_ptr,
-                .database = @as(*anyopaque, @ptrCast(evm.database)),
-                .contract_address = Address.ZERO_ADDRESS,
-                .jump_table = &Dispatch.JumpTable{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} },
-                .caller = caller,
-                .value = value,
-                .calldata_slice = calldata_input,
-                .code = &[_]u8{}, // Will be set during interpret
-                .authorized_address = null,
-                .instruction_counter = config.createLoopSafetyCounter().init(config.loop_quota orelse 0),
-                .output_data = &[_]u8{},
-            };
-        }
+        /// True when frame memory comes from the EVM's buffer pool instead of `allocator`.
+        const pooled_memory = @hasDecl(EvmType, "FrameMemory") and EvmType.FrameMemory.enabled;
 
-        /// Release a frame created by `initPooled`. Empties the pooled memory buffer
-        /// (capacity retained) and frees nothing; the pool owns the stack and memory.
-        pub fn deinitPooled(self: *Self) void {
-            self.memory.reset_for_reuse();
+        /// Give the frame's memory back: to the pool when it came from there, otherwise
+        /// (a copied frame, or a target without the pool) to `allocator`.
+        fn releaseMemory(evm: *EvmType, memory: *Memory, allocator: std.mem.Allocator) void {
+            if (comptime pooled_memory) {
+                if (evm.frame_memory.release(memory.buffer_ptr)) return;
+            }
+            memory.deinit(allocator);
         }
 
         /// Clean up all frame resources.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             (&self.getEvm().tracer).debug("Frame.deinit: Starting cleanup", .{});
             self.stack.deinit(allocator);
-            self.memory.deinit(allocator);
+            releaseMemory(self.getEvm(), &self.memory, allocator);
             (&self.getEvm().tracer).debug("Frame.deinit: Cleanup complete", .{});
         }
 
@@ -293,22 +277,28 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             self.jump_table = jump_table;
             const schedule = dispatch_schedule.items;
 
-            const start_index: usize = @intFromBool(dispatch_schedule.has_first_block_gas);
-            if (schedule.len <= start_index) return Error.InvalidOpcode;
+            var start_index: usize = 0;
 
-            if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-                if (!dispatch_schedule.validate()) {
-                    (&evm.tracer).debug("Frame.interpret: Invalid dispatch schedule structure", .{});
-                    return Error.InvalidOpcode;
-                }
+            // Every schedule ends with two STOP handlers, so running off the end of
+            // the code stops the frame. The check is constant time.
+            (&self.getEvm().tracer).assert(dispatch_schedule.endsWithStops(), "Frame.interpret: Bytecode stream does not end with 2 stop handlers");
+
+            // The full structural walk is O(schedule length) and reads item tags, so it
+            // runs only in Debug and ReleaseSafe builds, never per frame in ReleaseFast.
+            if (comptime (builtin.mode == .debug or builtin.mode == .safe)) {
+                (&self.getEvm().tracer).assert(dispatch_schedule.validate(), "Frame.interpret: Invalid dispatch schedule structure");
             }
 
-            if (dispatch_schedule.has_first_block_gas) {
+            // The schedule starts with first-block metadata unless the first block
+            // charges no gas and has no stack requirements.
+            if (dispatch_schedule.has_first_block) {
                 const meta = schedule[0].first_block_gas;
-                if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                if (meta.gas > 0) {
+                    try self.consumeGasChecked(@intCast(meta.gas));
+                }
 
                 // Validate stack requirements for the first block using verified single-compare guard
-                const verified_ops = @import("../verified_ops.zig");
+                const verified_ops = @import("../core/verified_ops.zig");
                 const current_stack_size: u32 = @intCast(self.stack.size());
                 const min_u16: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
                 const max_u16: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
@@ -323,15 +313,18 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                         return Error.StackOverflow;
                     },
                 }
+                
+                start_index = 1;
             }
 
             self.dispatch = Dispatch{
                 .cursor = schedule.ptr + start_index,
             };
 
-            try self.dispatch.cursor[0].opcode_handler(self, self.dispatch.cursor);
-
-            (&self.getEvm().tracer).assert(false, "Handlers should never return normally");
+            // The handler chain keeps the stack pointer and gas in registers and writes
+            // them back to the frame before it exits. Every exit, including STOP and
+            // RETURN, is reported to the EVM as an error value.
+            return handler_abi.errorFromExit(Error, handler_abi.enter(Self, self, self.dispatch.cursor));
         }
 
         /// Create a deep copy of the frame.
@@ -353,8 +346,8 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             errdefer new_memory.deinit(allocator);
             const mem_size = self.memory.size();
             if (mem_size > 0) {
-                const bytes = self.memory.get_slice(0, mem_size) catch unreachable;
-                try new_memory.set_data(0, bytes);
+                const bytes = self.memory.get_slice(0, @intCast(mem_size)) catch return Error.OutOfBounds;
+                new_memory.set_data(allocator, 0, bytes) catch return Error.AllocationError;
             }
 
             (&self.getEvm().tracer).debug("Frame.copy: Deep copy complete", .{});
@@ -371,7 +364,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 .value = self.value,
                 .calldata_slice = self.calldata_slice,
                 .code = self.code,
-                .authorized_address = self.authorized_address,
                 .instruction_counter = self.instruction_counter,
                 .output_data = self.output_data,
             };
@@ -384,9 +376,10 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             // Skip gas checks if disabled in config
             if (comptime config.disable_gas_checks) return;
 
+            // An amount that does not fit GasType exceeds any gas the frame can hold.
             const amt = std.math.cast(GasType, amount) orelse {
-                (&self.getEvm().tracer).panic("Frame.consumeGasChecked: Gas overflow, amount={} doesn't fit in GasType", .{amount});
-                return Error.GasOverflow;
+                (&self.getEvm().tracer).debug("Frame.consumeGasChecked: Out of gas, amount={} doesn't fit in GasType", .{amount});
+                return Error.OutOfGas;
             };
 
             // Check if we have enough gas
@@ -412,7 +405,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             return @as(*Database, @ptrCast(@alignCast(self.database)));
         }
 
-        /// Validate the current handler pointer and opcode-specific stack requirements.
+        /// Validate that the current dispatch cursor points to the expected handler and metadata.
         /// This provides extra validation that cursor logic is working as expected.
         /// Only runs in Debug and ReleaseSafe modes, no-op in ReleaseSmall/ReleaseFast.
         pub inline fn validateOpcodeHandler(
@@ -420,7 +413,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             comptime opcode: Dispatch.UnifiedOpcode,
             cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe)) return;
             const dispatch = Dispatch{ .cursor = cursor };
             dispatch.validateOpcodeHandler(opcode, self);
         }
@@ -432,7 +425,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             comptime opcode: Dispatch.UnifiedOpcode,
             cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (!config.enable_tracer and builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe and !Evm.tracing_enabled)) return;
             (&self.getEvm().tracer).before_instruction(self, opcode, cursor);
             self.validateOpcodeHandler(opcode, cursor);
         }
@@ -445,7 +438,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             next_handler: OpcodeHandler,
             next_cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (!config.enable_tracer and builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe and !Evm.tracing_enabled)) return;
             (&self.getEvm().tracer).after_instruction(self, opcode, next_handler, next_cursor);
         }
 
@@ -455,7 +448,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             self: *Self,
             comptime opcode: Dispatch.UnifiedOpcode,
         ) void {
-            if (comptime (!config.enable_tracer and builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe and !Evm.tracing_enabled)) return;
             (&self.getEvm().tracer).after_complete(self, opcode);
         }
 
@@ -475,8 +468,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 const white = "\x1b[37m";
             };
 
-            var output = std.ArrayList(u8).initCapacity(allocator, 4096) catch return Error.AllocationError;
-            const writer = output.writer(allocator);
+            var output = std.Io.Writer.Allocating.initCapacity(allocator, 4096) catch return Error.AllocationError;
+            defer output.deinit();
+            const writer = &output.writer;
 
             // Header
             try writer.print("{s}{s}╔══════════════════════════════════════════════════════════════╗{s}\n", .{ Colors.bold, Colors.cyan, Colors.reset });
@@ -576,7 +570,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
 
             try writer.print("\n{s}{s}════════════════════════════════════════════════════════════════{s}\n", .{ Colors.dim, Colors.cyan, Colors.reset });
 
-            return try output.toOwnedSlice(allocator);
+            return try output.toOwnedSlice();
         }
     };
 }

@@ -2,6 +2,24 @@ import { Bytes } from '../primitives/bytes.js';
 import { Address } from '../primitives/address.js';
 import { U256 } from '../primitives/u256.js';
 import type { Jsonified } from '../utils/json-types.js';
+import { GuillotineError } from '../errors.js';
+
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Decode strict UTF-8. Invalid sequences throw a `GuillotineError` of type `InvalidUtf8`
+ * instead of being replaced with U+FFFD. `what` names the value in the error message.
+ */
+export function decodeUtf8(bytes: Uint8Array, what: string): string {
+  try {
+    return UTF8.decode(bytes);
+  } catch (error) {
+    throw GuillotineError.invalidUtf8(
+      `${what} is not valid UTF-8`,
+      error instanceof Error ? error : new Error(String(error))
+    );
+  }
+}
 
 /**
  * Log entry from Evm execution
@@ -145,18 +163,14 @@ export class ExecutionResult {
   }
 
   /**
-   * Returns the output as a string (if it's UTF-8 encoded)
+   * Returns the output decoded as strict UTF-8, or null when there is no output.
+   * Throws a `GuillotineError` of type `InvalidUtf8` if the output is not valid UTF-8.
    */
   getOutputString(): string | null {
     if (!this.hasOutput()) {
       return null;
     }
-    
-    try {
-      return this.output.toString();
-    } catch {
-      return null;
-    }
+    return decodeUtf8(this.output.toBytes(), 'Execution output');
   }
 
   /**

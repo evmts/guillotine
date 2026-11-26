@@ -18,7 +18,7 @@ execute EVM bytecode. This page is the map.
 │  Guillotine      the performance EVM, Zig                │  engine
 │  guillotine.tevm.sh   dispatch schedule, fusion, FFI     │
 ├──────────────────────────────────────────────────────────┤
-│  guillotine-mini  the reference EVM, Zig                 │  oracle
+│  guillotine-mini  the reference EVM, Zig (separate repo) │  oracle
 │  mini.tevm.sh    readable switch loop, small WASM        │
 ├──────────────────────────────────────────────────────────┤
 │  ZEVM            Zig EVM experiments / alt engine        │
@@ -39,19 +39,18 @@ what an application developer normally reaches for: viem-compatible clients,
 Solidity imports via the bundler, forking, and test tooling. Tevm is a *consumer*
 of an EVM engine.
 
-**Guillotine** — this repository — is the performance engine. Zig, comptime
+**Guillotine**, this repository, is the performance engine. Zig, comptime
 configuration, dispatch-schedule execution, opcode fusion, and a C ABI so any
 language can drive it. You want Guillotine when you are embedding an EVM and
 throughput or binary size matters.
 
-**guillotine-mini** is the standalone readable EVM in its own repository
-([evmts/guillotine-mini](https://github.com/evmts/guillotine-mini)). Inside this
-repository, the tracer embeds its own sequential reference interpreter,
-`MinimalEvm` (`src/tracer/minimal_evm.zig`), with no schedule, no fusion, and no
-tail calls. Together they cover two jobs: `MinimalEvm` is the lockstep oracle
-that differential tests compare Guillotine against, and `guillotine-mini` ships
-as a small standalone WASM bundle. If you want to *read* an EVM, read
-`guillotine-mini`.
+**guillotine-mini** is the readable EVM. It lives in its own repository,
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini), and ships a
+standalone WASM bundle. This repository no longer carries a copy under `mini/`.
+Its in-tree counterpart is `MinimalEvm` in `src/tracer/minimal_evm.zig`: a
+plain sequential interpreter with no schedule, no fusion, and no tail calls,
+which the tracer and the differential tests in `test/differential` compare
+Guillotine against. If you want to *read* an EVM, read either one.
 
 **ZEVM** is the sibling Zig EVM effort. Where Guillotine optimises for raw
 execution throughput of a specialised, comptime-configured machine, ZEVM explores
@@ -80,19 +79,19 @@ code, that is Voltaire.
 ## Why two EVMs in one repository is the point
 
 Fast interpreters are hard to trust. Guillotine's answer is not "write careful
-code" — it is structural: keep a second, deliberately naive implementation in the
+code". It is structural: keep a second, deliberately naive implementation in the
 tree and assert after **every instruction** that the two agree on stack, memory,
 gas, and storage.
 
-That is why `MinimalEvm` is not dead weight and why `beforeInstruction()` is
+That is why `MinimalEvm` is not dead weight and why `N.before()` (which calls `beforeInstruction()`) is
 mandatory in every handler. The optimisations (fusion, block-batched gas, static jump
 resolution, tail calls) are only safe to make because a reference machine is
 watching. See [Tracing and debugging](/guides/tracing).
 
 ## Documentation for the family
 
-- Tevm — [tevm.sh](https://tevm.sh)
-- Guillotine — [guillotine.tevm.sh](https://guillotine.tevm.sh)
-- guillotine-mini — [mini.tevm.sh](https://mini.tevm.sh)
-- ZEVM — [zevm.tevm.sh](https://zevm.tevm.sh)
-- Voltaire — [voltaire.tevm.sh](https://voltaire.tevm.sh)
+- Tevm: [tevm.sh](https://tevm.sh)
+- Guillotine: [guillotine.tevm.sh](https://guillotine.tevm.sh)
+- guillotine-mini: [mini.tevm.sh](https://mini.tevm.sh)
+- ZEVM: [zevm.tevm.sh](https://zevm.tevm.sh)
+- Voltaire: [voltaire.tevm.sh](https://voltaire.tevm.sh)

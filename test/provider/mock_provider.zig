@@ -45,7 +45,7 @@ pub const MockProvider = struct {
     allocator: Allocator,
     responses: std.StringHashMap(MockResponse),
     call_counts: std.StringHashMap(u32),
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
     fail_after_calls: ?u32,
     current_call_count: u32,
 
@@ -56,7 +56,7 @@ pub const MockProvider = struct {
             .allocator = allocator,
             .responses = std.StringHashMap(MockResponse).init(allocator),
             .call_counts = std.StringHashMap(u32).init(allocator),
-            .mutex = std.Thread.Mutex{},
+            .mutex = .init,
             .fail_after_calls = null,
             .current_call_count = 0,
         };
@@ -78,8 +78,8 @@ pub const MockProvider = struct {
 
     /// Set expected response for a method
     pub fn setResponse(self: *Self, method: []const u8, response: MockResponse) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         const key = try self.allocator.dupe(u8, method);
         try self.responses.put(key, response);
@@ -87,23 +87,23 @@ pub const MockProvider = struct {
 
     /// Configure provider to fail after N calls
     pub fn setFailAfterCalls(self: *Self, n: u32) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
         self.fail_after_calls = n;
         self.current_call_count = 0;
     }
 
     /// Get call count for a method
     pub fn getCallCount(self: *Self, method: []const u8) u32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
         return self.call_counts.get(method) orelse 0;
     }
 
     /// Reset all state
     pub fn reset(self: *Self) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         var count_it = self.call_counts.valueIterator();
         while (count_it.next()) |count| {
@@ -115,8 +115,8 @@ pub const MockProvider = struct {
     /// Handle mock request
     pub fn request(self: *Self, method: []const u8, params: []const u8, id: u64) !json_rpc.JsonRpcResponse {
         _ = params;
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         self.current_call_count += 1;
 
@@ -141,9 +141,10 @@ pub const MockProvider = struct {
         const response = self.responses.get(method) orelse MockResponse.failure(-32601, "Method not found");
 
         if (response.delay_ms > 0) {
-            self.mutex.unlock();
-            std.Thread.sleep(response.delay_ms * std.time.ns_per_ms);
-            self.mutex.lock();
+            std.Io.Threaded.mutexUnlock(&self.mutex);
+            const slept = std.Io.sleep(std.testing.io, .fromNanoseconds(response.delay_ms * std.time.ns_per_ms), .awake);
+            std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+            try slept;
         }
 
         if (response.error_code) |code| {
@@ -274,10 +275,10 @@ test "mock provider delayed response" {
     const delayed = MockResponse.success("\"0x123\"").withDelay(50);
     try mock.setResponse("eth_blockNumber", delayed);
 
-    const start = std.time.milliTimestamp();
+    const start = milliTimestamp();
     const response = try mock.request("eth_blockNumber", "[]", 1);
     defer response.deinit(allocator);
-    const elapsed = std.time.milliTimestamp() - start;
+    const elapsed = milliTimestamp() - start;
 
     try std.testing.expect(elapsed >= 45);
 }
@@ -315,4 +316,8 @@ test "mock provider concurrent requests" {
     thread2.join();
 
     try std.testing.expectEqual(@as(u32, 20), mock.getCallCount("eth_blockNumber"));
+}
+
+fn milliTimestamp() i64 {
+    return @intCast(@divFloor(std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds, std.time.ns_per_ms));
 }

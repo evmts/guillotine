@@ -5,24 +5,26 @@ description: Verified toolchain prerequisites and build commands for Guillotine.
 
 # Installation
 
-Guillotine is a Zig library with vendored C and Rust dependencies. There is no
-package to `npm install` for the core engine. Build it from a checkout, or use
-one of the [language bindings](/guides/bindings).
+Guillotine is a Zig library with vendored C and Rust dependencies. Add it to a
+Zig project as a package ([Use it from a Zig project](#use-it-from-a-zig-project)),
+build it from a checkout, download the C FFI libraries from a
+[GitHub Release](https://github.com/evmts/guillotine/releases), or use one of the
+[language bindings](/guides/bindings).
 
 ## Prerequisites
 
 | Requirement | Version used to verify these docs | Why |
 | --- | --- | --- |
-| [Zig](https://ziglang.org/download/) | `0.15.2` | The whole engine. `build.zig.zon` declares `minimum_zig_version = "0.15.1"`. |
+| [Zig](https://ziglang.org/download/) | `0.17.1` | The whole engine. The stock release compiles the `preserve_none` tail-call dispatch natively; no compiler fork is required. `build.zig.zon` declares `minimum_zig_version = "0.17.1"`. |
 | [Rust / Cargo](https://rustup.rs) | stable | `lib/voltaire` builds a `crypto_wrappers` staticlib (arkworks BN254/BLS12-381 + keccak) that the Zig build links. |
 | A C/C++ toolchain | Apple Clang 17 (Xcode CLT) | `blst`, `c-kzg-4844` and `libc++` linkage. |
-| Python 3 | 3.11+ | Only for optional spec-fixture tooling. Not needed for a normal build. |
+| Python 3 | 3.11+ | Only for spec-fixture tooling and `zig build verify`. Not needed for a normal build. |
 
 Check what you have:
 
 ```bash
 zig version
-# 0.15.2
+# 0.17.1
 
 cargo --version
 # cargo 1.x.y
@@ -32,25 +34,58 @@ cc --version
 
 :::tip
 Zig releases are not backwards compatible at this stage of the language. Pin
-`0.15.x` — [zvm](https://github.com/tristanisham/zvm) or
+`0.17.1`; [zvm](https://github.com/tristanisham/zvm) and
 [asdf](https://github.com/asdf-community/asdf-zig) make that painless. `0.16`
-and `0.14` will not compile this tree.
+and older will not compile this tree.
 :::
 
 ## Platform support
 
-Verified on this machine: **macOS 26 (Darwin 25.2.0), arm64**.
 CI (`.github/workflows/ci.yml`) builds and tests on `macos-latest` (arm64) and
-`ubuntu-latest` (x86_64) with Zig 0.15.2.
+`ubuntu-latest` (x86_64) with Zig 0.17.1, and `.github/workflows/release.yml`
+ships prebuilt libraries for those two platforms. The results on
+[Project status](/status) were recorded on Linux x86_64.
 
 | Platform | Status |
 | --- | --- |
-| macOS arm64 | Verified here and in CI |
+| macOS arm64 | Built and tested in CI; release prebuild |
 | macOS x86_64 | The build graph maps it to `x86_64-apple-darwin`; not in CI |
-| Linux x86_64 | Built and tested in CI |
+| Linux x86_64 | Built and tested in CI; release prebuild (`libguillotine_ffi.so`, glibc >= 2.28) |
 | Linux arm64 | The build graph maps it to `aarch64-unknown-linux-gnu`; not in CI |
 | Windows | Best-effort, not in CI. `lib/voltaire/lib/build.zig` builds Voltaire's crate for `*-pc-windows-gnu` so Cargo emits `lib*.a`; the root `build.zig` builds the root Cargo workspace for `x86_64-pc-windows-msvc`. |
-| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. For a browser WASM EVM, use [guillotine-mini](https://github.com/evmts/guillotine-mini). |
+| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. The standalone reference EVM [`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini) has its own WASM build. |
+
+## Use it from a Zig project
+
+Fetch the tagged source archive. The `=guillotine` suffix sets the dependency
+key; without it, `zig fetch` uses the package name `Guillotine`.
+
+```bash
+zig fetch --save=guillotine https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz
+```
+
+`zig fetch --save` writes the entry, including the content hash, into your
+`build.zig.zon`:
+
+```zig
+.dependencies = .{
+    .guillotine = .{
+        .url = "https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz",
+        .hash = "...", // filled in by zig fetch --save
+    },
+},
+```
+
+Then import the `evm` module in `build.zig`:
+
+```zig
+const guillotine = b.dependency("guillotine", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("evm", guillotine.module("evm"));
+```
+
+The package also exports `voltaire` (primitives: `Address`, `U256`, RLP, ABI,
+crypto) and `layer2` (Base and OP Stack). Your machine still needs Cargo and a C
+compiler, because the dependency builds its native crypto libraries.
 
 ## Clone and build
 
@@ -60,17 +95,8 @@ cd guillotine
 zig build
 ```
 
-Real output from a successful run on macOS arm64 (Zig only prints on failure, so
-a silent exit 0 is the success case):
-
-```
-$ zig build ; echo "exit=$?"
-+ cc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -c ./src/server.c
-+ cc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -c ./build/assembly.S
-+ ar rc libblst.a assembly.o server.o
-+ ranlib libblst.a
-exit=0
-```
+A cold build prints the `blst` compile commands and Cargo progress. Exit status
+0 is success; a warm build prints nothing.
 
 The first build is slow. It compiles `blst`, `c-kzg-4844`, the arkworks Rust
 crate, and the Foundry compiler wrapper. Expect several minutes. Subsequent
@@ -84,39 +110,37 @@ zig build --release=fast
 zig build --release=small
 zig build --release=safe
 
-# Tracing hooks in the jump handlers
-zig build -Denable-tracing=true
+# Build-configured EVM options
+zig build -Devm-hardfork=Cancun -Devm-enable-fusion=false
 ```
 
-`zig build -h` also lists `-Devm-hardfork` (default `OSAKA`),
-`-Devm-enable-fusion`, `-Devm-disable-gas`, `-Devm-optimize`,
+`zig build -h` lists `-Devm-hardfork` (default `OSAKA`), `-Devm-enable-fusion`,
+`-Devm-disable-gas`, `-Ddisable-balance-checks`, `-Denable-tracing`,
 `-Dmax-call-depth`, `-Dstack-size`, `-Dmemory-limit`, and related flags.
-`build.zig` writes them into the `build_options` module, but the `src/` engine
-reads only `enable_tracing` from it (`src/instructions/handlers_jump.zig`), so
-the other flags do not change the engine. Select the hardfork, fusion, and
-limits on `EvmConfig` instead. See [Configuring the EVM](/guides/configuration).
+`build.zig` writes them into the `build_options` module, and `getBuildConfig()`
+in `src/root.zig` turns them into the `EvmConfig` of `BuildConfiguredEvm` (also
+exported as `DefaultEvm`). They do not change an `Evm(.{ ... })` you instantiate
+yourself. `-Devm-enable-fusion=false` also switches `zig build state-tests` to
+an EVM with fusion off. `-Devm-disable-gas=true` and
+`-Ddisable-balance-checks=true` are a compile error outside `-Doptimize=Debug`.
+See [Configuring the EVM](/guides/configuration).
 
 ## Running the tests
 
 ```bash
-zig build test              # specs, integration, unit, and lib tests
+zig build test              # unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz
 zig build test-unit         # src/**/*.zig
-zig build test-integration  # test/**/*.zig (includes MinimalEvm differential tests)
+zig build test-integration  # test/**/*.zig
 zig build test-lib          # lib/**/*.zig
-zig build test-opcodes      # per-opcode tests + ModExp, ECRECOVER & spec-runner unit tests (CI gate)
+zig build test-opcodes      # per-opcode tests (the CI gate)
+zig build test-jit          # src/jit/root.zig (native code runs on aarch64)
+zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8
 zig build state-tests       # official EEST state tests (fetch fixtures first)
 zig build specs             # legacy filler specs
-zig build bench             # self-contained EVM benchmark runner (ReleaseFast)
-zig build verify            # formal verification suite (LLVM 20 IR + SMT + Lean 4)
 ```
 
 `zig build state-tests` reads fixtures that `scripts/fetch-eest-fixtures.sh`
-downloads. `specs/README.md` documents both spec suites. Note that
-`zig build test-opcodes` is not a differential check — 127 of its 138
-per-opcode files assert only a successful run and the tracer's `MinimalEvm`
-validation is off by default; differential tests live in `test/differential/`
-and run under `zig build test-integration`. For benchmarks, see
-[Benchmarks and native JIT](/guides/benchmarks-and-jit).
+downloads (`tests@v21.0.3`, checked against a pinned SHA-256). `specs/README.md` documents both spec suites.
 
 Filter with `-Dtest-filter`:
 
@@ -135,19 +159,22 @@ success, not a hung run.
 These are reproduced on a clean checkout.
 
 **macOS SDK 26.4 and later.** Those SDKs list `libSystem` stubs for
-`arm64e-macos` but not `arm64-macos`, and Zig 0.15.2 ignores arm64e stubs, so
-native links fail with `undefined symbol: _abort`. CI probes the installed
-Xcode versions and sets `DEVELOPER_DIR` to the newest one whose SDK links
-(`.github/workflows/ci.yml`). Do the same locally:
+`arm64e-macos` but not `arm64-macos`. Zig ignores arm64e stubs, so native links
+can fail with `undefined symbol: _abort`. Before building, CI and the release
+workflow link a one-line Zig 0.17.1 program against each installed Xcode and set
+`DEVELOPER_DIR` to the first whose SDK links (`.github/workflows/ci.yml`,
+`.github/workflows/release.yml`). Do the same locally:
 `DEVELOPER_DIR=/Applications/Xcode_<version>.app/Contents/Developer zig build`.
 
 **Voltaire's Rust archive is built by `zig build`.** Every step that links the
-`voltaire` or `crypto` modules first runs `cargo build --release` in
-`lib/voltaire` (its own Cargo workspace, excluded from the root one) and links
-`lib/voltaire/target/release/libcrypto_wrappers.a`. Cargo gets an explicit
-`--target-dir`, so an exported `CARGO_TARGET_DIR` does not move the archive. If
-a build reports `libcrypto_wrappers.a: file not found`, check that `cargo` is on
-`PATH` and read the Cargo error above it.
+`voltaire` or `crypto` modules first runs `cargo build --release --locked` in
+`lib/voltaire` (its own Cargo workspace, excluded from the root one). Cargo gets
+`--target-dir` set to a directory in the Zig cache (`addOutputDirectoryArg` in
+`lib/voltaire/build.zig`), and the build links `libcrypto_wrappers.a` from there.
+No separate Rust step is needed, `lib/voltaire/target/` is not used, and an
+exported `CARGO_TARGET_DIR` does not move the archive. If a build reports
+`libcrypto_wrappers.a: file not found`, check that `cargo` is on `PATH` and read
+the Cargo error above it.
 
 **Cargo profile warning.** Every build prints:
 

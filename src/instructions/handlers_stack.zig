@@ -1,237 +1,81 @@
 const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
+const UnifiedOpcode = @import("../opcodes/opcode.zig").UnifiedOpcode;
 
 /// Stack manipulation opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
+///
+/// Basic-block entry validation (first block, JUMPDEST, BLOCK_BEGIN) guarantees the
+/// stack bounds for every instruction in the block, so these handlers do not check them.
 pub fn Handlers(FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
 
         /// POP opcode (0x50) - Remove item from stack.
-        pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.POP, cursor);
-            // Stack underflow validation handled by tracer.assert in stack.pop_unsafe()
-            // The tracer checks: stack_ptr < stack_base before popping
-            _ = self.stack.pop_unsafe();
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .POP);
+        pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .POP, cursor, sp, gas);
+            return N.next(self, .POP, cursor, sp + 1, gas);
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
-        pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH0, cursor);
-            // Stack overflow validation handled by tracer.assert in stack.push_unsafe()
-            // The tracer checks: stack_ptr > stack_limit before pushing
-            self.stack.push_unsafe(0);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH0);
+        pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .PUSH0, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            s.push_unsafe(0);
+            return N.next(self, .PUSH0, cursor, s.sp, gas);
         }
 
         /// Generate a push handler for PUSH1-PUSH32
         pub fn generatePushHandler(comptime push_n: u8) FrameType.OpcodeHandler {
-            std.debug.assert(push_n <= 32); // Only PUSH1 to PUSH32 is supported
-            std.debug.assert(push_n != 0); // PUSH0 is handled as its own opcode
+            if (push_n == 0 or push_n > 32) @compileError("Only PUSH1 to PUSH32 is supported");
+            const opcode: UnifiedOpcode = @enumFromInt(@intFromEnum(UnifiedOpcode.PUSH1) + @as(u16, push_n) - 1);
             return &struct {
-                pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-                    const opcode = switch (push_n) {
-                        1 => @import("../opcodes/opcode.zig").UnifiedOpcode.PUSH1,
-                        2 => .PUSH2,
-                        3 => .PUSH3,
-                        4 => .PUSH4,
-                        5 => .PUSH5,
-                        6 => .PUSH6,
-                        7 => .PUSH7,
-                        8 => .PUSH8,
-                        9 => .PUSH9,
-                        10 => .PUSH10,
-                        11 => .PUSH11,
-                        12 => .PUSH12,
-                        13 => .PUSH13,
-                        14 => .PUSH14,
-                        15 => .PUSH15,
-                        16 => .PUSH16,
-                        17 => .PUSH17,
-                        18 => .PUSH18,
-                        19 => .PUSH19,
-                        20 => .PUSH20,
-                        21 => .PUSH21,
-                        22 => .PUSH22,
-                        23 => .PUSH23,
-                        24 => .PUSH24,
-                        25 => .PUSH25,
-                        26 => .PUSH26,
-                        27 => .PUSH27,
-                        28 => .PUSH28,
-                        29 => .PUSH29,
-                        30 => .PUSH30,
-                        31 => .PUSH31,
-                        32 => .PUSH32,
-                        else => unreachable,
-                    };
-                    self.beforeInstruction(opcode, cursor);
-                    // Stack overflow validation handled by tracer.assert in stack.push_unsafe()
-                    // The tracer checks: stack_ptr > stack_limit before pushing
-                    const dispatch = Dispatch{ .cursor = cursor };
-
-                    // For PUSH1-PUSH8, we get push_inline metadata with u64 value
-                    // For PUSH9-PUSH32, we get push_pointer metadata with *u256 value
-                    const op_data = switch (push_n) {
-                        1 => dispatch.getOpData(.PUSH1),
-                        2 => dispatch.getOpData(.PUSH2),
-                        3 => dispatch.getOpData(.PUSH3),
-                        4 => dispatch.getOpData(.PUSH4),
-                        5 => dispatch.getOpData(.PUSH5),
-                        6 => dispatch.getOpData(.PUSH6),
-                        7 => dispatch.getOpData(.PUSH7),
-                        8 => dispatch.getOpData(.PUSH8),
-                        9 => dispatch.getOpData(.PUSH9),
-                        10 => dispatch.getOpData(.PUSH10),
-                        11 => dispatch.getOpData(.PUSH11),
-                        12 => dispatch.getOpData(.PUSH12),
-                        13 => dispatch.getOpData(.PUSH13),
-                        14 => dispatch.getOpData(.PUSH14),
-                        15 => dispatch.getOpData(.PUSH15),
-                        16 => dispatch.getOpData(.PUSH16),
-                        17 => dispatch.getOpData(.PUSH17),
-                        18 => dispatch.getOpData(.PUSH18),
-                        19 => dispatch.getOpData(.PUSH19),
-                        20 => dispatch.getOpData(.PUSH20),
-                        21 => dispatch.getOpData(.PUSH21),
-                        22 => dispatch.getOpData(.PUSH22),
-                        23 => dispatch.getOpData(.PUSH23),
-                        24 => dispatch.getOpData(.PUSH24),
-                        25 => dispatch.getOpData(.PUSH25),
-                        26 => dispatch.getOpData(.PUSH26),
-                        27 => dispatch.getOpData(.PUSH27),
-                        28 => dispatch.getOpData(.PUSH28),
-                        29 => dispatch.getOpData(.PUSH29),
-                        30 => dispatch.getOpData(.PUSH30),
-                        31 => dispatch.getOpData(.PUSH31),
-                        32 => dispatch.getOpData(.PUSH32),
-                        else => unreachable,
-                    };
-
-                    if (comptime push_n <= 8) {
-                        const value = op_data.metadata.value;
-                        self.stack.push_unsafe(value);
-                    } else {
-                        const value = op_data.metadata.value_ptr.*;
-                        self.stack.push_unsafe(value);
+                pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+                    N.before(self, opcode, cursor, sp, gas);
+                    var s = N.StackView{ .sp = sp };
+                    // PUSH1-PUSH8 carry one inline 64-bit limb. PUSH9-PUSH32 carry two,
+                    // three or four, least significant first, so the value is read from
+                    // the schedule itself and never through a pointer.
+                    const limbs = comptime Dispatch.pushLimbCount(push_n);
+                    var value: u256 = cursor[1].push_inline.value;
+                    inline for (1..@as(usize, limbs)) |limb| {
+                        value |= @as(u256, cursor[1 + limb].push_inline.value) << (64 * limb);
                     }
-                    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    s.push_unsafe(@as(WordType, @truncate(value)));
+                    return N.next(self, opcode, cursor, s.sp, gas);
                 }
             }.pushHandler;
         }
 
         /// Generate a dup handler for DUP1-DUP16
         pub fn generateDupHandler(comptime dup_n: u8) FrameType.OpcodeHandler {
-            std.debug.assert(dup_n > 0 and dup_n <= 16); // Only DUP1 to DUP16 is supported
+            if (dup_n == 0 or dup_n > 16) @compileError("Only DUP1 to DUP16 is supported");
+            const opcode: UnifiedOpcode = @enumFromInt(@intFromEnum(UnifiedOpcode.DUP1) + @as(u16, dup_n) - 1);
             return &struct {
-                pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-                    const opcode = switch (dup_n) {
-                        1 => @import("../opcodes/opcode.zig").UnifiedOpcode.DUP1,
-                        2 => .DUP2,
-                        3 => .DUP3,
-                        4 => .DUP4,
-                        5 => .DUP5,
-                        6 => .DUP6,
-                        7 => .DUP7,
-                        8 => .DUP8,
-                        9 => .DUP9,
-                        10 => .DUP10,
-                        11 => .DUP11,
-                        12 => .DUP12,
-                        13 => .DUP13,
-                        14 => .DUP14,
-                        15 => .DUP15,
-                        16 => .DUP16,
-                        else => unreachable,
-                    };
-                    self.beforeInstruction(opcode, cursor);
-                    // Basic-block entry validation (first_block_gas / JUMPDEST / BLOCK_BEGIN)
-                    // guarantees stack.size() >= dup_n and stack.size() < stack_capacity (proven by BLOCK-SOUND).
-                    self.stack.dup_n_unsafe(dup_n);
-                    const dispatch = Dispatch{ .cursor = cursor };
-                    // DUP operations don't have metadata, just get next
-                    const op_data = switch (dup_n) {
-                        1 => dispatch.getOpData(.DUP1),
-                        2 => dispatch.getOpData(.DUP2),
-                        3 => dispatch.getOpData(.DUP3),
-                        4 => dispatch.getOpData(.DUP4),
-                        5 => dispatch.getOpData(.DUP5),
-                        6 => dispatch.getOpData(.DUP6),
-                        7 => dispatch.getOpData(.DUP7),
-                        8 => dispatch.getOpData(.DUP8),
-                        9 => dispatch.getOpData(.DUP9),
-                        10 => dispatch.getOpData(.DUP10),
-                        11 => dispatch.getOpData(.DUP11),
-                        12 => dispatch.getOpData(.DUP12),
-                        13 => dispatch.getOpData(.DUP13),
-                        14 => dispatch.getOpData(.DUP14),
-                        15 => dispatch.getOpData(.DUP15),
-                        16 => dispatch.getOpData(.DUP16),
-                        else => unreachable,
-                    };
-                    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+                    N.before(self, opcode, cursor, sp, gas);
+                    var s = N.StackView{ .sp = sp };
+                    s.dup_n_unsafe(dup_n);
+                    return N.next(self, opcode, cursor, s.sp, gas);
                 }
             }.dupHandler;
         }
 
         /// Generate a swap handler for SWAP1-SWAP16
         pub fn generateSwapHandler(comptime swap_n: u8) FrameType.OpcodeHandler {
-            std.debug.assert(swap_n > 0 and swap_n <= 16); // Only SWAP1 to SWAP16 is supported
+            if (swap_n == 0 or swap_n > 16) @compileError("Only SWAP1 to SWAP16 is supported");
+            const opcode: UnifiedOpcode = @enumFromInt(@intFromEnum(UnifiedOpcode.SWAP1) + @as(u16, swap_n) - 1);
             return &struct {
-                pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-                    const opcode = switch (swap_n) {
-                        1 => @import("../opcodes/opcode.zig").UnifiedOpcode.SWAP1,
-                        2 => .SWAP2,
-                        3 => .SWAP3,
-                        4 => .SWAP4,
-                        5 => .SWAP5,
-                        6 => .SWAP6,
-                        7 => .SWAP7,
-                        8 => .SWAP8,
-                        9 => .SWAP9,
-                        10 => .SWAP10,
-                        11 => .SWAP11,
-                        12 => .SWAP12,
-                        13 => .SWAP13,
-                        14 => .SWAP14,
-                        15 => .SWAP15,
-                        16 => .SWAP16,
-                        else => unreachable,
-                    };
-                    self.beforeInstruction(opcode, cursor);
-                    // Basic-block entry validation (first_block_gas / JUMPDEST / BLOCK_BEGIN)
-                    // guarantees stack.size() >= swap_n + 1 (proven by BLOCK-SOUND).
-                    self.stack.swap_n_unsafe(swap_n);
-                    const dispatch = Dispatch{ .cursor = cursor };
-                    // SWAP operations don't have metadata, just get next
-                    const op_data = switch (swap_n) {
-                        1 => dispatch.getOpData(.SWAP1),
-                        2 => dispatch.getOpData(.SWAP2),
-                        3 => dispatch.getOpData(.SWAP3),
-                        4 => dispatch.getOpData(.SWAP4),
-                        5 => dispatch.getOpData(.SWAP5),
-                        6 => dispatch.getOpData(.SWAP6),
-                        7 => dispatch.getOpData(.SWAP7),
-                        8 => dispatch.getOpData(.SWAP8),
-                        9 => dispatch.getOpData(.SWAP9),
-                        10 => dispatch.getOpData(.SWAP10),
-                        11 => dispatch.getOpData(.SWAP11),
-                        12 => dispatch.getOpData(.SWAP12),
-                        13 => dispatch.getOpData(.SWAP13),
-                        14 => dispatch.getOpData(.SWAP14),
-                        15 => dispatch.getOpData(.SWAP15),
-                        16 => dispatch.getOpData(.SWAP16),
-                        else => unreachable,
-                    };
-                    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+                    N.before(self, opcode, cursor, sp, gas);
+                    var s = N.StackView{ .sp = sp };
+                    s.swap_n_unsafe(swap_n);
+                    return N.next(self, opcode, cursor, s.sp, gas);
                 }
             }.swapHandler;
         }

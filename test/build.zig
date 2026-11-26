@@ -220,7 +220,7 @@ fn createOpcodeTests(
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/evm/opcodes/all_opcodes.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         .filters = test_filters,
         .use_llvm = true,
@@ -264,13 +264,13 @@ fn createEvmTests(
     const snailtracer_step = createSnailTracerTest(b, target, optimize, modules, config_options_mod, libs);
 
     // Jump table test
-    const jump_table_step = createJumpTableTest(b, target, .Debug, modules, config_options_mod, libs);
+    const jump_table_step = createJumpTableTest(b, target, .debug, modules, config_options_mod, libs);
 
     // CODECOPY+RETURN test
     const codecopy_step = createCodecopyTest(b, target, optimize, modules, config_options_mod, libs);
 
     // Fixtures differential test
-    const fixtures_step = createFixturesDifferentialTest(b, target, .Debug, modules, config_options_mod, libs);
+    const fixtures_step = createFixturesDifferentialTest(b, target, .debug, modules, config_options_mod, libs);
 
     return .{
         .snailtracer = snailtracer_step,
@@ -295,11 +295,11 @@ fn createErc20Tests(
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/erc20_deployment_gas_issue.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             .use_llvm = true,
         });
-        configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .Debug);
+        configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .debug);
         const step = b.step("test-erc20-gas", "Test ERC20 deployment gas issue");
         step.dependOn(&b.addRunArtifact(test_exe).step);
     }
@@ -311,11 +311,11 @@ fn createErc20Tests(
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/evm/erc20_deployment_issue.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             .use_llvm = true,
         });
-        configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .Debug);
+        configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .debug);
         const step = b.step("test-erc20-deployment", "Test ERC20 deployment issue");
         step.dependOn(&b.addRunArtifact(test_exe).step);
     }
@@ -382,11 +382,11 @@ fn createSnailTracerTest(
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/evm/snailtracer_test.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         .use_llvm = true,
     });
-    configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .Debug);
+    configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .debug);
     const step = b.step("test-snailtracer", "Run snailtracer differential test");
     step.dependOn(&b.addRunArtifact(test_exe).step);
     return step;
@@ -481,11 +481,11 @@ fn createFusionTests(
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/fusions.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         .use_llvm = true,
     });
-    configureEvmTest(b, fusions_basic, modules, config_options_mod, libs, target, .Debug);
+    configureEvmTest(b, fusions_basic, modules, config_options_mod, libs, target, .debug);
 
     // Dispatch-specific fusion tests
     const fusions_dispatch = b.addTest(.{
@@ -493,11 +493,11 @@ fn createFusionTests(
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/fusions_dispatch.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         .use_llvm = true,
     });
-    configureEvmTest(b, fusions_dispatch, modules, config_options_mod, libs, target, .Debug);
+    configureEvmTest(b, fusions_dispatch, modules, config_options_mod, libs, target, .debug);
 
     // Differential harness: non-fuseable pattern sanity check
     const fusions_diff_toggle = b.addTest(.{
@@ -505,11 +505,11 @@ fn createFusionTests(
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/differential/synthetic_toggle_test.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         .use_llvm = true,
     });
-    configureEvmTest(b, fusions_diff_toggle, modules, config_options_mod, libs, target, .Debug);
+    configureEvmTest(b, fusions_diff_toggle, modules, config_options_mod, libs, target, .debug);
 
     const test_fusions_step = b.step("test-fusions", "Run focused fusion tests (unit + dispatch + differential)");
     test_fusions_step.dependOn(&b.addRunArtifact(fusions_basic).step);
@@ -534,11 +534,11 @@ fn createDebugTests(
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test_gt_exact.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             .use_llvm = true,
         });
-        configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .Debug);
+        configureEvmTest(b, test_exe, modules, config_options_mod, libs, target, .debug);
         const step = b.step("test-gt-bug", "Test GT opcode bug");
         step.dependOn(&b.addRunArtifact(test_exe).step);
     }
@@ -550,7 +550,7 @@ fn createDebugTests(
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/dev_test.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             .use_llvm = true,
         });

@@ -22,7 +22,7 @@ fn benchMemorySet(allocator: std.mem.Allocator) void {
     // Write data at various offsets
     var i: u32 = 0;
     while (i < 1000) : (i += 32) {
-        const data = [_]u8{0xAB, 0xCD} ++ [_]u8{0x00} ** 30;
+        const data = [_]u8{0xAB, 0xCD} ++ @as([30]u8, @splat(0x00));
         memory.set_data_evm(allocator, i, &data) catch break;
     }
 }
@@ -34,7 +34,7 @@ fn benchMemoryGet(allocator: std.mem.Allocator) void {
     // Pre-fill memory
     var i: u32 = 0;
     while (i < 1000) : (i += 32) {
-        const data = [_]u8{0xAB, 0xCD} ++ [_]u8{0x00} ** 30;
+        const data = [_]u8{0xAB, 0xCD} ++ @as([30]u8, @splat(0x00));
         memory.set_data_evm(allocator, i, &data) catch break;
     }
     
@@ -71,7 +71,7 @@ fn benchMemoryExpansion(allocator: std.mem.Allocator) void {
     const offsets = [_]u32{ 1024, 2048, 4096, 8192, 16384, 32768, 65536 };
     
     for (offsets) |offset| {
-        const data = [_]u8{0xFF} ** 32;
+        const data = @as([32]u8, @splat(0xFF));
         memory.set_data_evm(allocator, offset, &data) catch break;
     }
 }
@@ -81,7 +81,7 @@ fn benchMemoryCopy(allocator: std.mem.Allocator) void {
     defer memory.deinit(allocator);
     
     // Pre-fill with source data
-    const source_data = [_]u8{0xAB} ** 1024;
+    const source_data = @as([1024]u8, @splat(0xAB));
     memory.set_data_evm(allocator, 0, &source_data) catch return;
     
     // Perform copy operations
@@ -100,7 +100,7 @@ fn benchMemoryChildOperations(allocator: std.mem.Allocator) void {
     defer parent_memory.deinit(allocator);
     
     // Fill parent with some data
-    const data = [_]u8{0xDE, 0xAD, 0xBE, 0xEF} ++ [_]u8{0x00} ** 28;
+    const data = [_]u8{0xDE, 0xAD, 0xBE, 0xEF} ++ @as([28]u8, @splat(0x00));
     parent_memory.set_data_evm(allocator, 0, &data) catch return;
     
     // Create child memory and perform operations
@@ -110,7 +110,7 @@ fn benchMemoryChildOperations(allocator: std.mem.Allocator) void {
     // Perform operations on child
     var i: u32 = 0;
     while (i < 100) : (i += 32) {
-        const child_data = [_]u8{0xCA, 0xFE} ++ [_]u8{0x00} ** 30;
+        const child_data = [_]u8{0xCA, 0xFE} ++ @as([30]u8, @splat(0x00));
         child_memory.set_data_evm(allocator, 1024 + i, &child_data) catch break;
     }
 }

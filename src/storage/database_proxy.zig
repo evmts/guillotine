@@ -10,26 +10,22 @@
 //!   proxy and read back through it. `flush` applies them to the inner database
 //!   atomically and hands the applied change set to the caller. The buffer is
 //!   unbounded and never evicts. Transient storage (EIP-1153) is not persisted
-//!   state, so it forwards to the inner database. State roots, snapshots,
-//!   batches, and transactions would observe the inner database without the
-//!   buffered writes, so they are compile errors in this mode: call `flush`
-//!   first.
+//!   state, so it forwards to the inner database. State roots, snapshots observe the inner database without the
+//!   and transactions would observe the inner database without the buffered
+//!   writes, so they are compile errors in this mode: call `flush` first.
+//!   Deleting an account also deletes its storage: buffered slots of the account
+//!   are dropped, its inner slots read as zero, and `flush` deletes them.
 //!
 //! The proxy stores `*DatabaseType`, never a copy. Copying a database that owns
 //! hash maps and then writing through the copy diverges from, or frees memory
 //! still referenced by, the original.
 
 const std = @import("std");
-const primitives = @import("voltaire");
-const Address = primitives.Address.Address;
 const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
 const validate_database_implementation = @import("database.zig").validate_database_implementation;
-const CallParams = @import("../frame/call_params.zig").CallParams;
-const CallResult = @import("../frame/call_result.zig").CallResult;
-const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 
-const ZERO_CODE_HASH = [_]u8{0} ** 32;
+const ZERO_CODE_HASH = @as([32]u8, @splat(0));
 
 pub const ProxyMode = enum {
     /// Forward every operation to the inner database.
@@ -55,9 +51,12 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
         /// Writes buffered by an `.lru` proxy. `null` account values are deletions.
         /// Code values are owned by the allocator stored here.
         pub const Changes = struct {
-            storage_writes: std.AutoHashMapUnmanaged(StorageKey, u256) = .{},
-            account_updates: std.AutoHashMapUnmanaged([20]u8, ?Account) = .{},
-            code_updates: std.AutoHashMapUnmanaged([32]u8, []const u8) = .{},
+            storage_writes: std.AutoHashMapUnmanaged(StorageKey, u256) = .empty,
+            account_updates: std.AutoHashMapUnmanaged([20]u8, ?Account) = .empty,
+            code_updates: std.AutoHashMapUnmanaged([32]u8, []const u8) = .empty,
+            /// Accounts deleted since the last flush. Their inner storage is deleted
+            /// before `storage_writes` apply, also when the account was set again.
+            storage_clears: std.AutoHashMapUnmanaged([20]u8, void) = .empty,
 
             pub fn deinit(self: *Changes, allocator: std.mem.Allocator) void {
                 var code_iter = self.code_updates.valueIterator();
@@ -65,6 +64,7 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
                 self.code_updates.deinit(allocator);
                 self.account_updates.deinit(allocator);
                 self.storage_writes.deinit(allocator);
+                self.storage_clears.deinit(allocator);
             }
         };
 
@@ -119,7 +119,20 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
             switch (mode) {
                 .pass_through => return self.inner.delete_account(address),
                 .static => return Error.PermissionDenied,
-                .lru => try self.cache.changes.account_updates.put(self.cache.allocator, address, null),
+                .lru => {
+                    const changes = &self.cache.changes;
+                    const allocator = self.cache.allocator;
+                    // Reserve first, so that a failure leaves the buffer unchanged.
+                    try changes.account_updates.ensureUnusedCapacity(allocator, 1);
+                    try changes.storage_clears.ensureUnusedCapacity(allocator, 1);
+                    changes.account_updates.putAssumeCapacity(address, null);
+                    changes.storage_clears.putAssumeCapacity(address, {});
+                    var writes = changes.storage_writes.iterator();
+                    while (writes.next()) |write| {
+                        if (!std.mem.eql(u8, &write.key_ptr.address, &address)) continue;
+                        changes.storage_writes.removeByPtr(write.key_ptr);
+                    }
+                },
             }
         }
 
@@ -184,6 +197,7 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
             if (mode == .lru) {
                 const cache_key = StorageKey{ .address = address, .slot = key };
                 if (self.cache.changes.storage_writes.get(cache_key)) |value| return value;
+                if (self.cache.changes.storage_clears.contains(address)) return 0;
             }
             return self.inner.get_storage(address, key);
         }
@@ -219,19 +233,15 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
             return self.inner.get_code(code_hash);
         }
 
-        /// Mirrors `Database.get_code_by_address`, including EIP-7702 delegation.
+        /// Mirrors `Database.get_code_by_address`: an EIP-7702 delegation is followed
+        /// exactly once, so a delegation loop cannot recurse.
         pub fn get_code_by_address(self: *Self, address: [20]u8) Error![]const u8 {
             if (mode != .lru) return self.inner.get_code_by_address(address);
             const account = (try self.get_account(address)) orelse return Error.AccountNotFound;
-            if (account.get_effective_code_address()) |delegated| {
-                return self.get_code_by_address(delegated.bytes);
-            }
-            if (std.mem.eql(u8, &account.code_hash, &ZERO_CODE_HASH) or
-                std.mem.eql(u8, &account.code_hash, &primitives.EMPTY_CODE_HASH))
-            {
-                return &.{};
-            }
-            return self.get_code(account.code_hash);
+            const code_address = if (account.get_effective_code_address()) |delegate| delegate.bytes else address;
+            const code_account = (try self.get_account(code_address)) orelse return &.{};
+            if (!Account.is_code_hash_present(code_account.code_hash)) return &.{};
+            return self.get_code(code_account.code_hash);
         }
 
         pub fn set_code(self: *Self, code: []const u8) Error![32]u8 {
@@ -288,24 +298,6 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
             return self.inner.commit_snapshot(snapshot_id);
         }
 
-        // Batch operations
-
-        pub fn begin_batch(self: *Self) Error!void {
-            require_flushed("begin_batch");
-            return self.inner.begin_batch();
-        }
-
-        pub fn commit_batch(self: *Self) Error!void {
-            require_flushed("commit_batch");
-            if (mode == .static) return Error.PermissionDenied;
-            return self.inner.commit_batch();
-        }
-
-        pub fn rollback_batch(self: *Self) Error!void {
-            require_flushed("rollback_batch");
-            return self.inner.rollback_batch();
-        }
-
         // Transaction operations
 
         pub fn begin_transaction(self: *Self) Error!u32 {
@@ -350,6 +342,9 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
         }
 
         fn apply(self: *Self, changes: *const Changes) Error!void {
+            var clear_iter = changes.storage_clears.keyIterator();
+            while (clear_iter.next()) |address| try self.inner.delete_account(address.*);
+
             var code_iter = changes.code_updates.valueIterator();
             while (code_iter.next()) |code| _ = try self.inner.set_code(code.*);
 
@@ -370,184 +365,6 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
     };
 }
 
-/// Static host implementation that blocks state modifications.
-/// Implements EIP-214 constraint: STATICCALL cannot emit logs or modify state.
-pub fn StaticHost(comptime HostType: type) type {
-    return struct {
-        const Self = @This();
-
-        /// Underlying host for read operations
-        inner: HostType,
-
-        /// Initialize static host wrapper
-        pub fn init(inner: HostType) Self {
-            return Self{ .inner = inner };
-        }
-
-        // Read operations - forwarded to underlying host
-        pub fn get_balance(self: *Self, address: Address) u256 {
-            return self.inner.get_balance(address);
-        }
-
-        pub fn account_exists(self: *Self, address: Address) bool {
-            return self.inner.account_exists(address);
-        }
-
-        pub fn get_code(self: *Self, address: Address) []const u8 {
-            return self.inner.get_code(address);
-        }
-
-        pub fn get_block_info(self: *Self) @TypeOf(self.inner.get_block_info()) {
-            return self.inner.get_block_info();
-        }
-
-        pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
-            return self.inner.get_storage(address, slot);
-        }
-
-        pub fn get_is_static(self: *Self) bool {
-            _ = self;
-            return true; // Static hosts are always in static context
-        }
-
-        pub fn get_depth(self: *Self) u11 {
-            return self.inner.get_depth();
-        }
-
-        pub fn get_gas_price(self: *Self) u256 {
-            return self.inner.get_gas_price();
-        }
-
-        pub fn get_return_data(self: *Self) []const u8 {
-            return self.inner.get_return_data();
-        }
-
-        pub fn get_chain_id(self: *Self) u64 {
-            return self.inner.get_chain_id();
-        }
-
-        pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
-            return self.inner.get_block_hash(block_number);
-        }
-
-        pub fn get_blob_hash(self: *Self, index: u256) ?[32]u8 {
-            return self.inner.get_blob_hash(index);
-        }
-
-        pub fn get_blob_base_fee(self: *Self) u256 {
-            return self.inner.get_blob_base_fee();
-        }
-
-        pub fn get_tx_origin(self: *Self) Address {
-            return self.inner.get_tx_origin();
-        }
-
-        pub fn get_caller(self: *Self) Address {
-            return self.inner.get_caller();
-        }
-
-        pub fn get_call_value(self: *Self) u256 {
-            return self.inner.get_call_value();
-        }
-
-        pub fn get_input(self: *Self) []const u8 {
-            return self.inner.get_input();
-        }
-
-        pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
-            return self.inner.is_hardfork_at_least(target);
-        }
-
-        pub fn get_hardfork(self: *Self) Hardfork {
-            return self.inner.get_hardfork();
-        }
-
-        pub fn create_snapshot(self: *Self) u32 {
-            return self.inner.create_snapshot();
-        }
-
-        pub fn revert_to_snapshot(self: *Self, snapshot_id: u32) void {
-            return self.inner.revert_to_snapshot(snapshot_id);
-        }
-
-        pub fn record_storage_change(self: *Self, address: Address, slot: u256, original_value: u256) anyerror!void {
-            return self.inner.record_storage_change(address, slot, original_value);
-        }
-
-        pub fn get_original_storage(self: *Self, address: Address, slot: u256) ?u256 {
-            return self.inner.get_original_storage(address, slot);
-        }
-
-        pub fn access_address(self: *Self, address: Address) anyerror!u64 {
-            return self.inner.access_address(address);
-        }
-
-        pub fn access_storage_slot(self: *Self, contract_address: Address, slot: u256) anyerror!u64 {
-            return self.inner.access_storage_slot(contract_address, slot);
-        }
-
-        pub fn register_created_contract(self: *Self, address: Address) anyerror!void {
-            return self.inner.register_created_contract(address);
-        }
-
-        pub fn was_created_in_tx(self: *Self, address: Address) bool {
-            return self.inner.was_created_in_tx(address);
-        }
-
-        pub fn get_transient_storage(self: *Self, address: Address, slot: u256) anyerror!u256 {
-            return self.inner.get_transient_storage(address, slot);
-        }
-
-        // Write operations - all throw WriteProtection errors per EIP-214
-
-        /// EIP-214: STATICCALL cannot emit logs
-        pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
-            _ = self;
-            _ = contract_address;
-            _ = topics;
-            _ = data;
-            // Note: This should ideally return an error, but Host interface defines emit_log as void
-            // The LOG handlers check get_is_static() before calling emit_log, so this is a backup
-            @panic("WriteProtection: STATICCALL cannot emit logs (EIP-214)");
-        }
-
-        /// EIP-214: STATICCALL cannot modify storage
-        pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) anyerror!void {
-            _ = self;
-            _ = address;
-            _ = slot;
-            _ = value;
-            return error.WriteProtection;
-        }
-
-        /// EIP-214: STATICCALL cannot modify storage
-        pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) anyerror!void {
-            _ = self;
-            _ = address;
-            _ = slot;
-            _ = value;
-            return error.WriteProtection;
-        }
-
-        /// EIP-214: STATICCALL cannot mark contracts for destruction
-        pub fn mark_for_destruction(self: *Self, contract_address: Address, recipient: Address) anyerror!void {
-            _ = self;
-            _ = contract_address;
-            _ = recipient;
-            return error.WriteProtection;
-        }
-
-        /// EIP-214: STATICCALL cannot make state-modifying calls (only STATICCALL allowed)
-        pub fn inner_call(self: *Self, params: CallParams) anyerror!CallResult {
-            // Only allow STATICCALL - other call types would allow state modification
-            switch (params) {
-                .staticcall => return self.inner.inner_call(params),
-                else => return error.WriteProtection,
-            }
-        }
-    };
-}
-
 test "DatabaseProxy satisfies the database interface in every mode" {
     comptime validate_database_implementation(DatabaseProxy(.pass_through, Database));
     comptime validate_database_implementation(DatabaseProxy(.static, Database));
@@ -557,7 +374,7 @@ test "DatabaseProxy satisfies the database interface in every mode" {
 test "DatabaseProxy pass_through writes reach the caller's database" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    const address = [_]u8{0x11} ** 20;
+    const address = @as([20]u8, @splat(0x11));
 
     var proxy = DatabaseProxy(.pass_through, Database).init(&db);
     defer proxy.deinit();
@@ -586,7 +403,7 @@ test "DatabaseProxy pass_through writes reach the caller's database" {
 test "DatabaseProxy static rejects every write and reads live inner state" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    const address = [_]u8{0x22} ** 20;
+    const address = @as([20]u8, @splat(0x22));
 
     var proxy = DatabaseProxy(.static, Database).init(&db);
     defer proxy.deinit();
@@ -607,7 +424,6 @@ test "DatabaseProxy static rejects every write and reads live inner state" {
     try std.testing.expectError(denied, proxy.set_transient_storage(address, 3, 42));
     try std.testing.expectError(denied, proxy.set_code(&[_]u8{0x00}));
     try std.testing.expectError(denied, proxy.commit_changes());
-    try std.testing.expectError(denied, proxy.commit_batch());
     const snapshot = try proxy.create_snapshot();
     try std.testing.expectError(denied, proxy.commit_snapshot(snapshot));
     try proxy.revert_to_snapshot(snapshot);
@@ -619,8 +435,8 @@ test "DatabaseProxy static rejects every write and reads live inner state" {
 test "DatabaseProxy lru buffers writes until flush" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    const kept = [_]u8{0x33} ** 20;
-    const deleted = [_]u8{0x44} ** 20;
+    const kept = @as([20]u8, @splat(0x33));
+    const deleted = @as([20]u8, @splat(0x44));
     const code = [_]u8{ 0x60, 0x01, 0x00 };
 
     try db.set_balance(kept, 10);
@@ -708,7 +524,7 @@ test "DatabaseProxy lru set_code does not buffer code the inner database already
 test "DatabaseProxy lru discard drops buffered writes" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    const address = [_]u8{0x55} ** 20;
+    const address = @as([20]u8, @splat(0x55));
 
     var proxy = DatabaseProxy(.lru, Database).init(&db, std.testing.allocator);
     defer proxy.deinit();
@@ -769,7 +585,7 @@ test "DatabaseProxy lru flush reverts the inner database when a write fails" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
     var inner = FailingStorage{ .db = &db };
-    const address = [_]u8{0x66} ** 20;
+    const address = @as([20]u8, @splat(0x66));
     try db.set_balance(address, 1);
 
     var proxy = DatabaseProxy(.lru, FailingStorage).init(&inner, std.testing.allocator);
@@ -784,4 +600,37 @@ test "DatabaseProxy lru flush reverts the inner database when a write fails" {
     // The buffer survives so the caller can retry or discard.
     try std.testing.expectEqual(@as(u256, 2), try proxy.get_balance(address));
     try std.testing.expectEqual(@as(u256, 3), try proxy.get_storage(address, 1));
+}
+
+test "DatabaseProxy lru delete_account deletes the account's storage" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    const address = @as([20]u8, @splat(0x77));
+    try db.set_balance(address, 1);
+    try db.set_storage(address, 1, 11);
+    try db.set_storage(address, 2, 22);
+
+    var proxy = DatabaseProxy(.lru, Database).init(&db, std.testing.allocator);
+    defer proxy.deinit();
+
+    try proxy.set_storage(address, 2, 23);
+    try proxy.set_storage(address, 3, 33);
+    try proxy.delete_account(address);
+    // Neither buffered nor inner slots of the deleted account are readable.
+    try std.testing.expectEqual(@as(u256, 0), try proxy.get_storage(address, 1));
+    try std.testing.expectEqual(@as(u256, 0), try proxy.get_storage(address, 2));
+    try std.testing.expectEqual(@as(u256, 0), try proxy.get_storage(address, 3));
+
+    // An account set again at the address starts with empty storage.
+    try proxy.set_balance(address, 9);
+    try proxy.set_storage(address, 4, 44);
+    try std.testing.expectEqual(@as(u256, 0), try proxy.get_storage(address, 1));
+
+    var changes = try proxy.flush();
+    defer changes.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u256, 9), try db.get_balance(address));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 1));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 3));
+    try std.testing.expectEqual(@as(u256, 44), try db.get_storage(address, 4));
 }

@@ -12,11 +12,6 @@
 
 const std = @import("std");
 
-// Small-input sparse-reset table: for inputs < 512 bytes, track at most 512 written
-// hash slots and zero only those slots before returning (avoids zeroing 32 KB on every small tx).
-// Larger inputs use a stack-local [8192]u32 table for minimal L1 footprint and zero TLS overhead.
-threadlocal var tl_small_htab: [8192]u32 = [_]u32{0} ** 8192;
-
 /// Returns the length of the data after compression through FastLZ.
 ///
 /// Based on:
@@ -28,16 +23,12 @@ pub fn flzCompressLen(input: []const u8) u32 {
         return literals(@intCast(input.len), 0);
     }
 
-    if (input.len < 512) {
-        return flzCompressLenSmall(input);
-    }
-
     var idx: u32 = 2;
     const idx_limit: u32 = @as(u32, @intCast(input.len)) - 13;
 
     var anchor: u32 = 0;
     var size: u32 = 0;
-    var htab: [8192]u32 = [_]u32{0} ** 8192;
+    var htab: [8192]u32 = @as([8192]u32, @splat(0));
 
     while (idx < idx_limit) {
         var r: u32 = undefined;
@@ -80,70 +71,6 @@ pub fn flzCompressLen(input: []const u8) u32 {
     return literals(@as(u32, @intCast(input.len)) - anchor, size);
 }
 
-fn flzCompressLenSmall(input: []const u8) u32 {
-    const htab = &tl_small_htab;
-    var touched: [1024]u16 = undefined;
-    var n_touched: usize = 0;
-    defer {
-        for (touched[0..n_touched]) |slot| htab[slot] = 0;
-    }
-
-    var idx: u32 = 2;
-    const idx_limit: u32 = @as(u32, @intCast(input.len)) - 13;
-    var anchor: u32 = 0;
-    var size: u32 = 0;
-
-    while (idx < idx_limit) {
-        var r: u32 = undefined;
-        var distance: u32 = undefined;
-
-        while (true) {
-            const seq = readU24(input, idx);
-            const hash = hashFn(seq);
-            r = htab[hash];
-            if (r == 0) {
-                touched[n_touched] = hash;
-                n_touched += 1;
-            }
-            htab[hash] = idx;
-            distance = idx - r;
-            if (idx >= idx_limit) break;
-            idx += 1;
-            if (distance < 8192 and seq == readU24(input, r)) break;
-        }
-
-        if (idx >= idx_limit) break;
-
-        idx -= 1;
-        if (idx > anchor) {
-            size = literals(idx - anchor, size);
-        }
-
-        const len = cmp(input, r + 3, idx + 3, idx_limit + 9);
-        size = flzMatch(len, size);
-
-        const h1 = hashFn(readU24(input, idx + len));
-        if (htab[h1] == 0) {
-            touched[n_touched] = h1;
-            n_touched += 1;
-        }
-        htab[h1] = idx + len;
-        idx = idx + len + 1;
-
-        const h2 = hashFn(readU24(input, idx));
-        if (htab[h2] == 0) {
-            touched[n_touched] = h2;
-            n_touched += 1;
-        }
-        htab[h2] = idx;
-        idx += 1;
-
-        anchor = idx;
-    }
-
-    return literals(@as(u32, @intCast(input.len)) - anchor, size);
-}
-
 fn literals(r: u32, size: u32) u32 {
     const new_size = size + 0x21 * (r / 0x20);
     const remainder = r % 0x20;
@@ -155,30 +82,18 @@ fn literals(r: u32, size: u32) u32 {
 }
 
 /// Compare bytes at two positions and return match length.
-/// Preserves exact FastLZ return semantics (first mismatch index + 1, or r - q on full match).
 /// SAFETY: Caller must ensure p, q, and r are valid for the algorithm's invariants.
 /// The algorithm guarantees this through idx_limit = input.len - 13.
 fn cmp(input: []const u8, p: u32, q: u32, r: u32) u32 {
-    const max_len: usize = @intCast(r - q);
-    const p_base: usize = @intCast(p);
-    const q_base: usize = @intCast(q);
-    var l: usize = 0;
-
-    while (l + 8 <= max_len) : (l += 8) {
-        const a = std.mem.readInt(u64, input[p_base + l ..][0..8], .little);
-        const b = std.mem.readInt(u64, input[q_base + l ..][0..8], .little);
-        const diff = a ^ b;
-        if (diff != 0) {
-            return @intCast(l + (@ctz(diff) >> 3) + 1);
+    var l: u32 = 0;
+    var max_len = r - q;
+    while (l < max_len) {
+        if (input[@as(usize, @intCast(p + l))] != input[@as(usize, @intCast(q + l))]) {
+            max_len = 0;
         }
+        l += 1;
     }
-
-    while (l < max_len) : (l += 1) {
-        if (input[p_base + l] != input[q_base + l]) {
-            return @intCast(l + 1);
-        }
-    }
-    return @intCast(max_len);
+    return l;
 }
 
 fn flzMatch(l: u32, size: u32) u32 {
@@ -224,14 +139,14 @@ test "flz_compress_len - short hex FACADE" {
 }
 
 test "flz_compress_len - thousand zeros" {
-    const input = [_]u8{0} ** 1000;
+    const input = @as([1000]u8, @splat(0));
     const result = flzCompressLen(&input);
     // Expected: 21 (from Rust test vectors)
     try std.testing.expectEqual(@as(u32, 21), result);
 }
 
 test "flz_compress_len - thousand forty twos" {
-    const input = [_]u8{42} ** 1000;
+    const input = @as([1000]u8, @splat(42));
     const result = flzCompressLen(&input);
     // Expected: 21 (from Rust test vectors)
     try std.testing.expectEqual(@as(u32, 21), result);
@@ -269,7 +184,7 @@ test "flz_compress_len - sample contract call" {
 }
 
 test "flz_compress_len - no repeats incremental" {
-    var input = std.ArrayList(u8){};
+    var input = std.ArrayList(u8).empty;
     defer input.deinit(std.testing.allocator);
 
     var prev_len: u32 = 0;
@@ -300,15 +215,15 @@ test "flz_compress_len - various sizes" {
 
 test "flz_compress_len - boundary cases" {
     // Test around the 13-byte boundary
-    const input_12 = [_]u8{0xAB} ** 12;
+    const input_12 = @as([12]u8, @splat(0xAB));
     const result_12 = flzCompressLen(&input_12);
     try std.testing.expectEqual(@as(u32, 13), result_12); // literals(12, 0) = 13
 
-    const input_13 = [_]u8{0xAB} ** 13;
+    const input_13 = @as([13]u8, @splat(0xAB));
     const result_13 = flzCompressLen(&input_13);
     try std.testing.expect(result_13 > 0);
 
-    const input_14 = [_]u8{0xAB} ** 14;
+    const input_14 = @as([14]u8, @splat(0xAB));
     const result_14 = flzCompressLen(&input_14);
     try std.testing.expect(result_14 > 0);
 }

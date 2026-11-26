@@ -6,24 +6,44 @@ const report = @import("report.zig");
 const paths = @import("bench_options");
 
 // The build helper rejects budgets above the Osaka+ transaction cap.
-pub const gas_limit: u64 = paths.gas_limit;
+pub const suite_gas_limit: u64 = paths.gas_limit;
+
+/// Fork name and gas budget of `profile`.
+pub fn hardforkName(comptime profile: workloads.Profile) []const u8 {
+    return switch (profile) {
+        .suite => paths.hardfork,
+        .uncapped => "PRAGUE",
+    };
+}
+
+pub fn gasLimit(comptime profile: workloads.Profile) u64 {
+    return switch (profile) {
+        .suite => suite_gas_limit,
+        .uncapped => workloads.uncapped_gas_limit,
+    };
+}
 pub const instruction_limit: u32 = 300_000_000;
 
 /// Each instantiation uses the real public Guillotine API. Loop dispatch needs
 /// a separately configured module because its selector is a build-time option.
-pub fn Runner(comptime evm: type, comptime fusion: bool) type {
+pub fn Runner(comptime evm: type, comptime fusion: bool, comptime profile: workloads.Profile) type {
     return struct {
         const Self = @This();
-        const hardfork = std.meta.stringToEnum(evm.Hardfork, paths.hardfork) orelse @compileError("unknown benchmark hardfork");
-        const precompile_hardfork = std.meta.stringToEnum(evm.Primitives.Hardfork, paths.hardfork) orelse @compileError("hardfork is absent from Voltaire");
+        const gas_limit = gasLimit(profile);
+        const hardfork = std.meta.stringToEnum(evm.Hardfork, hardforkName(profile)) orelse @compileError("unknown benchmark hardfork");
+        const precompile_hardfork = std.meta.stringToEnum(evm.Primitives.Hardfork, hardforkName(profile)) orelse @compileError("hardfork is absent from Voltaire");
         const Evm = evm.Evm(.{
             .eips = .{ .hardfork = hardfork },
+            // Frame gas must hold the whole budget (see EvmConfig.block_gas_limit).
+            .block_gas_limit = gas_limit,
             .enable_fusion = fusion,
             .loop_quota = instruction_limit,
             .tracer_config = .disabled,
         });
         const SetupEvm = evm.Evm(.{
             .eips = .{ .hardfork = hardfork },
+            // Frame gas must hold the whole budget (see EvmConfig.block_gas_limit).
+            .block_gas_limit = gas_limit,
             .enable_fusion = false,
             .loop_quota = instruction_limit,
             .tracer_config = .disabled,
@@ -42,9 +62,6 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
         stage: []const u8 = "setup",
 
         pub fn available(workload: workloads.Workload) ?[]const u8 {
-            if (workload.min_gas > gas_limit) {
-                return "workload gas requirement exceeds the selected hardfork transaction gas cap (pass -Dbench-hardfork=PRAGUE)";
-            }
             return switch (workload.source) {
                 .clz => if (!hardfork.isAtLeast(.OSAKA)) "CLZ requires OSAKA or later" else if (@hasField(evm.Opcode, "CLZ")) null else "CLZ handler is absent from this checkout",
                 .precompile => |address| if (evm.precompiles.isPrecompile(Address.fromU256(address), precompile_hardfork)) null else "precompile is not enabled for the selected hardfork in this checkout",
@@ -53,7 +70,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             };
         }
 
-        pub fn init(allocator: std.mem.Allocator, workload: workloads.Workload, row: *report.Row) !Self {
+        pub fn init(allocator: std.mem.Allocator, io: std.Io, workload: workloads.Workload, row: *report.Row) !Self {
             const database = try allocator.create(evm.Database);
             errdefer allocator.destroy(database);
             database.* = evm.Database.init(allocator);
@@ -61,15 +78,15 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             try database.set_account(caller.bytes, .{
                 .balance = std.math.maxInt(u256),
                 .nonce = 0,
-                .code_hash = [_]u8{0} ** 32,
-                .storage_root = [_]u8{0} ** 32,
+                .code_hash = @as([32]u8, @splat(0)),
+                .storage_root = @as([32]u8, @splat(0)),
             });
             const hash = try database.set_code(&.{ 0x60, 42, 0x60, 0, 0x52, 0x60, 32, 0x60, 0, 0xf3 });
             try database.set_account(child.bytes, .{
                 .balance = 0,
                 .nonce = 1,
                 .code_hash = hash,
-                .storage_root = [_]u8{0} ** 32,
+                .storage_root = @as([32]u8, @splat(0)),
             });
             const machine = try allocator.create(Evm);
             errdefer allocator.destroy(machine);
@@ -87,7 +104,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             switch (workload.source) {
                 .fixture => |name| {
                     row.stage = "fixture/read-initcode";
-                    const initcode = try loadFixture(allocator, name, "bytecode.txt");
+                    const initcode = try loadFixture(io, allocator, name, "bytecode.txt");
                     defer allocator.free(initcode);
                     // Surface validation errors that Evm.call otherwise reduces
                     // to success=false, without changing the fixture bytes.
@@ -123,7 +140,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
                     const runtime = try database.get_code_by_address(self.target.bytes);
                     if (runtime.len == 0) return error.EmptyDeployedCode;
                     row.stage = "fixture/read-calldata";
-                    self.input = try loadFixture(allocator, name, "calldata.txt");
+                    self.input = try loadFixture(io, allocator, name, "calldata.txt");
                 },
                 .bytecode => |code| try self.install(code),
                 .precompile => |address| self.target = Address.fromU256(address),
@@ -151,7 +168,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
                 .balance = 0,
                 .nonce = 1,
                 .code_hash = hash,
-                .storage_root = [_]u8{0} ** 32,
+                .storage_root = @as([32]u8, @splat(0)),
             });
         }
 
@@ -204,7 +221,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
 
         /// Validation is deliberately outside the timed region. Every sample
         /// must match the preflight gas and output, including after warmup.
-        pub fn measure(self: *Self, workload: workloads.Workload, options: cli.Options, row: *report.Row) !void {
+        pub fn measure(self: *Self, io: std.Io, workload: workloads.Workload, options: cli.Options, row: *report.Row) !void {
             row.stage = null;
             self.stage = "preflight";
             var reference = self.invoke();
@@ -221,12 +238,11 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             const samples = try self.allocator.alloc(u64, options.iterations);
             defer self.allocator.free(samples);
             self.stage = "measurement";
-            var timer = try std.time.Timer.start();
             for (samples, 0..) |*sample, index| {
                 row.sample_index = index;
-                timer.reset();
+                const start = std.Io.Timestamp.now(io, .awake);
                 var result = self.invoke();
-                sample.* = timer.read();
+                sample.* = @intCast(start.durationTo(std.Io.Timestamp.now(io, .awake)).nanoseconds);
                 defer result.deinit(self.allocator);
                 try check(workload, result, row);
                 if (result.gas_left != reference.gas_left or !std.mem.eql(u8, result.output, reference.output)) return error.NonDeterministicExecution;
@@ -240,10 +256,10 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
     };
 }
 
-fn loadFixture(allocator: std.mem.Allocator, name: []const u8, file: []const u8) ![]u8 {
-    const path = try std.fs.path.join(allocator, &.{ paths.fixture_directory, name, file });
+fn loadFixture(io: std.Io, allocator: std.mem.Allocator, name: []const u8, file: []const u8) ![]u8 {
+    const path = try std.Io.Dir.path.join(allocator, &.{ paths.fixture_directory, name, file });
     defer allocator.free(path);
-    const hex = try std.fs.cwd().readFileAlloc(allocator, path, 2 * 1024 * 1024);
+    const hex = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(2 * 1024 * 1024));
     defer allocator.free(hex);
     return workloads.decodeHex(allocator, hex);
 }

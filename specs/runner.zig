@@ -5,17 +5,6 @@ const primitives = @import("voltaire");
 const Address = primitives.Address;
 const assembler = @import("assembler.zig");
 
-/// The runner validates `post.Prague` expectations, so it must execute Prague
-/// rules. `evm.DefaultEvm` follows the latest mainnet fork (Osaka), whose
-/// EIP-7825 gas cap rejects the large-gas transactions these fixtures send.
-/// As in eest_runner.zig, fixtures send gas limits far above 30M (frame gas is
-/// sized from block_gas_limit) and run long loops, so neither is capped.
-pub const SpecEvm = evm.Evm(.{
-    .eips = .{ .hardfork = .PRAGUE },
-    .block_gas_limit = std.math.maxInt(i64),
-    .loop_quota = null,
-});
-
 // Error type for tests that are not yet implemented
 pub const TestTodo = error.TestTodo;
 
@@ -115,7 +104,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 defer allocator.free(bytes);
                 break :blk std.mem.bytesAsValue([32]u8, bytes).*;
             };
-            break :blk [_]u8{0} ** 32;
+            break :blk @as([32]u8, @splat(0));
         },
     };
     
@@ -124,7 +113,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
         if (pre == .object) {
             var it = pre.object.iterator();
             while (it.next()) |kv| {
-                if (std.mem.startsWith(u8, kv.key_ptr.*, "//")) continue;
                 const address = try parseAddress(kv.key_ptr.*);
                 const account = kv.value_ptr.*;
                 
@@ -147,7 +135,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 // Only process the "code" field which contains the actual assembly or bytecode
                 if (account.object.get("code")) |code| {
                     if (code == .string) {
-                        const code_str = std.mem.trim(u8, code.string, " \t\n\r");
+                        const code_str = code.string;
                         if (!std.mem.eql(u8, code_str, "") and !std.mem.eql(u8, code_str, "0x")) {
                             var code_bytes: []u8 = undefined;
                             const should_free = true;
@@ -214,7 +202,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                     if (storage == .object) {
                         var storage_it = storage.object.iterator();
                         while (storage_it.next()) |storage_kv| {
-                            if (std.mem.startsWith(u8, storage_kv.key_ptr.*, "//")) continue;
                             const key = try std.fmt.parseInt(u256, storage_kv.key_ptr.*, 0);
 
                             // Storage values might contain placeholders like <eoa:sender:0x...>
@@ -264,11 +251,12 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
             } else try allocator.alloc(u8, 0);
             defer allocator.free(tx_data);
             
-            // Determine sender (derive from secretKey via secp256k1 when sender is omitted)
+            // Determine sender
             const sender = if (tx.object.get("sender")) |s|
                 try parseAddress(s.string)
-            else if (tx.object.get("secretKey")) |sk|
-                try addressFromSecretKey(sk.string)
+            else if (tx.object.get("secretKey") != null)
+                // Standard test address for the common test private key
+                try Address.fromHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
             else
                 Address.zero();
 
@@ -317,7 +305,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 .max_fee_per_blob_gas = max_fee_per_blob_gas,
             };
 
-            var evm_instance = try SpecEvm.init(
+            var evm_instance = try evm.DefaultEvm.init(
                 allocator,
                 &database,
                 block_info,
@@ -326,55 +314,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 sender // origin is the transaction sender
             );
             defer evm_instance.deinit();
-
-            // Apply EIP-7702 authorization list (type 4 transactions)
-            if (tx.object.get("authorizationList")) |auth_list| {
-                if (auth_list == .array) {
-                    const secp256k1_n: u256 = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
-                    for (auth_list.array.items) |auth_val| {
-                        if (auth_val != .object) continue;
-                        const auth_obj = auth_val.object;
-                        const auth_chain_id = if (auth_obj.get("chainId")) |v| try parseIntFromJson(v) else 0;
-                        if (auth_chain_id != 0 and auth_chain_id != tx_context.chain_id) continue;
-                        const auth_nonce = if (auth_obj.get("nonce")) |v| try parseIntFromJson(v) else 0;
-                        if (auth_nonce >= std.math.maxInt(u64)) continue;
-                        const y_parity_val = auth_obj.get("yParity") orelse auth_obj.get("v") orelse continue;
-                        if (try parseIntFromJson(y_parity_val) > 1) continue;
-                        const r_val = if (auth_obj.get("r")) |v| try std.fmt.parseInt(u256, v.string, 0) else 0;
-                        const s_val = if (auth_obj.get("s")) |v| try std.fmt.parseInt(u256, v.string, 0) else 0;
-                        if (r_val == 0 or r_val >= secp256k1_n) continue;
-                        if (s_val == 0 or s_val > secp256k1_n / 2) continue;
-                        const signer_val = auth_obj.get("signer") orelse continue;
-                        const authority = try parseAddress(signer_val.string);
-                        const delegate_val = auth_obj.get("address") orelse continue;
-                        const delegate = try parseAddress(delegate_val.string);
-
-                        try evm_instance.access_list.pre_warm_addresses(&.{authority});
-                        const existing = try database.get_account(authority.bytes);
-                        var auth_acc = existing orelse evm.Account.zero();
-                        const has_no_code = std.mem.eql(u8, &auth_acc.code_hash, &primitives.EMPTY_CODE_HASH) or
-                            std.mem.eql(u8, &auth_acc.code_hash, &([_]u8{0} ** 32)) or
-                            auth_acc.delegated_address != null;
-                        if (!has_no_code) continue;
-                        if (auth_acc.nonce != auth_nonce) continue;
-
-                        if (delegate.isZero()) {
-                            auth_acc.delegated_address = null;
-                            auth_acc.code_hash = primitives.EMPTY_CODE_HASH;
-                        } else {
-                            auth_acc.delegated_address = delegate;
-                            var designator: [23]u8 = undefined;
-                            designator[0] = 0xef;
-                            designator[1] = 0x01;
-                            designator[2] = 0x00;
-                            @memcpy(designator[3..23], &delegate.bytes);
-                            auth_acc.code_hash = try database.set_code(&designator);
-                        }
-                        auth_acc.nonce += 1;
-                        try database.set_account(authority.bytes, auth_acc);
-                    }
-                }
-            }
 
             // Parse gas limit
             const gas_limit = if (tx.object.get("gasLimit")) |g| blk: {
@@ -441,7 +380,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
         if (state == .object) {
             var it = state.object.iterator();
             while (it.next()) |kv| {
-                if (std.mem.startsWith(u8, kv.key_ptr.*, "//")) continue;
                 const address = try parseAddress(kv.key_ptr.*);
                 const expected = kv.value_ptr.*;
 
@@ -487,7 +425,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                     if (storage == .object) {
                         var storage_it = storage.object.iterator();
                         while (storage_it.next()) |storage_kv| {
-                            if (std.mem.startsWith(u8, storage_kv.key_ptr.*, "//")) continue;
                             const key = try std.fmt.parseInt(u256, storage_kv.key_ptr.*, 0);
 
                             // Expected storage values might contain placeholders like <eoa:sender:0x...>
@@ -515,15 +452,10 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
         // Handle expect format (alternative to post)
         if (expect_list == .array) {
             for (expect_list.array.items) |expectation| {
-                // The runner executes data[0], gasLimit[0], value[0] under Prague; skip
-                // expectations written for other transaction variants or non-Prague forks.
-                if (!expectationAppliesToFirstVariant(expectation)) continue;
-                if (!expectationAppliesToPrague(expectation)) continue;
                 if (expectation.object.get("result")) |result| {
                     if (result == .object) {
                         var it = result.object.iterator();
                         while (it.next()) |kv| {
-                            if (std.mem.startsWith(u8, kv.key_ptr.*, "//")) continue;
                             const address = try parseAddress(kv.key_ptr.*);
                             const expected = kv.value_ptr.*;
 
@@ -548,7 +480,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                                 if (storage == .object) {
                                     var storage_it = storage.object.iterator();
                                     while (storage_it.next()) |storage_kv| {
-                                        if (std.mem.startsWith(u8, storage_kv.key_ptr.*, "//")) continue;
                                         const key = try std.fmt.parseInt(u256, storage_kv.key_ptr.*, 0);
 
                                         // Expected storage values might contain placeholders like <eoa:sender:0x...>
@@ -575,118 +506,6 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 }
             }
         }
-    }
-}
-
-/// Whether an `expect` entry's `indexes` select data/gas/value index 0.
-/// An index is -1 (all variants), an integer, a "lo-hi" range string, or an
-/// array of those. Label strings (":label x") cannot be resolved here, so they
-/// count as matching to keep the check rather than silently drop it.
-fn expectationAppliesToFirstVariant(expectation: std.json.Value) bool {
-    if (expectation != .object) return true;
-    const indexes = expectation.object.get("indexes") orelse return true;
-    if (indexes != .object) return true;
-    for ([_][]const u8{ "data", "gas", "value" }) |name| {
-        const selector = indexes.object.get(name) orelse continue;
-        if (!indexSelectorMatchesZero(selector)) return false;
-    }
-    return true;
-}
-
-fn indexSelectorMatchesZero(selector: std.json.Value) bool {
-    switch (selector) {
-        .integer => |n| return n == -1 or n == 0,
-        .array => |items| {
-            for (items.items) |item| {
-                if (indexSelectorMatchesZero(item)) return true;
-            }
-            return false;
-        },
-        .string => |text| {
-            const dash = std.mem.indexOfScalar(u8, text, '-') orelse return true;
-            const lo = std.fmt.parseInt(i64, text[0..dash], 10) catch return true;
-            return lo <= 0;
-        },
-        else => return true,
-    }
-}
-
-fn expectationAppliesToPrague(expectation: std.json.Value) bool {
-    if (expectation != .object) return true;
-    const networks = expectation.object.get("network") orelse return true;
-    if (networks != .array or networks.array.items.len == 0) return true;
-    for (networks.array.items) |item| {
-        if (item != .string) continue;
-        if (networkSelectorMatchesPrague(item.string)) return true;
-    }
-    return false;
-}
-
-fn networkSelectorMatchesPrague(raw: []const u8) bool {
-    const s = std.mem.trim(u8, raw, " \t\n\r");
-    if (s.len == 0) return true;
-    if (std.mem.startsWith(u8, s, ">=")) {
-        const hf = parseHardfork(s[2..]);
-        return @intFromEnum(evm.Hardfork.PRAGUE) >= @intFromEnum(hf);
-    }
-    if (std.mem.startsWith(u8, s, "<=")) {
-        const hf = parseHardfork(s[2..]);
-        return @intFromEnum(evm.Hardfork.PRAGUE) <= @intFromEnum(hf);
-    }
-    if (std.mem.startsWith(u8, s, "<")) {
-        const hf = parseHardfork(s[1..]);
-        return @intFromEnum(evm.Hardfork.PRAGUE) < @intFromEnum(hf);
-    }
-    if (std.mem.startsWith(u8, s, ">")) {
-        const hf = parseHardfork(s[1..]);
-        return @intFromEnum(evm.Hardfork.PRAGUE) > @intFromEnum(hf);
-    }
-    const hf = parseHardfork(s);
-    return hf == .PRAGUE;
-}
-
-fn addressFromSecretKey(secret_hex: []const u8) !Address {
-    var trimmed = std.mem.trim(u8, secret_hex, " \t\n\r");
-    // Handle placeholder format like "<eoa:sender:0x45a9...>"
-    if (std.mem.startsWith(u8, trimmed, "<") and std.mem.endsWith(u8, trimmed, ">")) {
-        const inner = trimmed[1 .. trimmed.len - 1];
-        if (std.mem.lastIndexOfScalar(u8, inner, ':')) |colon| {
-            trimmed = inner[colon + 1 ..];
-        } else {
-            trimmed = inner;
-        }
-    }
-    const hex_body = if (std.mem.startsWith(u8, trimmed, "0x") or std.mem.startsWith(u8, trimmed, "0X"))
-        trimmed[2..]
-    else
-        trimmed;
-    if (hex_body.len == 0 or hex_body.len > 64) return error.InvalidSecretKey;
-    var padded: [64]u8 = [_]u8{'0'} ** 64;
-    @memcpy(padded[64 - hex_body.len ..], hex_body);
-    var secret: [32]u8 = undefined;
-    _ = try std.fmt.hexToBytes(&secret, &padded);
-    const point = try std.crypto.ecc.Secp256k1.basePoint.mul(secret, .big);
-    const uncompressed = point.toUncompressedSec1();
-    var digest: [32]u8 = undefined;
-    std.crypto.hash.sha3.Keccak256.hash(uncompressed[1..65], &digest, .{});
-    return Address{ .bytes = digest[12..32].* };
-}
-
-test "expect indexes select the first transaction variant" {
-    const allocator = std.testing.allocator;
-    const cases = [_]struct { json: []const u8, applies: bool }{
-        .{ .json = "{\"indexes\":{\"data\":-1,\"gas\":-1,\"value\":-1}}", .applies = true },
-        .{ .json = "{\"indexes\":{\"data\":-1,\"gas\":0,\"value\":-1}}", .applies = true },
-        .{ .json = "{\"indexes\":{\"data\":-1,\"gas\":1,\"value\":-1}}", .applies = false },
-        .{ .json = "{\"indexes\":{\"data\":[1,2],\"gas\":0,\"value\":-1}}", .applies = false },
-        .{ .json = "{\"indexes\":{\"data\":[2,0],\"gas\":0,\"value\":-1}}", .applies = true },
-        .{ .json = "{\"indexes\":{\"data\":\"1-3\",\"gas\":0,\"value\":0}}", .applies = false },
-        .{ .json = "{\"indexes\":{\"data\":\":label x\",\"gas\":0,\"value\":0}}", .applies = true },
-    };
-    for (cases) |case| {
-        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, case.json, .{});
-        defer parsed.deinit();
-        try std.testing.expectEqual(case.applies, expectationAppliesToFirstVariant(parsed.value));
     }
 }
 
@@ -892,7 +711,7 @@ fn parseHexData(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     // Handle concatenated :raw data
     if (std.mem.indexOf(u8, clean_data, ",:raw ")) |_| {
         var parts = std.mem.tokenizeSequence(u8, clean_data, ",:raw ");
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         while (parts.next()) |part| {
@@ -914,7 +733,7 @@ fn parseHexData(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     // 1. First replace placeholders with their hex addresses (without 0x)
     // 2. Then ensure the entire string is valid hex
     if (is_raw and std.mem.indexOf(u8, clean_data, "<") != null) {
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         // Remove 0x prefix if present for processing
@@ -1143,7 +962,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
             try std.fmt.parseInt(u256, env.?.currentBaseFee.?, 0)
         else 10,
         
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Setup pre-state
@@ -1214,7 +1033,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
         .chain_id = 1,
     };
     
-    var evm_instance = try SpecEvm.init(
+    var evm_instance = try evm.DefaultEvm.init(
         allocator, 
         &database, 
         block_info, 

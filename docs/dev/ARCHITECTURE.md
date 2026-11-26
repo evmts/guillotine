@@ -41,22 +41,26 @@ Guillotine contains two complete EVM implementations:
 
 | Implementation | Location | Philosophy | Primary Use |
 |----------------|----------|------------|-------------|
-| **Mini** | `mini/src/` | Clarity over performance | Learning, testing, reference |
+| **MinimalEvm** | `src/tracer/minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` | Clarity over performance | Differential-testing reference |
 | **Performance** | `src/` | Speed via dispatch optimization | Production execution |
 
-Both select a hardfork from Frontier through Osaka; `Hardfork.DEFAULT` is `OSAKA` (lib/voltaire/src/primitives/hardfork.zig). Neither passes the full Ethereum spec suite yet. See [specs/README.md](../../specs/README.md) for the current EEST pass rate of the Performance EVM.
+The performance EVM passes every official EEST state test from Frontier
+through Osaka. MinimalEvm is the reference interpreter that the tracer and the
+differential tests in `test/differential` run beside it. The standalone,
+readable reference EVM lives in its own repository,
+[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ### Why Two Implementations?
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
-│   MINI EVM                              PERFORMANCE EVM                     │
-│   ────────                              ───────────────                     │
+│   MINIMALEVM                            PERFORMANCE EVM                     │
+│   ──────────                            ───────────────                     │
 │                                                                             │
 │   ┌─────────────────────────┐           ┌─────────────────────────┐        │
-│   │  • Easy to understand   │           │  • Optimized for speed  │        │
-│   │  • 46 .zig files        │           │  • 187 .zig files       │        │
+│   │  • Easy to understand   │           │  • 2-10x faster         │        │
+│   │  • 3 source files       │           │  • Whole src/ tree      │        │
 │   │  • Sequential execution │           │  • Dispatch execution   │        │
 │   │  • Per-op gas checking  │           │  • Per-block gas        │        │
 │   │  • No preprocessing     │           │  • Bytecode analysis    │        │
@@ -66,9 +70,9 @@ Both select a hardfork from Frontier through Osaka; `Hardfork.DEFAULT` is `OSAKA
 │                             │                                               │
 │                             ▼                                               │
 │              ┌─────────────────────────────┐                                │
-│              │  Same Ethereum specs         │                                │
-│              │  Separate test suites:       │                                │
-│              │  test-mini-specs, state-tests│                                │
+│              │  Same EVM semantics          │                                │
+│              │  Same final state            │                                │
+│              │  Compared by differential    │                                │
 │              └─────────────────────────────┘                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -80,39 +84,37 @@ Both select a hardfork from Frontier through Osaka; `Hardfork.DEFAULT` is `OSAKA
 
 The EVM orchestrator manages high-level execution: call stack, state access, gas refunds.
 
-#### Mini EVM (Traditional)
+#### MinimalEvm (Traditional)
 
 ```zig
-// mini/src/evm.zig - Complete state management in one file (excerpt)
-pub fn Evm(comptime config: EvmConfig) type {
-    return struct {
-        pub const AccountState = struct {
-            balance: u256 = 0,
-            nonce: u64 = 0,
-            code: []const u8 = &[_]u8{},
-        };
+// src/tracer/minimal_evm.zig (excerpt) - all state in plain hash maps
+pub const MinimalEvm = struct {
+    frames: std.ArrayList(*MinimalFrame),
+    storage: std.AutoHashMap(StorageSlotKey, u256),
+    transient_storage: std.AutoHashMap(StorageSlotKey, u256),
+    original_storage: std.AutoHashMap(StorageSlotKey, u256),
+    balances: std.AutoHashMap(Address, u256),
+    nonces: std.AutoHashMap(Address, u64),
+    code: std.AutoHashMap(Address, []const u8),
 
-        // Account state: one map lookup returns balance, nonce and code
-        frames: std.ArrayList(FrameType),
-        storage: Storage,
-        accounts: std.AutoHashMap(primitives.Address, AccountState),
+    // Transaction state
+    gas_refund: u64,
+    hardfork: Hardfork,
 
-        // Transaction state
-        access_list_manager: AccessListManager,  // warm addresses and slots
-        gas_refund: u64,
-
-        // Execution context
-        origin: primitives.Address,
-        gas_price: u256,
-        block_context: BlockContext,
-    };
-}
+    // Block and transaction context
+    chain_id: u64,
+    block_number: u64,
+    origin: Address,
+    gas_price: u256,
+    host: ?HostInterface,
+    // ...
+};
 ```
 
 #### Performance EVM (Modular)
 
 ```zig
-// src/evm.zig - Delegates to specialized modules (excerpt)
+// src/evm.zig - Delegates to specialized modules (~270KB system)
 pub fn Evm(comptime config: EvmConfig) type {
     return struct {
         // Modular state management
@@ -122,7 +124,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         // Execution support
         call_arena: GrowingArenaAllocator,
-        tracer: @import("tracer/tracer.zig").Tracer,
+        tracer: Tracer,
     };
 }
 ```
@@ -164,16 +166,17 @@ The Frame manages a single call's execution: stack, memory, gas, bytecode.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Mini Frame
+#### MinimalFrame
 
 ```zig
-// mini/src/frame.zig (Frame fields, excerpt)
+// src/tracer/minimal_frame.zig (MinimalFrame fields, excerpt)
 stack: std.ArrayList(u256),           // Bounds-checked every operation
-memory: std.ArrayList(u8),            // Contiguous byte buffer
+memory: std.AutoHashMap(u32, u8),     // Sparse byte storage
 memory_size: u32,
 pc: u32,                               // Program counter into bytecode
 gas_remaining: i64,
-bytecode: Bytecode,                    // With JUMPDEST analysis
+bytecode: []const u8,
+valid_jumpdests: std.array_hash_map.Auto(u32, void), // JUMPDEST analysis
 caller: Address,
 address: Address,
 value: u256,
@@ -183,7 +186,7 @@ calldata: []const u8,
 #### Performance Frame
 
 ```zig
-// src/frame/frame.zig (Frame fields, excerpt)
+// src/frame/frame.zig:134-157
 // CACHE LINE 1 (hot data - 64 bytes aligned)
 stack: Stack,                          // Cache-aligned, pre-validated ops
 gas_remaining: GasType,
@@ -199,7 +202,7 @@ calldata_slice: []const u8,
 code: []const u8,
 jump_table: *const Dispatch.JumpTable,
 dispatch: Dispatch,                    // Schedule cursor (NOT PC!)
-instruction_counter: config.createLoopSafetyCounter(),
+instruction_counter: LoopSafetyCounter,
 ```
 
 ### 3. Stack Implementation
@@ -208,7 +211,7 @@ instruction_counter: config.createLoopSafetyCounter(),
 Stack Growth Direction
 ──────────────────────
 
-MINI EVM: Upward growth (ArrayList)    PERFORMANCE: Downward growth (Array)
+MINIMALEVM: Upward growth (ArrayList)  PERFORMANCE: Downward growth (Array)
 ──────────────────────────────────     ─────────────────────────────────────
 
     Index 1023 ─┐                           Index 0 ─┐
@@ -228,18 +231,18 @@ push: items.append(value)              push: stack_ptr -= 1; data[stack_ptr] = v
 pop:  items.len -= 1                   pop:  stack_ptr += 1; return data[stack_ptr-1]
 ```
 
-#### Mini Stack (ArrayList)
+#### MinimalFrame Stack (ArrayList)
 
 ```zig
-// mini/src/frame.zig:161-176
-pub fn pushStack(self: *Self, value: u256) EvmError!void {
+// src/tracer/minimal_frame.zig
+pub fn pushStack(self: *Self, value: u256) MinimalEvmError!void {
     if (self.stack.items.len >= 1024) {
         return error.StackOverflow;  // Check every push
     }
     try self.stack.append(self.allocator, value);
 }
 
-pub fn popStack(self: *Self) EvmError!u256 {
+pub fn popStack(self: *Self) MinimalEvmError!u256 {
     if (self.stack.items.len == 0) {
         return error.StackUnderflow;  // Check every pop
     }
@@ -253,35 +256,31 @@ pub fn popStack(self: *Self) EvmError!u256 {
 
 ```zig
 // src/stack/stack.zig - Pointer-based, downward growth
-// (Debug/ReleaseSafe tracer asserts omitted)
-pub fn Stack(config: StackConfig) type {
+pub fn Stack(comptime config: StackConfig) type {
     return struct {
-        // Heap buffer of stack_capacity words, 64-byte cache line aligned
-        buf_ptr: [*]align(64) WordType,
-        // Points to the top item, or one past the buffer when empty
-        stack_ptr: [*]align(ptr_align) WordType,
+        // Pre-allocated array, 64-byte cache line aligned
+        data: [stack_capacity]WordType align(64),
+        stack_ptr: usize,  // Points to next free slot
 
         // Unsafe operations (caller validates first via preprocessing)
         pub inline fn pop_unsafe(self: *Self) WordType {
-            const value = self.stack_ptr[0];
             self.stack_ptr += 1;
-            return value;
+            return self.data[self.stack_ptr - 1];
         }
 
         pub inline fn push_unsafe(self: *Self, value: WordType) void {
             self.stack_ptr -= 1;
-            self.stack_ptr[0] = value;
+            self.data[self.stack_ptr] = value;
         }
 
-        // Binary operation in place: result overwrites the second item
+        // Binary operation without intermediate storage
         pub inline fn binary_op_unsafe(
             self: *Self,
-            comptime op: fn (a: WordType, b: WordType) WordType,
+            comptime op: fn (WordType, WordType) WordType
         ) void {
-            const top = self.stack_ptr[0];
-            const second = self.stack_ptr[1];
-            self.stack_ptr[1] = op(top, second);
+            const a = self.data[self.stack_ptr];
             self.stack_ptr += 1;
+            self.data[self.stack_ptr] = op(self.data[self.stack_ptr], a);
         }
     };
 }
@@ -289,11 +288,11 @@ pub fn Stack(config: StackConfig) type {
 
 ## Execution Flow
 
-### Mini EVM: Sequential Interpretation
+### MinimalEvm: Sequential Interpretation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MINI EVM EXECUTION LOOP                             │
+│                       MINIMALEVM EXECUTION LOOP                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Bytecode: [60 05 60 03 01 00]  (PUSH1 5, PUSH1 3, ADD, STOP)             │
@@ -328,29 +327,23 @@ pub fn Stack(config: StackConfig) type {
 ```
 
 ```zig
-// mini/src/frame.zig (tracing and loop_quota checks omitted)
-pub fn execute(self: *Self) EvmError!void {
-    while (!self.stopped and !self.reverted and self.pc < self.bytecode.len()) {
+// src/tracer/minimal_frame.zig
+pub fn execute(self: *Self) MinimalEvmError!void {
+    while (!self.stopped and !self.reverted and self.pc < self.bytecode.len) {
         try self.step();
     }
 }
 
-pub fn step(self: *Self) EvmError!void {
-    if (self.stopped or self.reverted or self.pc >= self.bytecode.len()) return;
+pub fn step(self: *Self) MinimalEvmError!void {
+    if (self.stopped or self.reverted or self.pc >= self.bytecode.len) {
+        return;
+    }
     const opcode = self.getCurrentOpcode() orelse return;
     try self.executeOpcode(opcode);
 }
 
-pub fn executeOpcode(self: *Self, opcode: u8) EvmError!void {
-    // (JavaScript and config opcode overrides are checked first)
-    // Giant switch statement - one case per opcode
-    switch (opcode) {
-        0x00 => try ControlFlowHandlers.stop(self),
-        0x01 => try ArithmeticHandlers.add(self),
-        0x02 => try ArithmeticHandlers.mul(self),
-        // ... every other opcode
-    }
-}
+// executeOpcode is one switch over every opcode, with each case inline:
+//     0x01 => { try self.consumeGas(...); ...; self.pc += 1; },
 ```
 
 ### Performance EVM: Dispatch Execution
@@ -363,7 +356,7 @@ pub fn executeOpcode(self: *Self, opcode: u8) EvmError!void {
 │   PREPROCESSING (once per bytecode)                                         │
 │   ─────────────────────────────────                                         │
 │                                                                             │
-│   Bytecode: [60 05 60 03 01 00]   (schedule shown with fusion disabled)    │
+│   Bytecode: [60 05 60 03 01 00]                                            │
 │                  │                                                          │
 │                  ▼                                                          │
 │   Schedule: [                                                               │
@@ -405,33 +398,25 @@ pub fn executeOpcode(self: *Self, opcode: u8) EvmError!void {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-With the default `enable_fusion = true` (src/evm_config.zig), the preprocessor
-fuses `PUSH1 3` + `ADD` into one `PUSH_ADD_INLINE` item.
-
 ```zig
-// src/frame/frame.zig - Entry point (tracer calls and stack-bound checks omitted)
+// src/frame/frame.zig - Entry point
 pub fn interpret(
     self: *Self,
-    dispatch_schedule: *const Dispatch.DispatchSchedule,
+    schedule: [*]const Dispatch.Item,
     jump_table: *const Dispatch.JumpTable,
     bytecode_raw: []const u8,
 ) Error!void {
+    // Validate first block gas
+    const first_block = schedule[0].first_block_gas;
+    if (self.gas_remaining < first_block.gas) {
+        return Error.OutOfGas;
+    }
+    self.gas_remaining -= first_block.gas;
+
+    // Start tail-call chain (NEVER returns normally)
     self.code = bytecode_raw;
     self.jump_table = jump_table;
-    const schedule = dispatch_schedule.items;
-    const start_index: usize = @intFromBool(dispatch_schedule.has_first_block_gas);
-
-    // Charge the first basic block's gas once
-    if (dispatch_schedule.has_first_block_gas) {
-        const meta = schedule[0].first_block_gas;
-        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
-        // ... min_stack / max_stack check against the current stack size
-    }
-
-    // Start the handler chain. Each handler tail-calls the next, so this
-    // call returns only through an error (Stop, Return, Revert, OutOfGas, ...)
-    self.dispatch = Dispatch{ .cursor = schedule.ptr + start_index };
-    try self.dispatch.cursor[0].opcode_handler(self, self.dispatch.cursor);
+    return @call(.always_tail, schedule[1].opcode_handler, .{self, schedule + 1});
 }
 ```
 
@@ -451,12 +436,12 @@ pub fn interpret(
 │   │ opcode_handler  │   *const fn(*Frame, [*]Item) Error!noreturn           │
 │   └─────────────────┘                                                       │
 │                                                                             │
-│   ┌─────────────────┐   First basic block metadata                          │
-│   │ first_block_gas │   { gas: u32, min_stack: i16, max_stack: i16 }        │
+│   ┌─────────────────┐   Basic block metadata                                │
+│   │ first_block_gas │   { gas: u32, min_stack: u8, max_stack: u8 }          │
 │   └─────────────────┘                                                       │
 │                                                                             │
-│   ┌─────────────────┐   JUMPDEST basic block metadata                       │
-│   │ jump_dest       │   { gas: u32, min_stack: i16, max_stack: i16 }        │
+│   ┌─────────────────┐   Jump target metadata                                │
+│   │ jump_dest       │   { gas: u32, min_stack: u8, cursor_offset: u16 }     │
 │   └─────────────────┘                                                       │
 │                                                                             │
 │   ┌─────────────────┐   Small PUSH values (≤8 bytes)                        │
@@ -464,41 +449,39 @@ pub fn interpret(
 │   └─────────────────┘                                                       │
 │                                                                             │
 │   ┌─────────────────┐   Large PUSH values (>8 bytes)                        │
-│   │ push_pointer    │   { value_ptr: *const WordType }                      │
+│   │ push_pointer    │   { ptr: *const [32]u8 }                              │
 │   └─────────────────┘                                                       │
 │                                                                             │
 │   ┌─────────────────┐   Pre-resolved static jump                            │
-│   │ jump_static     │   { dispatch: *const anyopaque }                      │
+│   │ jump_static     │   { target_cursor: [*]const Item }                    │
 │   └─────────────────┘                                                       │
 │                                                                             │
 │   ┌─────────────────┐   Maps cursor position to bytecode PC                 │
-│   │ pc              │   { value: uN }  (uN sized to PcType)                 │
+│   │ pc              │   { pc: u32 }                                         │
 │   └─────────────────┘                                                       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```zig
-// src/preprocessor/dispatch.zig
-// Untagged union: exactly 8 bytes in ReleaseFast/ReleaseSmall.
-// Debug/ReleaseSafe add a hidden safety tag.
-pub const Item = union {
-    opcode_handler: OpcodeHandler,               // Function pointer
-    jump_dest: Metadata.JumpDestMetadata,        // Block gas/stack info
-    push_inline: Metadata.PushInlineMetadata,    // Small values (≤8 bytes)
-    push_pointer: Metadata.PushPointerMetadata,  // Large values (>8 bytes)
-    pc: Metadata.PcMetadata,
-    jump_static: Metadata.JumpStaticMetadata,    // Pre-resolved jumps
-    first_block_gas: Metadata.FirstBlockMetadata,
+// src/preprocessor/dispatch.zig:32-40
+pub const Item = union(enum) {
+    opcode_handler: OpcodeHandler,      // Function pointer
+    jump_dest: JumpDestMetadata,        // Block gas/stack info
+    push_inline: PushInlineMetadata,    // One 64-bit limb of a PUSH value (PUSH9-32 use 2-4)
+    push_pointer: PushPointerMetadata,  // Fused PUSH+op operand wider than 64 bits
+    pc: PcMetadata,
+    jump_static: JumpStaticMetadata,    // Pre-resolved jumps
+    first_block_gas: FirstBlockMetadata,
 };
 ```
 
 ### Handler Pattern
 
 ```zig
-// src/instructions/handlers_arithmetic.zig - every handler follows this pattern
+// Every handler follows this pattern
 pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    // 1. Tracer sync (Debug and ReleaseSafe builds only)
+    // 1. Tracer sync (debug builds only)
     self.beforeInstruction(.ADD, cursor);
 
     // 2. Execute (pre-validated, use unsafe)
@@ -508,8 +491,9 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
         }
     }.op);
 
-    // 3. Look up the next handler and tail-call it (NEVER returns)
-    return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+    // 3. Tail-call next handler (NEVER returns)
+    const next = dispatch.getOpData(.ADD);
+    return @call(.always_tail, next.handler, .{self, next.cursor});
 }
 ```
 
@@ -676,7 +660,7 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 │   │ 3. TRANSIENT STORAGE (EIP-1153, Cancun+)                          │    │
 │   │    • TLOAD/TSTORE opcodes                                         │    │
 │   │    • Cleared at transaction boundary                              │    │
-│   │    • Writes roll back when their call frame reverts               │    │
+│   │    • NOT cleared on revert (persists within tx)                   │    │
 │   │    • Always warm access (100 gas)                                 │    │
 │   └───────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
@@ -704,28 +688,24 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 │                                                                             │
 │   REVERT to snapshot_id=1:                                                  │
 │   • Remove entries with snapshot_id >= 1                                    │
+│   • Apply reverse of each removed entry to restore state                    │
 │   • Entries [2], [3], [4] removed                                           │
 │   • Entries [0], [1] remain                                                 │
-│   • Database.revert_to_snapshot restores account and storage state;         │
-│     the journal itself writes nothing back                                  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```zig
-// src/storage/journal.zig (excerpt; original_storage index upkeep omitted)
+// src/storage/journal.zig:14-80
 pub fn Journal(comptime config: JournalConfig) type {
     return struct {
         entries: std.ArrayList(Entry),
         next_snapshot_id: SnapshotIdType,
         allocator: std.mem.Allocator,
 
-        pub fn create_snapshot(self: *Self) Error!SnapshotIdType {
-            if (self.next_snapshot_id == std.math.maxInt(SnapshotIdType)) {
-                return error.SnapshotIdExhausted;
-            }
+        pub fn create_snapshot(self: *Self) SnapshotIdType {
             const id = self.next_snapshot_id;
-            self.next_snapshot_id += 1;
+            self.next_snapshot_id +|= 1;
             return id;
         }
 
@@ -735,20 +715,13 @@ pub fn Journal(comptime config: JournalConfig) type {
                 if (entry.snapshot_id < snapshot_id) {
                     self.entries.items[write_idx] = entry;
                     write_idx += 1;
-                    continue;
                 }
-                // ... drop this entry's original_storage index row
             }
             self.entries.shrinkRetainingCapacity(write_idx);
         }
     };
 }
 ```
-
-A failed frame reverts through `Evm.revertFrame` (src/evm.zig). It truncates
-logs, restores the refund counter, the access list, SELFDESTRUCT marks and
-created contracts from a frame checkpoint, then calls
-`journal.revert_to_snapshot` and `database.revert_to_snapshot`.
 
 ### Access List (EIP-2929)
 
@@ -811,20 +784,21 @@ created contracts from a frame checkpoint, then calls
 ```
 
 ```zig
-// mini/src/bytecode.zig (src/bytecode/bytecode.zig has its own analyzeJumpDests)
-fn analyzeJumpDests(code: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32, void)) !void {
-    var pc: u32 = 0;
+fn analyzeJumpDests(code: []const u8) JumpDestSet {
+    var set = JumpDestSet{};
+    var pc: usize = 0;
     while (pc < code.len) {
         const opcode = code[pc];
-        if (opcode == 0x5b) {  // JUMPDEST
-            try valid_jumpdests.put(pc, {});
+        if (opcode == 0x5B) {  // JUMPDEST
+            set.add(pc);
             pc += 1;
-        } else if (opcode >= 0x60 and opcode <= 0x7f) {  // PUSH1-PUSH32
-            pc += 1 + (opcode - 0x5f);  // Skip push data
+        } else if (opcode >= 0x60 and opcode <= 0x7F) {  // PUSH1-PUSH32
+            pc += 1 + (opcode - 0x5F);  // Skip push data
         } else {
             pc += 1;
         }
     }
+    return set;
 }
 ```
 
@@ -846,16 +820,14 @@ fn analyzeJumpDests(code: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32
 │   │                 │ (next)               │                             │ │
 │   └─────────────────┴──────────────────────┴─────────────────────────────┘ │
 │                                                                             │
-│   Function dispatch pattern (Solidity ABI):                                 │
+│   Conditional branch pattern (require, loops):                              │
 │   ┌─────────────────┬──────────────────────┬─────────────────────────────┐ │
-│   │ PUSH4 selector  │ 8 ops                │ FUNCTION_DISPATCH           │ │
-│   │ EQ              │                      │ { selector, jump_target }   │ │
-│   │ PUSH2 target    │                      │                             │ │
+│   │ ISZERO          │ 4 items              │ ISZERO_JUMPI                │ │
+│   │ PUSH2 target    │                      │ { jump_target }             │ │
 │   │ JUMPI           │                      │                             │ │
 │   └─────────────────┴──────────────────────┴─────────────────────────────┘ │
 │                                                                             │
-│   39 synthetic opcodes (src/opcodes/opcode_synthetic.zig,                   │
-│   docs/performance/SYNTHETIC-OPCODES.md)                                    │
+│   30+ fusion patterns total (see SYNTHETIC-OPCODES.md)                      │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -864,24 +836,20 @@ fn analyzeJumpDests(code: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32
 
 ### Instruction Handlers
 
-Performance handlers live in `src/instructions/`; Mini handlers live in `mini/src/instructions/`. Where the two differ, the table names both.
-
-| Category | Opcodes | Performance file | Mini file |
-|----------|---------|------------------|-----------|
-| Arithmetic | ADD, SUB, MUL, DIV, MOD, EXP, ADDMOD, MULMOD, etc. | `handlers_arithmetic.zig` | `handlers_arithmetic.zig` |
-| Bitwise | AND, OR, XOR, NOT, SHL, SHR, SAR, BYTE (CLZ: Performance only) | `handlers_bitwise.zig` | `handlers_bitwise.zig` |
-| Comparison | LT, GT, EQ, ISZERO, SLT, SGT | `handlers_comparison.zig` | `handlers_comparison.zig` |
-| Stack | PUSH0-32, POP, DUP1-16, SWAP1-16 | `handlers_stack.zig` | `handlers_stack.zig` |
-| Memory | MLOAD, MSTORE, MSTORE8, MSIZE, MCOPY | `handlers_memory.zig` | `handlers_memory.zig` |
-| Storage | SLOAD, SSTORE, TLOAD, TSTORE | `handlers_storage.zig` | `handlers_storage.zig` |
-| Control | JUMP, JUMPI, JUMPDEST | `handlers_jump.zig` | `handlers_control_flow.zig` |
-| Control | PC | `handlers_context.zig` | `handlers_control_flow.zig` |
-| Control | STOP, RETURN, REVERT | `handlers_system.zig` | `handlers_control_flow.zig` |
-| Context | ADDRESS, CALLER, ORIGIN, CALLVALUE, CALLDATALOAD, etc. | `handlers_context.zig` | `handlers_context.zig` |
-| Block | BLOCKHASH, COINBASE, TIMESTAMP, NUMBER, etc. | `handlers_context.zig` | `handlers_block.zig` |
-| System | CALL, CALLCODE, STATICCALL, DELEGATECALL, CREATE, CREATE2, SELFDESTRUCT | `handlers_system.zig` | `handlers_system.zig` |
-| Log | LOG0-LOG4 | `handlers_log.zig` | `handlers_log.zig` |
-| Keccak | KECCAK256 | `handlers_keccak.zig` | `handlers_keccak.zig` |
+| Category | Opcodes | Files |
+|----------|---------|-------|
+| Arithmetic | ADD, SUB, MUL, DIV, MOD, EXP, ADDMOD, MULMOD, etc. | `handlers_arithmetic.zig` |
+| Bitwise | AND, OR, XOR, NOT, SHL, SHR, SAR, BYTE | `handlers_bitwise.zig` |
+| Comparison | LT, GT, EQ, ISZERO, SLT, SGT | `handlers_comparison.zig` |
+| Stack | PUSH0-32, POP, DUP1-16, SWAP1-16 | `handlers_stack.zig` |
+| Memory | MLOAD, MSTORE, MSTORE8, MSIZE, MCOPY | `handlers_memory.zig` |
+| Storage | SLOAD, SSTORE, TLOAD, TSTORE | `handlers_storage.zig` |
+| Control | JUMP, JUMPI, JUMPDEST, PC, STOP | `handlers_jump.zig` / `handlers_control_flow.zig` |
+| Context | ADDRESS, CALLER, ORIGIN, CALLVALUE, CALLDATALOAD, etc. | `handlers_context.zig` |
+| Block | BLOCKHASH, COINBASE, TIMESTAMP, NUMBER, etc. | `handlers_block.zig` |
+| System | CALL, STATICCALL, DELEGATECALL, CREATE, CREATE2, RETURN, REVERT | `handlers_system.zig` |
+| Log | LOG0-LOG4 | `handlers_log.zig` |
+| Keccak | KECCAK256 | `handlers_keccak.zig` |
 
 ### Synthetic Handlers (Performance Only)
 
@@ -893,112 +861,99 @@ handlers_arithmetic_synthetic.zig  // PUSH+ADD, PUSH+MUL, etc.
 handlers_bitwise_synthetic.zig     // PUSH+AND, PUSH+OR, etc.
 handlers_memory_synthetic.zig      // PUSH+MSTORE, PUSH+MLOAD, etc.
 handlers_jump_synthetic.zig        // Static jump resolution
-handlers_advanced_synthetic.zig    // 3+ opcode patterns: constant folding, ISZERO+JUMPI, etc.
 ```
 
 ## Memory Allocation
 
-### Mini: Arena for State, Allocator for Frames
+### MinimalEvm: Standard Allocator
 
 ```zig
-// mini/src/evm.zig
-arena: std.heap.ArenaAllocator,   // state maps (accounts, storage, ...)
+// Uses provided allocator directly
 allocator: std.mem.Allocator,
 
-// mini/src/frame.zig: stack and memory grow through frame.allocator
+// Stack and memory use allocator
 stack: std.ArrayList(u256),
-memory: std.ArrayList(u8),
+memory: std.AutoHashMap(u32, u8),
 ```
 
-### Performance: Call Arena plus Per-Depth Pools
+### Performance: Arena Allocator
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        PERFORMANCE ALLOCATION                               │
+│                        ARENA ALLOCATION PATTERN                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   call_arena (GrowingArenaAllocator, src/evm_arena_allocator.zig)           │
-│   ───────────────────────────────────────────────────────────────           │
-│   • Dispatch schedule and jump table for bytecode not in analysis_cache     │
-│   • RETURN/REVERT output copies                                             │
-│   • Log topics and data                                                     │
-│   Reset after each root call: call_arena.resetRetainCapacity()              │
-│   (frees everything at once, keeps grown capacity up to                     │
-│   arena_capacity_limit)                                                     │
+│   Transaction Start                                                         │
+│   ─────────────────                                                         │
+│   Arena created with initial capacity                                       │
 │                                                                             │
-│   stack_pool / memory_pool (one buffer per call depth)                      │
-│   ───────────────────────────────────────────────────────────────           │
-│   • Allocated from Evm.allocator on first use at that depth                 │
-│   • Reused by every later frame at the same depth                           │
+│   During Execution                                                          │
+│   ────────────────                                                          │
+│   All allocations come from arena:                                          │
+│   • Frame stack                                                             │
+│   • Memory pages                                                            │
+│   • Journal entries                                                         │
+│   • Temporary buffers                                                       │
 │                                                                             │
-│   Evm.allocator (passed to Evm.init)                                        │
-│   ───────────────────────────────────────────────────────────────           │
-│   • Journal entries, access list, logs list, other long-lived state         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ Arena Memory: [Frame1|Memory1|Journal|Frame2|Memory2|Temp|...]     │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   NO individual frees during transaction!                                   │
+│                                                                             │
+│   Transaction End                                                           │
+│   ───────────────                                                           │
+│   Single reset: arena.reset()                                               │
+│   All memory freed at once - O(1)                                           │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```zig
-// src/evm.zig (excerpt)
+// Transaction-scoped arena
+// All allocations freed at once when transaction completes
 call_arena: GrowingArenaAllocator,
-stack_pool: [config.max_call_depth + 1]?[*]align(64) Frame.WordType,
-memory_pool: [config.max_call_depth + 1]?*std.ArrayList(u8),
 
-// Each call borrows the pooled buffers for its depth
-var frame = try Frame.initPooled(stack_buf, mem_buf, self.allocator, gas_cast,
-    caller, value, input, @as(*anyopaque, @ptrCast(self)));
-defer frame.deinitPooled();
+// Frame uses arena for all allocations
+pub fn init(allocator: std.mem.Allocator, ...) Error!Self {
+    var stack = Stack.init(allocator, null) catch return Error.AllocationError;
+    var memory = Memory.init(allocator) catch return Error.AllocationError;
+    // ...
+}
 ```
 
 ## Configuration
 
-Both implementations use compile-time configuration:
+The performance EVM takes a comptime configuration. MinimalEvm takes its
+hardfork at runtime through `MinimalEvm.setHardfork` (default `Hardfork.DEFAULT`).
 
 ```zig
-// Mini: mini/src/evm_config.zig
-pub const EvmConfig = struct {
-    hardfork: Hardfork = Hardfork.DEFAULT,  // OSAKA
-    stack_size: u12 = 1024,
-    max_bytecode_size: u32 = 24576,
-    memory_limit: u64 = 0xFFFFFF,
-    max_call_depth: u16 = 1024,
-    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
-    // ...
-};
+// MinimalEvm (runtime)
+var minimal = try MinimalEvm.init(allocator);
+minimal.setHardfork(.OSAKA);
 
-// Performance: src/evm_config.zig (frame_config() derives the FrameConfig)
-pub const EvmConfig = struct {
-    eips: Eips = Eips{ .hardfork = Hardfork.DEFAULT },  // OSAKA
-    max_call_depth: u11 = 1024,
-    enable_fusion: bool = true,
-    enable_native_jit: bool = false,
-    stack_size: u12 = 1024,
+// Performance (comptime)
+pub const FrameConfig = struct {
     WordType: type = u256,
-    max_bytecode_size: u32 = 24576,
-    memory_limit: u64 = 0xFFFFFF,
-    arena_capacity_limit: usize = 64 * 1024 * 1024,
-    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
+    stack_size: usize = 1024,
+    max_bytecode_size: usize = 24576,
+    memory_limit: usize = 0x1000000,
+    fusions_enabled: bool = true,
+    loop_quota: ?u64 = 300_000_000,  // Safety limit
     // ...
 };
 ```
 
-These are Zig comptime structs; set the fields to change behavior. build.zig
-declares `-D` options with matching names (`-Devm-hardfork`,
-`-Devm-enable-fusion`, `-Dstack-size`, ...), but only `-Denable-tracing` takes
-effect. Mini's `EvmConfig.fromBuildOptions()` would read the others, and
-nothing calls it.
-
 ## Key Architectural Differences Summary
 
-| Aspect | Mini | Performance |
-|--------|------|-------------|
+| Aspect | MinimalEvm | Performance |
+|--------|------------|-------------|
 | Execution | PC-based loop | Dispatch tail-calls |
 | Stack | `ArrayList` with checks | Cache-aligned array, unsafe ops |
-| Memory | `ArrayList(u8)` per frame | `ArrayList(u8)` pooled per call depth |
+| Memory | Sparse `HashMap` | Word-aligned pages |
 | State | Direct maps | Journal + Database |
 | Handlers | Return after execution | Tail-call to next |
-| Fusion | None | 39 synthetic opcodes |
+| Fusion | None | 30+ synthetic opcodes |
 | Validation | Per-operation | Preprocessing |
 | Gas checking | Per-operation | Per-basic-block |
-| `.zig` files | 46 (`mini/src/`) | 187 (`src/`) |
-| `evm.zig` size | 97 KB | 340 KB |
+| Files | 3 in `src/tracer/` | Whole `src/` tree |

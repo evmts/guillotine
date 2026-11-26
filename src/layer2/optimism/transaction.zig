@@ -1,4 +1,5 @@
 const std = @import("std");
+const OpSpecId = @import("spec.zig").OpSpecId;
 
 /// Deposit transaction parts (EIP-2718 type 0x7E)
 ///
@@ -147,11 +148,44 @@ pub const OpTxType = enum(u8) {
     /// EIP-4844: Blob transaction
     Eip4844 = 0x03,
 
+    /// EIP-7702: Set code transaction. Accepted from Isthmus (Prague), see
+    /// specs.optimism.io/protocol/isthmus/exec-engine.html#eip-7702.
+    Eip7702 = 0x04,
+
     /// Optimism deposit transaction (type 0x7E / 126)
     ///
     /// This transaction type is specific to Optimism and represents
     /// a transaction initiated on L1 and executed on L2.
     Deposit = 0x7E,
+
+    pub const DecodeError = error{ EmptyEnvelope, UnknownTxType, TxTypeNotSupported };
+
+    /// Transaction type of an EIP-2718 envelope. A first byte >= 0xC0 is an RLP list
+    /// (legacy transaction); otherwise it is the type byte.
+    pub fn fromEnvelope(envelope: []const u8) DecodeError!OpTxType {
+        if (envelope.len == 0) return error.EmptyEnvelope;
+        const first = envelope[0];
+        if (first >= 0xc0) return .Legacy;
+        return std.enums.fromInt(OpTxType, first) orelse error.UnknownTxType;
+    }
+
+    /// True if `spec` accepts this type. Blob transactions are never valid on the
+    /// OP Stack (no L2 blob space; op-alloy `OpTxType` has no 0x03 variant).
+    /// EIP-7702 activates with Isthmus (Prague).
+    pub fn isSupported(self: OpTxType, spec: OpSpecId) bool {
+        return switch (self) {
+            .Legacy, .Eip2930, .Eip1559, .Deposit => true,
+            .Eip4844 => false,
+            .Eip7702 => spec.isAtLeast(.ISTHMUS),
+        };
+    }
+
+    /// Decode the type of `envelope` and reject types `spec` does not accept.
+    pub fn decode(envelope: []const u8, spec: OpSpecId) DecodeError!OpTxType {
+        const tx_type = try fromEnvelope(envelope);
+        if (!tx_type.isSupported(spec)) return error.TxTypeNotSupported;
+        return tx_type;
+    }
 
     /// Check if this transaction type is a deposit.
     pub fn isDeposit(self: OpTxType) bool {
@@ -165,6 +199,7 @@ pub const OpTxType = enum(u8) {
             .Eip2930 => "EIP-2930 (Access List)",
             .Eip1559 => "EIP-1559 (Fee Market)",
             .Eip4844 => "EIP-4844 (Blob)",
+            .Eip7702 => "EIP-7702 (Set Code)",
             .Deposit => "Deposit (OP)",
         };
     }
@@ -393,4 +428,33 @@ test "Integration: regular transaction with L1 data cost" {
     // Calculate L1 data gas: 2 zero bytes + 4 non-zero bytes
     const expected_gas: u64 = 2 * 4 + 4 * 16;
     try std.testing.expectEqual(expected_gas, op_tx.calculateDataGas());
+}
+
+test "OpTxType: EIP-7702 is type 0x04 and gated on Isthmus" {
+    try std.testing.expectEqual(@as(u8, 0x04), @intFromEnum(OpTxType.Eip7702));
+    try std.testing.expectEqualStrings("EIP-7702 (Set Code)", OpTxType.Eip7702.name());
+    try std.testing.expect(!OpTxType.Eip7702.isDeposit());
+    const envelope = [_]u8{ 0x04, 0xf8, 0x00 };
+    try std.testing.expectEqual(OpTxType.Eip7702, try OpTxType.fromEnvelope(&envelope));
+    for (OpSpecId.ALL) |spec| {
+        if (spec.isBefore(.ISTHMUS)) {
+            try std.testing.expectError(error.TxTypeNotSupported, OpTxType.decode(&envelope, spec));
+        } else {
+            try std.testing.expectEqual(OpTxType.Eip7702, try OpTxType.decode(&envelope, spec));
+        }
+    }
+}
+
+test "OpTxType: decode envelopes and reject blob and unknown types" {
+    try std.testing.expectEqual(OpTxType.Legacy, try OpTxType.decode(&.{ 0xf8, 0x6b }, .BEDROCK));
+    try std.testing.expectEqual(OpTxType.Legacy, try OpTxType.decode(&.{0xc0}, .JOVIAN));
+    try std.testing.expectEqual(OpTxType.Eip2930, try OpTxType.decode(&.{0x01}, .BEDROCK));
+    try std.testing.expectEqual(OpTxType.Eip1559, try OpTxType.decode(&.{0x02}, .JOVIAN));
+    try std.testing.expectEqual(OpTxType.Deposit, try OpTxType.decode(&.{0x7e}, .BEDROCK));
+    for (OpSpecId.ALL) |spec| {
+        try std.testing.expectError(error.TxTypeNotSupported, OpTxType.decode(&.{0x03}, spec));
+    }
+    try std.testing.expectError(error.UnknownTxType, OpTxType.decode(&.{0x05}, .JOVIAN));
+    try std.testing.expectError(error.UnknownTxType, OpTxType.decode(&.{0x7f}, .JOVIAN));
+    try std.testing.expectError(error.EmptyEnvelope, OpTxType.decode(&.{}, .JOVIAN));
 }

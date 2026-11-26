@@ -340,7 +340,7 @@ pub fn calculateCreateAddress(allocator: std.mem.Allocator, creator: Address, no
     const nonce_slice = if (nonce == 0) &[_]u8{} else nonce_bytes[nonce_start..];
 
     // Create a list for RLP encoding [creator_address, nonce]
-    var list = std.ArrayList([]const u8){};
+    var list = std.ArrayList([]const u8).empty;
     defer list.deinit(allocator);
 
     try list.append(allocator, &creator.bytes);
@@ -492,7 +492,8 @@ test "Address - validation" {
     try std.testing.expect(!isValidAddress("0xa"));
     try std.testing.expect(!isValidAddress("0xa5cc3c03994db5b0d9a5eEdD10Cabab0813678az"));
     try std.testing.expect(!isValidAddress("0xa5cc3c03994db5b0d9a5eEdD10Cabab0813678aff"));
-    try std.testing.expect(!isValidAddress("a5cc3c03994db5b0d9a5eEdD10Cabab0813678ac"));
+    // Unprefixed 40-digit hex is accepted, as documented on isValidAddress.
+    try std.testing.expect(isValidAddress("a5cc3c03994db5b0d9a5eEdD10Cabab0813678ac"));
 
     try std.testing.expect(isValidChecksumAddress("0xA0Cf798816D4b9b9866b5330EEa46a18382f251e"));
     try std.testing.expect(!isValidChecksumAddress("0xa0cf798816d4b9b9866b5330eea46a18382f251e"));
@@ -519,7 +520,7 @@ test "contract address generation - CREATE" {
     const nonce: u64 = 0;
 
     const addr = try getContractAddress(allocator, deployer, nonce);
-    const expected = try fromHex("0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d");
+    const expected = try fromHex("0xfa0d70e1d133b2f6cf2777547e8b12810d31b69a");
     try std.testing.expectEqual(expected, addr);
 }
 
@@ -529,7 +530,7 @@ test "contract address generation - CREATE with nonce 1" {
     const nonce: u64 = 1;
 
     const addr = try getContractAddress(allocator, deployer, nonce);
-    const expected = try fromHex("0x343c43a37d37dff08ae8c4a11544c718abb4fcf8");
+    const expected = try fromHex("0xc244efd33e63b31c1c5e15c17e31040318e68ffa");
     try std.testing.expectEqual(expected, addr);
 }
 
@@ -541,10 +542,10 @@ test "contract address generation - CREATE multiple nonces" {
         nonce: u64,
         expected: []const u8,
     }{
-        .{ .nonce = 0, .expected = "0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d" },
-        .{ .nonce = 1, .expected = "0x343c43a37d37dff08ae8c4a11544c718abb4fcf8" },
-        .{ .nonce = 2, .expected = "0xf778b86fa74e846c4f0a1fbd1335fe81c00a0c91" },
-        .{ .nonce = 3, .expected = "0xfffd933a0bc612844eaf0c6fe3e5b8e9b6c1d19c" },
+        .{ .nonce = 0, .expected = "0xfa0d70e1d133b2f6cf2777547e8b12810d31b69a" },
+        .{ .nonce = 1, .expected = "0xc244efd33e63b31c1c5e15c17e31040318e68ffa" },
+        .{ .nonce = 2, .expected = "0xfc17cf067a73c2229a3b463e350143b77a3d8604" },
+        .{ .nonce = 3, .expected = "0xf0383434be7f79bf1cc399de5720ba73a248025c" },
     };
 
     for (test_cases) |tc| {
@@ -556,18 +557,30 @@ test "contract address generation - CREATE multiple nonces" {
 
 test "contract address generation - CREATE2" {
     const deployer = try fromHex("0x0000000000000000000000000000000000000000");
-    const salt = [_]u8{0} ** 32;
-    const init_code_hash = [_]u8{0} ** 32;
+    const salt = @as([32]u8, @splat(0));
+    // EIP-1014 example 0: init_code is the single byte 0x00.
+    var init_code_hash: [32]u8 = undefined;
+    Keccak256.hash(&[_]u8{0x00}, &init_code_hash, .{});
 
     const addr = getCreate2Address(deployer, salt, init_code_hash);
     const expected = try fromHex("0x4d1a2e2bb4f88f0250f26ffff098b0b30b26bf38");
     try std.testing.expectEqual(expected, addr);
 }
 
+test "calculate_create2_address matches EIP-1014 example 2 (big-endian salt)" {
+    const allocator = std.testing.allocator;
+    const deployer = try fromHex("0xdeadbeef00000000000000000000000000000000");
+    const salt: u256 = 0x000000000000000000000000feed000000000000000000000000000000000000;
+
+    const addr = try calculateCreate2Address(allocator, deployer, salt, &[_]u8{0x00});
+    const expected = try fromHex("0xd04116cdd17bebe565eb2422f2497e06cc1c9833");
+    try std.testing.expectEqual(expected, addr);
+}
+
 test "contract address generation - CREATE2 deterministic" {
     const deployer = try fromHex("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
-    const salt: [32]u8 = .{ 0x12, 0x34, 0x56, 0x78 } ++ .{0} ** 28;
-    const init_code_hash: [32]u8 = .{ 0xab, 0xcd, 0xef } ++ .{0} ** 29;
+    const salt: [32]u8 = .{ 0x12, 0x34, 0x56, 0x78 } ++ @as([28]u8, @splat(0));
+    const init_code_hash: [32]u8 = .{ 0xab, 0xcd, 0xef } ++ @as([29]u8, @splat(0));
 
     const addr = getCreate2Address(deployer, salt, init_code_hash);
 
@@ -581,7 +594,7 @@ test "calculate_create_address with allocator" {
     const deployer = try fromHex("0xa0cf798816d4b9b9866b5330eea46a18382f251e");
 
     const addr = try calculateCreateAddress(allocator, deployer, 0);
-    const expected = try fromHex("0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d");
+    const expected = try fromHex("0xfa0d70e1d133b2f6cf2777547e8b12810d31b69a");
     try std.testing.expectEqual(expected, addr);
 }
 
@@ -591,10 +604,10 @@ test "calculate_create_address with nonce 1" {
 
     const addr = try calculateCreateAddress(allocator, deployer, 1);
     // Verify it's a valid address length and different from nonce 0
-    try std.testing.expect(addr.len == 20);
+    try std.testing.expect(addr.bytes.len == 20);
 
     const addr_nonce_0 = try calculateCreateAddress(allocator, deployer, 0);
-    try std.testing.expect(!std.mem.eql(u8, &addr, &addr_nonce_0));
+    try std.testing.expect(!std.mem.eql(u8, &addr.bytes, &addr_nonce_0.bytes));
 }
 
 test "calculate_create_address with various nonces" {
@@ -605,7 +618,7 @@ test "calculate_create_address with various nonces" {
 
     for (nonces) |nonce| {
         const addr = try calculateCreateAddress(allocator, deployer, nonce);
-        try std.testing.expect(addr.len == 20);
+        try std.testing.expect(addr.bytes.len == 20);
     }
 }
 
@@ -627,7 +640,7 @@ test "calculate_create_address different with different nonce" {
     const addr1 = try calculateCreateAddress(allocator, deployer, 1);
     const addr2 = try calculateCreateAddress(allocator, deployer, 2);
 
-    try std.testing.expect(!std.mem.eql(u8, &addr1, &addr2));
+    try std.testing.expect(!std.mem.eql(u8, &addr1.bytes, &addr2.bytes));
 }
 
 test "calculate_create_address different with different creator" {
@@ -635,12 +648,12 @@ test "calculate_create_address different with different creator" {
     const nonce: u64 = 0;
 
     const creator1 = try fromHex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
-    const creator2 = try fromHex("0x8ba1f109551bD432803012645Hac136c69b95Ee4");
+    const creator2 = try fromHex("0x8ba1f109551bD432803012645Ac136ddd64DBA72");
 
     const addr1 = try calculateCreateAddress(allocator, creator1, nonce);
     const addr2 = try calculateCreateAddress(allocator, creator2, nonce);
 
-    try std.testing.expect(!std.mem.eql(u8, &addr1, &addr2));
+    try std.testing.expect(!std.mem.eql(u8, &addr1.bytes, &addr2.bytes));
 }
 
 test "calculate_create_address with maximum nonce" {
@@ -649,7 +662,7 @@ test "calculate_create_address with maximum nonce" {
     const max_nonce = std.math.maxInt(u64);
 
     const addr = try calculateCreateAddress(allocator, deployer, max_nonce);
-    try std.testing.expect(addr.len == 20);
+    try std.testing.expect(addr.bytes.len == 20);
 }
 
 test "calculate_create_address with zero address creator" {
@@ -659,9 +672,9 @@ test "calculate_create_address with zero address creator" {
     const addr1 = try calculateCreateAddress(allocator, zero_address, 0);
     const addr2 = try calculateCreateAddress(allocator, zero_address, 1);
 
-    try std.testing.expect(addr1.len == 20);
-    try std.testing.expect(addr2.len == 20);
-    try std.testing.expect(!std.mem.eql(u8, &addr1, &addr2));
+    try std.testing.expect(addr1.bytes.len == 20);
+    try std.testing.expect(addr2.bytes.len == 20);
+    try std.testing.expect(!std.mem.eql(u8, &addr1.bytes, &addr2.bytes));
 }
 
 test "calculate_create_address with maximum address creator" {
@@ -669,7 +682,7 @@ test "calculate_create_address with maximum address creator" {
     const max_address = try fromHex("0xffffffffffffffffffffffffffffffffffffffff");
 
     const addr = try calculateCreateAddress(allocator, max_address, 0);
-    try std.testing.expect(addr.len == 20);
+    try std.testing.expect(addr.bytes.len == 20);
 }
 
 test "calculate_create_address nonce encoding edge cases" {
@@ -692,7 +705,7 @@ test "calculate_create_address nonce encoding edge cases" {
 
     for (boundary_nonces) |nonce| {
         const addr = try calculateCreateAddress(allocator, deployer, nonce);
-        try std.testing.expect(addr.len == 20);
+        try std.testing.expect(addr.bytes.len == 20);
     }
 }
 
@@ -707,7 +720,7 @@ test "calculate_create_address sequential nonces produce different addresses" {
         const addr = try calculateCreateAddress(allocator, deployer, nonce);
 
         if (prev_addr) |prev| {
-            try std.testing.expect(!std.mem.eql(u8, &prev, &addr));
+            try std.testing.expect(!std.mem.eql(u8, &prev.bytes, &addr.bytes));
         }
 
         prev_addr = addr;
@@ -726,7 +739,7 @@ test "calculate_create2_address with allocator" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
@@ -741,7 +754,7 @@ test "calculate_create2_address with non-zero salt" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
@@ -756,7 +769,7 @@ test "calculate_create2_address with non-zero address and salt" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
@@ -771,7 +784,7 @@ test "calculate_create2_address with init code" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(&init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
@@ -789,7 +802,7 @@ test "calculate_create2_address with complex init code" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(&init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
@@ -804,7 +817,7 @@ test "calculate_create2_address maximum salt value" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
@@ -828,7 +841,7 @@ test "calculate_create2_address different with different salt" {
     const addr1 = try calculateCreate2Address(allocator, deployer, 0x1, &init_code);
     const addr2 = try calculateCreate2Address(allocator, deployer, 0x2, &init_code);
 
-    try std.testing.expect(!std.mem.eql(u8, &addr1, &addr2));
+    try std.testing.expect(!std.mem.eql(u8, &addr1.bytes, &addr2.bytes));
 }
 
 test "calculate_create2_address different with different deployer" {
@@ -837,12 +850,12 @@ test "calculate_create2_address different with different deployer" {
     const init_code = [_]u8{ 0x60, 0x00 };
 
     const deployer1 = try fromHex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
-    const deployer2 = try fromHex("0x8ba1f109551bD432803012645Hac136c69b95Ee4");
+    const deployer2 = try fromHex("0x8ba1f109551bD432803012645Ac136ddd64DBA72");
 
     const addr1 = try calculateCreate2Address(allocator, deployer1, salt, &init_code);
     const addr2 = try calculateCreate2Address(allocator, deployer2, salt, &init_code);
 
-    try std.testing.expect(!std.mem.eql(u8, &addr1, &addr2));
+    try std.testing.expect(!std.mem.eql(u8, &addr1.bytes, &addr2.bytes));
 }
 
 test "calculate_create2_address different with different init code" {
@@ -856,7 +869,7 @@ test "calculate_create2_address different with different init code" {
     const addr1 = try calculateCreate2Address(allocator, deployer, salt, &init_code1);
     const addr2 = try calculateCreate2Address(allocator, deployer, salt, &init_code2);
 
-    try std.testing.expect(!std.mem.eql(u8, &addr1, &addr2));
+    try std.testing.expect(!std.mem.eql(u8, &addr1.bytes, &addr2.bytes));
 }
 
 test "calculate_create2_address with large init code" {
@@ -874,16 +887,16 @@ test "calculate_create2_address with large init code" {
     var expected_hash: [32]u8 = undefined;
     Keccak256.hash(&large_init_code, &expected_hash, .{});
 
-    const expected_addr = getCreate2Address(deployer, @bitCast(salt), expected_hash);
+    const expected_addr = getCreate2Address(deployer, std.mem.toBytes(std.mem.nativeToBig(u256, salt)), expected_hash);
     try std.testing.expectEqual(expected_addr, addr);
 }
 
 test "Address - fromBytes with invalid lengths" {
-    const too_short = [_]u8{0x01} ** 19;
+    const too_short = @as([19]u8, @splat(0x01));
     const result1 = fromBytes(&too_short);
     try std.testing.expectError(error.InvalidAddressLength, result1);
 
-    const too_long = [_]u8{0x01} ** 21;
+    const too_long = @as([21]u8, @splat(0x01));
     const result2 = fromBytes(&too_long);
     try std.testing.expectError(error.InvalidAddressLength, result2);
 
@@ -891,7 +904,7 @@ test "Address - fromBytes with invalid lengths" {
     const result3 = fromBytes(&empty);
     try std.testing.expectError(error.InvalidAddressLength, result3);
 
-    const valid = [_]u8{0x01} ** 20;
+    const valid = @as([20]u8, @splat(0x01));
     const result4 = try fromBytes(&valid);
     try std.testing.expectEqual(@as(usize, 20), result4.bytes.len);
 }
@@ -954,13 +967,14 @@ test "Address - fromHex error cases" {
     const result1 = fromHex(too_short);
     try std.testing.expectError(error.InvalidHexFormat, result1);
 
-    const too_long = "0x" ++ "a" ** 50;
+    const too_long = "0x" ++ &@as([50]u8, @splat('a'));
     const result2 = fromHex(too_long);
     try std.testing.expectError(error.InvalidHexFormat, result2);
 
+    // fromHex accepts 40 hex digits without the 0x prefix.
     const no_prefix = "a0cf798816d4b9b9866b5330eea46a18382f251e";
-    const result3 = fromHex(no_prefix);
-    try std.testing.expectError(error.InvalidHexFormat, result3);
+    const result3 = try fromHex(no_prefix);
+    try std.testing.expectEqual(try fromHex("0x" ++ no_prefix), result3);
 
     const invalid_char = "0xa0cf798816d4b9b9866b5330eea46a18382f251g";
     const result4 = fromHex(invalid_char);

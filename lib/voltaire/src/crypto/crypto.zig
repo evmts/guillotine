@@ -122,7 +122,7 @@ pub const CryptoError = error{
     SigningFailed,
     RecoveryFailed,
     OutOfMemory,
-    NotImplemented,
+    UnsupportedOperation,
 };
 
 // Type definitions
@@ -362,6 +362,11 @@ pub const bls12_381 = struct {
         return bls12_381_pairing_output_size();
     }
 
+    fn validateFp(bytes: *const [64]u8) Error!void {
+        const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
+        if (std.mem.readInt(u512, bytes, .big) >= modulus) return Error.InvalidPoint;
+    }
+
     /// Map field element to G1 curve point
     /// Implements draft-irtf-cfrg-hash-to-curve for BLS12-381 G1
     /// Input: 64 bytes (Fp field element, big-endian, padded)
@@ -374,9 +379,12 @@ pub const bls12_381 = struct {
         const c_kzg = @import("c_kzg");
         const blst = c_kzg.blst;
 
+        try validateFp(input[0..64]);
+        @memset(output, 0);
+
         // Parse input as Fp field element (big-endian, padded to 64 bytes)
         var fp: blst.blst_fp = undefined;
-        blst.blst_fp_from_bendian(&fp, input.ptr);
+        blst.blst_fp_from_bendian(&fp, input.ptr + 16);
 
         // Map Fp to G1 point (Jacobian coordinates)
         var p1: blst.blst_p1 = undefined;
@@ -387,8 +395,8 @@ pub const bls12_381 = struct {
         blst.blst_p1_to_affine(&p1_affine, &p1);
 
         // Serialize affine point to output (x || y, big-endian, 64 bytes each)
-        blst.blst_bendian_from_fp(output.ptr, &p1_affine.x);
-        blst.blst_bendian_from_fp(output.ptr + 64, &p1_affine.y);
+        blst.blst_bendian_from_fp(output.ptr + 16, &p1_affine.x);
+        blst.blst_bendian_from_fp(output.ptr + 80, &p1_affine.y);
     }
 
     /// Map field extension element to G2 curve point
@@ -403,10 +411,14 @@ pub const bls12_381 = struct {
         const c_kzg = @import("c_kzg");
         const blst = c_kzg.blst;
 
+        try validateFp(input[0..64]);
+        try validateFp(input[64..128]);
+        @memset(output, 0);
+
         // Parse input as Fp2 element (c0 || c1, each 64 bytes big-endian)
         var fp2: blst.blst_fp2 = undefined;
-        blst.blst_fp_from_bendian(&fp2.fp[0], input.ptr); // c0
-        blst.blst_fp_from_bendian(&fp2.fp[1], input.ptr + 64); // c1
+        blst.blst_fp_from_bendian(&fp2.fp[0], input.ptr + 16); // c0
+        blst.blst_fp_from_bendian(&fp2.fp[1], input.ptr + 80); // c1
 
         // Map Fp2 to G2 point (Jacobian coordinates)
         var p2: blst.blst_p2 = undefined;
@@ -417,10 +429,10 @@ pub const bls12_381 = struct {
         blst.blst_p2_to_affine(&p2_affine, &p2);
 
         // Serialize affine point to output (x.c0 || x.c1 || y.c0 || y.c1)
-        blst.blst_bendian_from_fp(output.ptr, &p2_affine.x.fp[0]);
-        blst.blst_bendian_from_fp(output.ptr + 64, &p2_affine.x.fp[1]);
-        blst.blst_bendian_from_fp(output.ptr + 128, &p2_affine.y.fp[0]);
-        blst.blst_bendian_from_fp(output.ptr + 192, &p2_affine.y.fp[1]);
+        blst.blst_bendian_from_fp(output.ptr + 16, &p2_affine.x.fp[0]);
+        blst.blst_bendian_from_fp(output.ptr + 80, &p2_affine.x.fp[1]);
+        blst.blst_bendian_from_fp(output.ptr + 144, &p2_affine.y.fp[0]);
+        blst.blst_bendian_from_fp(output.ptr + 208, &p2_affine.y.fp[1]);
     }
 
     /// Perform BLS12-381 pairing check (returns bool)
@@ -429,76 +441,9 @@ pub const bls12_381 = struct {
     ///        G1 point: 128 bytes (x || y, each 64 bytes)
     ///        G2 point: 256 bytes (x0 || x1 || y0 || y1, each 64 bytes)
     pub fn pairingCheck(input: []const u8) Error!bool {
-        if (input.len % 384 != 0) return Error.InvalidInput;
-
-        // Import blst types from c_kzg module
-        const c_kzg = @import("c_kzg");
-        const blst = c_kzg.blst;
-
-        const num_pairs = input.len / 384;
-
-        // Special case: empty input means pairing of identity elements, which is 1
-        if (num_pairs == 0) {
-            return true;
-        }
-
-        // Parse and accumulate pairings
-        var i: usize = 0;
-        var acc: blst.blst_fp12 = undefined;
-
-        while (i < num_pairs) : (i += 1) {
-            const offset = i * 384;
-            const g1_bytes = input[offset .. offset + 128];
-            const g2_bytes = input[offset + 128 .. offset + 384];
-
-            // Parse G1 point (128 bytes: x || y)
-            var p1_affine: blst.blst_p1_affine = undefined;
-            blst.blst_fp_from_bendian(&p1_affine.x, g1_bytes.ptr);
-            blst.blst_fp_from_bendian(&p1_affine.y, g1_bytes.ptr + 64);
-
-            // Validate G1 point
-            if (!blst.blst_p1_affine_on_curve(&p1_affine)) {
-                return Error.InvalidPoint;
-            }
-            if (!blst.blst_p1_affine_in_g1(&p1_affine)) {
-                return Error.InvalidPoint;
-            }
-
-            // Parse G2 point (256 bytes: x0 || x1 || y0 || y1)
-            var p2_affine: blst.blst_p2_affine = undefined;
-            blst.blst_fp_from_bendian(&p2_affine.x.fp[0], g2_bytes.ptr);
-            blst.blst_fp_from_bendian(&p2_affine.x.fp[1], g2_bytes.ptr + 64);
-            blst.blst_fp_from_bendian(&p2_affine.y.fp[0], g2_bytes.ptr + 128);
-            blst.blst_fp_from_bendian(&p2_affine.y.fp[1], g2_bytes.ptr + 192);
-
-            // Validate G2 point
-            if (!blst.blst_p2_affine_on_curve(&p2_affine)) {
-                return Error.InvalidPoint;
-            }
-            if (!blst.blst_p2_affine_in_g2(&p2_affine)) {
-                return Error.InvalidPoint;
-            }
-
-            // Compute Miller loop for this pair
-            var loop_result: blst.blst_fp12 = undefined;
-            blst.blst_miller_loop(&loop_result, &p2_affine, &p1_affine);
-
-            // Accumulate results by multiplication
-            if (i == 0) {
-                acc = loop_result;
-            } else {
-                var temp: blst.blst_fp12 = undefined;
-                blst.blst_fp12_mul(&temp, &acc, &loop_result);
-                acc = temp;
-            }
-        }
-
-        // Apply final exponentiation
-        var final: blst.blst_fp12 = undefined;
-        blst.blst_final_exp(&final, &acc);
-
-        // Check if result is 1 (identity element in GT)
-        return blst.blst_fp12_is_one(&final);
+        var output: [32]u8 = undefined;
+        try pairing(input, &output);
+        return output[31] == 1;
     }
 
     // CamelCase aliases for consistency with G2 naming and precompile expectations
@@ -613,10 +558,10 @@ fn unaudited_rfc6979Nonce(hash: Hash.Hash, private_key: PrivateKey) u256 {
     // x = int2octets(private_key)
 
     // Step c: Initialize V to 0x01 repeated hlen times
-    var v: [hlen]u8 = [_]u8{0x01} ** hlen;
+    var v: [hlen]u8 = @as([hlen]u8, @splat(0x01));
 
     // Step d: Initialize K to 0x00 repeated hlen times
-    var k: [hlen]u8 = [_]u8{0x00} ** hlen;
+    var k: [hlen]u8 = @as([hlen]u8, @splat(0x00));
 
     // Step e: K = HMAC_K(V || 0x00 || int2octets(x) || bits2octets(h1))
     {
@@ -851,7 +796,7 @@ test "address derivation" {
     const address = public_key.toAddress();
 
     // Verify address is not zero
-    const zero_address = [_]u8{0} ** 20;
+    const zero_address = @as([20]u8, @splat(0));
     try testing.expect(!std.mem.eql(u8, &address, &zero_address));
 }
 
@@ -929,7 +874,7 @@ test "invalid signature rejection" {
     try testing.expect(!try unaudited_verifyMessage(wrong_message, signature, expected_address));
 
     // Test with wrong address
-    const wrong_address = [_]u8{0xFF} ** 20;
+    const wrong_address = @as([20]u8, @splat(0xFF));
     try testing.expect(!try unaudited_verifyMessage(message, signature, wrong_address));
 
     // Test with invalid signature
@@ -1045,7 +990,7 @@ test "generate private key" {
     try testing.expectEqual(@as(usize, 32), key2.len);
 
     // Keys should not be zero
-    const zero_key = [_]u8{0} ** 32;
+    const zero_key = @as([32]u8, @splat(0));
     try testing.expect(!std.mem.eql(u8, &key1, &zero_key));
     try testing.expect(!std.mem.eql(u8, &key2, &zero_key));
 }

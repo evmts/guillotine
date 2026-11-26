@@ -46,14 +46,11 @@ The Performance EVM transforms bytecode into an optimized dispatch schedule befo
 Unlike traditional interpreters, the Performance EVM uses dispatch-based execution:
 
 ```zig
-// src/frame/frame.zig:66
+// src/frame/frame.zig:62
 pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item) Error!noreturn;
 
-// src/instructions/handlers_arithmetic.zig:71
 // Handler pattern: tail-call to next instruction
 pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.ADD, cursor);
-
     // Pre-validated: use unsafe operations
     self.stack.binary_op_unsafe(struct {
         fn op(top: WordType, second: WordType) WordType {
@@ -61,21 +58,20 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
         }
     }.op);
 
-    // Tail-call next handler (no return); see src/instructions/dispatch_next.zig
-    return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+    // Tail-call next handler (no return)
+    return @call(.always_tail, next_handler, .{self, next_cursor});
 }
 ```
 
 ### Dispatch Schedule Structure
 
 ```zig
-// src/preprocessor/dispatch.zig:33-41
-// Untagged union: exactly 8 bytes in ReleaseFast/ReleaseSmall
-pub const Item = union {
+// src/preprocessor/dispatch.zig:32-40
+pub const Item = union(enum) {
     opcode_handler: OpcodeHandler,          // Function pointer
     jump_dest: JumpDestMetadata,            // Gas cost, stack requirements
-    push_inline: PushInlineMetadata,        // Values ≤8 bytes (embedded)
-    push_pointer: PushPointerMetadata,      // Values >8 bytes (heap pointer)
+    push_inline: PushInlineMetadata,        // One 64-bit limb of a PUSH value (PUSH9-32 use 2-4)
+    push_pointer: PushPointerMetadata,      // Fused PUSH+op operand wider than 64 bits
     pc: PcMetadata,                         // PC opcode metadata
     jump_static: JumpStaticMetadata,        // Pre-resolved jump destination
     first_block_gas: FirstBlockMetadata,    // Basic block gas requirement
@@ -91,7 +87,7 @@ Bytecode:  [PUSH1, 0x01, PUSH1, 0x02, ADD, JUMP]
 PC:           0     1     2     3    4     5
 
 Dispatch Schedule:
-[0] first_block_gas { gas: 17 }     ← Metadata, not an instruction
+[0] first_block_gas { gas: 15 }     ← Metadata, not an instruction
 [1] PUSH1_handler                   ← Cursor starts here
 [2] push_inline { value: 1 }        ← Metadata for PUSH1
 [3] PUSH1_handler
@@ -100,16 +96,11 @@ Dispatch Schedule:
 [6] JUMP_handler
 ```
 
-This schedule assumes fusion is off (comptime `EvmConfig{ .enable_fusion = false }`; the `-Devm-enable-fusion` build option is not read by any code). Fusion is on
-by default and replaces some handler and metadata pairs with synthetic handlers.
-The builder also appends terminal STOP and `INVALID_JUMP_TARGET` handlers after
-the last instruction.
-
 ## Source Structure
 
 ```
 src/
-├── evm.zig (340KB)                 # EVM orchestrator
+├── evm.zig (270KB)                 # EVM orchestrator
 ├── frame/
 │   ├── frame.zig                   # Dispatch-based executor
 │   ├── frame_config.zig            # Configuration
@@ -126,8 +117,8 @@ src/
 │   ├── handlers_*.zig              # Standard handlers
 │   └── handlers_*_synthetic.zig    # Fusion handlers
 ├── storage/
-│   ├── database.zig (120KB)        # World state
-│   ├── journal.zig (53KB)          # Snapshot system
+│   ├── database.zig (88KB)         # World state
+│   ├── journal.zig (34KB)          # Snapshot system
 │   └── access_list.zig             # EIP-2929 tracking
 └── tracer/
     ├── tracer.zig                  # Execution monitoring
@@ -141,30 +132,26 @@ src/
 Common patterns detected and combined:
 
 ```zig
-// src/opcodes/opcode_synthetic.zig:17-64
+// src/opcodes/opcode_synthetic.zig:17-60
 pub const OpcodeSynthetic = enum(u8) {
     PUSH_ADD_INLINE = 0xA5,           // PUSH + ADD
     PUSH_MUL_INLINE = 0xA7,           // PUSH + MUL
     PUSH_MSTORE_INLINE = 0xB3,        // PUSH + MSTORE
-    FUNCTION_DISPATCH = 0xC8,         // PUSH4 + EQ + PUSH + JUMPI
-    CALLVALUE_CHECK = 0xC9,           // CALLVALUE + DUP1 + ISZERO
-    // ... 30+ fusion patterns
+    ISZERO_JUMPI = 0xC3,              // ISZERO + PUSH + JUMPI
+    PUSH_ADD_DUP1_INLINE = 0xCB,      // PUSH + ADD + DUP1
+    // ... every listed fusion is emitted by the schedule builder
 };
 ```
 
 ### 2. Tail-Call Execution
 
 ```zig
-// src/preprocessor/dispatch.zig:19
 // Every handler ends with tail-call, no loop needed
 pub inline fn getTailCallModifier() std.builtin.CallModifier {
-    return if (comptime builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
-        .auto
-    else
-        .always_tail;
+    return if (comptime is_wasm) .auto else .always_tail;
 }
 
-return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+return @call(Self.getTailCallModifier(), next_handler, .{self, cursor});
 ```
 
 ### 3. Inline Metadata
@@ -172,11 +159,11 @@ return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ 
 Push values embedded directly in schedule:
 
 ```zig
-// Small values (≤8 bytes) inline
+// PUSH values are stored inline as 64-bit limbs: 1 for PUSH1-8, up to 4 for PUSH25-32
 push_inline: PushInlineMetadata { .value: u64 }
 
-// Large values (>8 bytes) heap-allocated
-push_pointer: PushPointerMetadata { .value_ptr: *const WordType }
+// Only a fused PUSH+op whose operand is wider than 64 bits points into the arena
+push_pointer: PushPointerMetadata { .value_ptr: *const u256 }
 ```
 
 ### 4. Gas Batching
@@ -185,11 +172,10 @@ Gas calculated per basic block, not per instruction:
 
 ```zig
 // First schedule item contains block gas
-// src/preprocessor/dispatch_metadata.zig (FirstBlockMetadata = JumpDestMetadata)
 first_block_gas: FirstBlockMetadata {
-    .gas: u32,          // Total gas for basic block
-    .min_stack: i16,    // Minimum stack items required
-    .max_stack: i16,    // Maximum stack growth
+    .gas: u64,          // Total gas for basic block
+    .min_stack: u8,     // Minimum stack items required
+    .max_stack: u8,     // Maximum stack growth
 }
 ```
 
@@ -224,7 +210,7 @@ zig build bench
 | Bytecode reads | Per instruction | None (preprocessed) |
 | Stack ops | Bounds-checked | Pre-validated unsafe |
 | Gas checks | Per instruction | Per basic block |
-| Complexity | ~46 `.zig` files in `mini/src` | ~187 `.zig` files in `src` |
+| Complexity | ~46 files | ~158 files |
 | Speed | Baseline | 2-10x faster |
 
 ## Further Reading

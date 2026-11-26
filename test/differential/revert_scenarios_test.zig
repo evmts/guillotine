@@ -236,7 +236,14 @@ test "differential: STATICCALL that attempts state modification" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    // The callee is this same code, so it recurses through STATICCALL with
+    // 10,000 gas until the innermost call runs out of gas. Each caller keeps
+    // only 1/64 of its gas, too little for the cold SLOAD (2,100) once its child
+    // failed and the slot's warm access was reverted (EIP-2929), so every level
+    // fails. MinimalEvm does not revert warm slots and lets an outer level pass.
+    // Word 0 is the MSTORE8-written code, then call result 0 and SLOAD 0.
+    const expected = ([_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55 } ++ @as([27]u8, @splat(0))) ++ @as([96]u8, @splat(0));
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }
 
 test "differential: CALL chain with multiple reverts" {

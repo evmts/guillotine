@@ -2,6 +2,7 @@ const std = @import("std");
 const crypto = @import("crypto");
 const utils = @import("utils.zig");
 const PrecompileError = @import("common.zig").PrecompileError;
+const backend_error = @import("bls12_backend_error.zig");
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas costs for BLS12-381 G2 MSM
@@ -27,9 +28,8 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 256);
     errdefer allocator.free(output);
-    errdefer allocator.free(output);
-    crypto.Crypto.bls12_381.g2Msm(input, output) catch {
-        return error.InvalidPoint;
+    crypto.Crypto.bls12_381.g2Msm(input, output) catch |err| {
+        return backend_error.precompileError(err, error.InvalidPoint);
     };
 
     return PrecompileResult{
@@ -52,7 +52,7 @@ test "bls12_g2_msm - invalid input length not multiple of 288" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 300;
+    const input = @as([300]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
 
     try testing.expectError(error.InvalidInput, result);
@@ -62,7 +62,7 @@ test "bls12_g2_msm - single pair gas cost with discount" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 288;
+    const input = @as([288]u8, @splat(0));
     const k = 1;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -83,7 +83,7 @@ test "bls12_g2_msm - two pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 2);
+    const input = @as([(288 * 2)]u8, @splat(0));
     const k = 2;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -106,7 +106,7 @@ test "bls12_g2_msm - four pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 4);
+    const input = @as([(288 * 4)]u8, @splat(0));
     const k = 4;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -129,7 +129,7 @@ test "bls12_g2_msm - eight pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 8);
+    const input = @as([(288 * 8)]u8, @splat(0));
     const k = 8;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -152,7 +152,7 @@ test "bls12_g2_msm - sixteen pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 16);
+    const input = @as([(288 * 16)]u8, @splat(0));
     const k = 16;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -175,7 +175,7 @@ test "bls12_g2_msm - thirty-two pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 32);
+    const input = @as([(288 * 32)]u8, @splat(0));
     const k = 32;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -198,7 +198,7 @@ test "bls12_g2_msm - sixty-four pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 64);
+    const input = @as([(288 * 64)]u8, @splat(0));
     const k = 64;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -221,7 +221,7 @@ test "bls12_g2_msm - one hundred twenty-eight pairs discount tier" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** (288 * 128);
+    const input = @as([(288 * 128)]u8, @splat(0));
     const k = 128;
     const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -247,7 +247,7 @@ test "bls12_g2_msm - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 288;
+    const input = @as([288]u8, @splat(0));
     const k = 1;
     const discount = utils.msmDiscountG2(k);
     const gas_cost = (BASE_GAS * k * discount) / 1000;
@@ -261,7 +261,7 @@ test "bls12_g2_msm - output length" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 288;
+    const input = @as([288]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
 
     if (result) |res| {
@@ -271,5 +271,21 @@ test "bls12_g2_msm - output length" {
         if (err != error.InvalidPoint) {
             return err;
         }
+    }
+}
+
+test "EIP-2537 g2_msm rejects padding and noncanonical field elements without leaking" {
+    var input = @as([288]u8, @splat(0));
+    const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
+    for (0..4) |slot| {
+        const offset = slot * 64;
+        for (0..16) |padding| {
+            input[offset + padding] = 1;
+            try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, 1_000_000));
+            input[offset + padding] = 0;
+        }
+        std.mem.writeInt(u512, input[offset..][0..64], modulus, .big);
+        try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, 1_000_000));
+        @memset(input[offset..][0..64], 0);
     }
 }

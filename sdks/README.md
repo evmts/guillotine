@@ -6,42 +6,43 @@ Guillotine officially ships three integration surfaces:
 | --- | --- | --- |
 | Zig native bindings | Repository root, `src/root.zig` | Import the EVM and its types directly from Zig. |
 | C FFI bindings | [`c/`](c/), `src/evm_c_api.zig` | Embed the native EVM or build a custom language SDK. |
-| `@tevm/guillotine` TypeScript npm package | [`typescript/`](typescript/) | Call the native library from Bun through Bun FFI (Bun ≥ 1.1; Node.js and browsers are not supported). |
+| `@tevm/guillotine` TypeScript package | [`typescript/`](typescript/) | Call the native EVM from Bun through `bun:ffi`. |
 
-The C and TypeScript APIs are experimental and may change. The TypeScript
-package source is `sdks/typescript`. `sdks/wasm/build.zig` is not called by the
-root build and the TypeScript package does not use it.
+The C and TypeScript APIs are experimental and may change.
 
-Python, Go, Rust, Swift, and Kotlin/JNI integrations are custom
-SDKs built on the C/Zig FFI, rather than separately maintained language SDKs in
-this repository. Start with [Building custom SDKs](../docs/building-custom-sdks.md)
+The TypeScript package is a Bun native FFI binding over `libguillotine_ffi`,
+the shared library built from `src/evm_c_api.zig`. It loads the library from
+`GUILLOTINE_LIB_PATH` or from the `prebuilds/<platform>-<arch>/` directory
+packaged with it (`bun run build:native` fills that directory). It requires
+Bun and does not run in Node.js or browsers.
+
+Python, Go, Rust, Swift, Kotlin/JNI, and direct `bun:ffi` integrations are
+custom SDKs built on the C ABI, not separately maintained packages in this
+repository. Start with [Building custom SDKs](../docs/building-custom-sdks.md)
 and the [SDK builder skill](../.agents/skills/guillotine-sdk-builder/SKILL.md)
-(also available at [`skills/guillotine-sdk-builder`](../skills/guillotine-sdk-builder/SKILL.md)).
+(also at [`skills/guillotine-sdk-builder`](../skills/guillotine-sdk-builder/SKILL.md)).
 
 ## Build from the repository root
 
-Use the Zig version required by `build.zig.zon` and the repository's native
-crypto toolchain. The root build resolves the module and native dependencies:
+Use the Zig version pinned in `build.zig.zon`:
 
 ```sh
-zig build
 zig build shared
 zig build static
 ```
 
 Native artifacts are installed under `zig-out/lib/`:
 
-- Shared: `libguillotine_ffi.dylib` on macOS, `libguillotine_ffi.so` on Linux
-  (Windows uses a DLL).
-- Static: `libguillotine_ffi_static.a` on Unix targets.
+- Shared: `libguillotine_ffi.dylib` on macOS, `libguillotine_ffi.so` on Linux.
+- Static: `libguillotine_ffi_static.a`.
 
-The [C header](c/include/guillotine.h) describes the native library. The
-[custom SDK guide](../docs/building-custom-sdks.md) covers ownership, layouts,
-exported symbols, linking, and language templates.
+The [C header](c/include/guillotine.h) declares the ABI. The
+[custom SDK guide](../docs/building-custom-sdks.md) covers exported symbols,
+struct layouts, ownership, errors, threading, linking, and language templates.
 
-## Bun
+## Tests
 
-Bun applications use `@tevm/guillotine`, which loads `libguillotine_ffi`
-through `bun:ffi`. Build the native library for it with `bun run build:native`
-in `sdks/typescript` (it runs `zig build shared -Doptimize=ReleaseFast` from
-the repository root). See [the package README](typescript/README.md).
+```sh
+make -f sdks/c/Makefile test      # C header, integration, and safety tests
+cd sdks/typescript && bun test    # TypeScript SDK (needs the shared library)
+```

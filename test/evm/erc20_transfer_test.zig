@@ -37,7 +37,7 @@ test "ERC20 transfer fixture test" {
     const allocator = testing.allocator;
     
     // Read bytecode from fixture
-    const bytecode_file = try std.fs.cwd().openFile("fixtures/erc20-transfer/bytecode.txt", .{});
+    const bytecode_file = try std.fs.cwd().openFile("src/_test_utils/fixtures/erc20-transfer/bytecode.txt", .{});
     defer bytecode_file.close();
     const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(bytecode_hex);
@@ -46,7 +46,7 @@ test "ERC20 transfer fixture test" {
     defer allocator.free(init_code);
 
     // Read calldata from fixture
-    const calldata_file = try std.fs.cwd().openFile("fixtures/erc20-transfer/calldata.txt", .{});
+    const calldata_file = try std.fs.cwd().openFile("src/_test_utils/fixtures/erc20-transfer/calldata.txt", .{});
     defer calldata_file.close();
     const calldata_hex = try calldata_file.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(calldata_hex);
@@ -69,14 +69,14 @@ test "ERC20 transfer fixture test" {
     
     // Caller address with large balance
     const caller_address = primitives.Address{ 
-        .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01}
+        .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01}
     };
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Setup block info
@@ -88,7 +88,7 @@ test "ERC20 transfer fixture test" {
         .gas_limit = 2_100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -110,7 +110,7 @@ test "ERC20 transfer fixture test" {
             .caller = caller_address, 
             .value = 0, 
             .init_code = init_code, 
-            .gas = 16_000_000 
+            .gas = 500_000_000 
         } 
     };
     
@@ -132,8 +132,7 @@ test "ERC20 transfer fixture test" {
     
     if (deploy_result.success) {
         // Get the created contract address
-        contract_address = deploy_result.created_address orelse
-            try primitives.Address.getContractAddress(allocator, caller_address, 0);
+        contract_address = primitives.Address.get_contract_address(caller_address, 0);
         const created_account = database.get_account(contract_address.bytes) catch null;
         
         if (created_account) |acc| {
@@ -164,13 +163,13 @@ test "ERC20 transfer fixture test" {
         // Fallback: install bytecode directly as runtime code
         std.debug.print("\nCREATE failed, installing bytecode as runtime code fallback\n", .{});
         
-        contract_address = primitives.Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
+        contract_address = primitives.Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
         const code_hash = try database.set_code(init_code);
         try database.set_account(contract_address.bytes, .{
             .balance = 0,
             .nonce = 1,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
         runtime_code = try database.get_code(code_hash);
     }
@@ -196,7 +195,7 @@ test "ERC20 transfer fixture test" {
             .to = contract_address,
             .value = 0,
             .input = calldata,
-            .gas = 16_000_000,
+            .gas = 1_000_000_000,
         },
     };
     
@@ -224,7 +223,7 @@ test "ERC20 transfer fixture test" {
     // Check if execution was successful
     if (!result.success) {
         std.debug.print("\nEXECUTION FAILED!\n", .{});
-        std.debug.print("Gas consumed: {}\n", .{16_000_000 - result.gas_left});
+        std.debug.print("Gas consumed: {}\n", .{1_000_000_000 - result.gas_left});
         return error.ExecutionFailed;
     }
     

@@ -11,25 +11,33 @@ opaque-handle C interface, declared in `sdks/c/include/guillotine.h`.
 
 | Surface | Directory | Status | Mechanism |
 | --- | --- | --- | --- |
-| Zig | `src/root.zig` | Alpha, like the engine | Import the `evm` module directly |
+| Zig | `src/root.zig` | Alpha, like the engine | Zig package; import `dep.module("evm")` |
 | C | `sdks/c/` | Experimental | The C ABI directly |
-| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Experimental; Bun ≥ 1.1 only | Bun FFI over `libguillotine_ffi` |
+| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Experimental; Bun only; 340 / 340 tests pass | Bun FFI over `libguillotine_ffi` |
 
 Python, Go, Rust, Swift, Kotlin/JNI, and native Bun integrations are custom
 SDKs you build on the C ABI; the repository does not maintain them. Start with
-[Building custom SDKs](https://github.com/evmts/guillotine/blob/main/docs/building-custom-sdks.md).
+[Building custom SDKs](https://github.com/evmts/guillotine/blob/main/docs/building-custom-sdks.md)
+and the Custom SDK Builder skill
+(`.agents/skills/guillotine-sdk-builder/SKILL.md`).
 
 ## The C ABI
 
 Build a linkable library first:
 
 ```bash
-zig build shared    # dynamic library for FFI
-zig build static    # static library for FFI
+zig build shared    # dynamic library for FFI (the supported artifact)
+zig build static    # static library; links only with extra archives, see below
 ```
 
 Both install to `zig-out/lib/`: `libguillotine_ffi.dylib` on macOS or
-`libguillotine_ffi.so` on Linux, and `libguillotine_ffi_static.a`. The C SDK
+`libguillotine_ffi.so` on Linux, and `libguillotine_ffi_static.a`. Releases
+ship only the shared library: the static archive does not bundle `libblst`,
+`libcrypto_wrappers` or `libckzg`, so a consumer cannot link it alone. Prebuilt
+`libguillotine_ffi.so` (x86_64, glibc >= 2.28), `libguillotine_ffi.dylib`
+(arm64) and `guillotine.h` are attached to each
+[GitHub Release](https://github.com/evmts/guillotine/releases) with
+`SHA256SUMS.txt`. The C SDK
 checks the header and runs native tests with `make -f sdks/c/Makefile simple`
 and `make -f sdks/c/Makefile test`.
 
@@ -77,20 +85,12 @@ bool guillotine_get_code   (EvmHandle*, const uint8_t address[20], uint8_t** cod
 `u256` crosses the boundary as a 32-byte big-endian array. Addresses are 20 raw
 bytes. There are no bignum structs in the ABI.
 
-### Execution and simulation
+### Execution
 
 ```c
-EvmResult*    guillotine_call        (EvmHandle*, const CallParams* params);
-EvmResult*    guillotine_call_tracing(EvmHandle*, const CallParams* params);
-EvmResult*    guillotine_simulate    (EvmHandle*, const CallParams* params);
-
-StateDumpFFI* guillotine_dump_state     (EvmHandle* handle);
-StateDumpFFI* guillotine_dump_state_test(EvmHandle* handle);
-void          guillotine_free_state_dump(StateDumpFFI* dump);
+EvmResult* guillotine_call        (EvmHandle*, const CallParams* params);
+EvmResult* guillotine_call_tracing(EvmHandle*, const CallParams* params);
 ```
-
-`guillotine_simulate` executes a `CALL` against an ephemeral database overlay so
-base state is never mutated.
 
 ### Freeing
 
@@ -98,10 +98,9 @@ Zig allocated it, so Zig must free it. Never call `free()` on anything the ABI
 returned:
 
 ```c
-void guillotine_free_result    (EvmResult* result);
-void guillotine_free_output    (uint8_t* output, size_t len);
-void guillotine_free_code      (uint8_t* code,   size_t len);
-void guillotine_free_state_dump(StateDumpFFI* dump);
+void guillotine_free_result(EvmResult* result);
+void guillotine_free_output(uint8_t* output, size_t len);
+void guillotine_free_code  (uint8_t* code,   size_t len);
 ```
 
 ### Errors
@@ -122,65 +121,40 @@ void            evm_bytecode_destroy(BytecodeHandle* handle);
 size_t          evm_bytecode_get_length(const BytecodeHandle* handle);
 size_t          evm_bytecode_get_runtime_data(const BytecodeHandle* handle, uint8_t* buffer, size_t buffer_len);
 uint8_t         evm_bytecode_get_opcode_at(const BytecodeHandle* handle, size_t position);
-int             evm_bytecode_analyze(const BytecodeHandle* handle, CBytecodeAnalysis* analysis_out);
-void            evm_bytecode_free_analysis(CBytecodeAnalysis* analysis);
-size_t          evm_bytecode_pretty_print(const uint8_t* data, size_t data_len, uint8_t* buffer, size_t buffer_len);
-size_t          evm_dispatch_pretty_print(const uint8_t* data, size_t data_len, uint8_t* buffer, size_t buffer_len);
 ```
-
-## TypeScript (`@tevm/guillotine`)
-
-The TypeScript SDK (`sdks/typescript/`) calls `libguillotine_ffi` directly
-through [Bun FFI](https://bun.sh/docs/api/ffi) (Bun ≥ 1.1). Node.js and browsers
-are not supported — the legacy WASM backend was removed because it ran a stale
-binary with an incompatible ABI.
-
-```ts
-import { Address, Bytes, GuillotineEvm, U256 } from '@tevm/guillotine'
-
-using evm = await GuillotineEvm.create({ chainId: 1n })
-
-const caller = Address.fromHex('0x00000000000000000000000000000000000000a1')
-const contract = Address.fromHex('0x00000000000000000000000000000000000000c0')
-
-// PUSH1 2 PUSH1 3 ADD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
-await evm.setCode(contract, Bytes.fromHex('0x600260030160005260206000f3'))
-
-const gas = 1_000_000n
-const result = await evm.call({ caller, to: contract, value: U256.zero(), input: Bytes.empty(), gas })
-// result.success === true, output encodes 5n
-```
-
-Native library resolution order:
-
-1. `GuillotineEvm.create(block, { libraryPath })`
-2. The `GUILLOTINE_LIB_PATH` environment variable
-3. `prebuilds/<platform>-<arch>/libguillotine_ffi.<dylib|so|dll>` inside the package
-
-Release builds ship multi-platform `darwin-arm64` and `linux-x64` prebuilds via
-GitHub Actions; see [Publishing and releases](/guides/publishing). Locally,
-`bun run build:native` builds a ReleaseFast shared library and copies it into
-`prebuilds/<platform>-<arch>/`.
 
 ## WASM
 
-The root build has no WASM step for the `src/` engine. `sdks/wasm/build.zig`
-defines `createWasmSteps` (`wasm`, `wasm-debug`, `wasm-minimal-evm`), but
-`build.zig` never calls it, and it still points at `src/primitives/` and
-`src/crypto/`, which no longer exist. The TypeScript SDK removed its WASM
-backend (`sdks/typescript/README.md`).
+The root build has no WASM step for the `src/` engine, and the TypeScript SDK
+has no WASM backend (`sdks/typescript/README.md`).
 
-For a browser WASM EVM, use the separate [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini) repository, which builds its own standalone `guillotine_mini.wasm` bundle.
+The separate [`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini)
+repository builds its own WASM module with its own C exports.
 
-`src/tracer/minimal_evm_c.zig` holds a C wrapper for the tracer's `MinimalEvm`
-(`evm_create`, `evm_set_bytecode`, `evm_execute`, …), but no build step
-compiles it into a library.
+## npm packaging
+
+The TypeScript SDK is `@tevm/guillotine` (`sdks/typescript/package.json`). It
+loads `libguillotine_ffi` through Bun FFI and does not run in Node.js or
+browsers. `bun run build:native` copies a ReleaseFast library into
+`prebuilds/<platform>-<arch>/`.
+
+`.github/workflows/release.yml` publishes the package when a `v*` tag is pushed.
+It builds `libguillotine_ffi` in ReleaseFast with `-Dstrip=true` on `macos-latest` (`darwin-arm64`)
+and `ubuntu-latest` (`linux-x64`, cross-targeted to `x86_64-linux-gnu.2.28`), runs
+the C and TypeScript SDK tests on each, combines both libraries into
+`prebuilds/`, and runs `npm publish --provenance` once the `NPM_TOKEN` secret
+exists. The same run creates a GitHub Release with `libguillotine_ffi.so`,
+`libguillotine_ffi.dylib`, `guillotine.h` and `SHA256SUMS.txt`. See
+[Publishing and releases](/guides/publishing). Other platforms have no prebuild; build the library yourself and set
+`GUILLOTINE_LIB_PATH`.
 
 ## Which should I use?
 
-- **Zig**: import the `evm` module directly. See
-  [Getting started](/getting-started).
+- **Zig**: add the package and import `guillotine.module("evm")`. See
+  [Installation](/installation#use-it-from-a-zig-project).
 - **C, or a language with a C FFI**: link `libguillotine_ffi` and include
   `sdks/c/include/guillotine.h`.
 - **TypeScript on Bun**: `@tevm/guillotine`.
-- **A browser**: guillotine-mini's WASM build. The `src/` engine has none.
+- **A browser**: the WASM build of the separate
+  [`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini) repository.
+  The `src/` engine has none.

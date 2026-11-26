@@ -17,6 +17,7 @@ pub const modexp = @import("modexp.zig");
 
 test {
     _ = modexp;
+    _ = point_evaluation;
 }
 pub const bn254_add = @import("bn254_add.zig");
 pub const bn254_mul = @import("bn254_mul.zig");
@@ -83,7 +84,7 @@ pub fn execute(
     hardfork: Hardfork,
 ) PrecompileError!PrecompileResult {
     if (!isPrecompile(address, hardfork)) {
-        return error.NotImplemented;
+        return error.UnsupportedPrecompile;
     }
 
     const addr_int = address.toU256();
@@ -93,9 +94,9 @@ pub fn execute(
         0x03 => ripemd160.execute(allocator, input, gas_limit),
         0x04 => identity.execute(allocator, input, gas_limit),
         0x05 => modexp.execute(allocator, input, gas_limit, hardfork),
-        0x06 => bn254_add.execute(allocator, input, gas_limit),
-        0x07 => bn254_mul.execute(allocator, input, gas_limit),
-        0x08 => bn254_pairing.execute(allocator, input, gas_limit),
+        0x06 => bn254_add.executeAtFork(allocator, input, gas_limit, hardfork),
+        0x07 => bn254_mul.executeAtFork(allocator, input, gas_limit, hardfork),
+        0x08 => bn254_pairing.executeAtFork(allocator, input, gas_limit, hardfork),
         0x09 => blake2f.execute(allocator, input, gas_limit),
         0x0A => point_evaluation.execute(allocator, input, gas_limit),
         0x0B => bls12_g1_add.execute(allocator, input, gas_limit),
@@ -106,7 +107,7 @@ pub fn execute(
         0x10 => bls12_map_fp_to_g1.execute(allocator, input, gas_limit),
         0x11 => bls12_map_fp2_to_g2.execute(allocator, input, gas_limit),
         0x100 => p256verify.execute(allocator, input, gas_limit, p256verify.GAS_COST_EIP7951),
-        else => error.NotImplemented,
+        else => error.UnsupportedPrecompile,
     };
 }
 
@@ -179,7 +180,7 @@ test "execute - final EIP-2537 address layout routes to the right precompile" {
     };
     try testing.expectEqual(@as(u256, 0x0B), cases[0].address.toU256());
     try testing.expectEqual(@as(u256, 0x11), cases[6].address.toU256());
-    var input: [512]u8 = [_]u8{0} ** 512;
+    var input: [512]u8 = @as([512]u8, @splat(0));
     for (cases) |case| {
         const data = input[0..case.input_len];
         try testing.expectError(error.OutOfGas, execute(allocator, case.address, data, case.cost - 1, .PRAGUE));
@@ -188,20 +189,41 @@ test "execute - final EIP-2537 address layout routes to the right precompile" {
             try testing.expectEqual(case.cost, res.gas_used);
         } else |err| {
             try testing.expect(err != error.OutOfGas);
-            try testing.expect(err != error.NotImplemented);
+            try testing.expect(err != error.UnsupportedPrecompile);
         }
     }
 
-    try testing.expectError(error.NotImplemented, execute(allocator, Address.fromU256(0x12), &[_]u8{}, 100000, .PRAGUE));
-    try testing.expectError(error.NotImplemented, execute(allocator, Address.fromU256(0x13), &[_]u8{}, 100000, .PRAGUE));
-    try testing.expectError(error.NotImplemented, execute(allocator, BLS12_G1ADD_ADDRESS, input[0..256], 100000, .CANCUN));
+    try testing.expectError(error.UnsupportedPrecompile, execute(allocator, Address.fromU256(0x12), &[_]u8{}, 100000, .PRAGUE));
+    try testing.expectError(error.UnsupportedPrecompile, execute(allocator, Address.fromU256(0x13), &[_]u8{}, 100000, .PRAGUE));
+    try testing.expectError(error.UnsupportedPrecompile, execute(allocator, BLS12_G1ADD_ADDRESS, input[0..256], 100000, .CANCUN));
 }
 
 test "precompile - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 32;
+    const input = @as([32]u8, @splat(0));
     const result = sha256.execute(allocator, &input, 10);
     try testing.expectError(error.OutOfGas, result);
+}
+
+test {
+    _ = bn254_add;
+    _ = bn254_mul;
+    _ = bn254_pairing;
+    _ = bls12_g1_add;
+    _ = bls12_g1_msm;
+    _ = bls12_g2_add;
+    _ = bls12_g2_msm;
+    _ = bls12_pairing;
+    _ = bls12_map_fp_to_g1;
+    _ = bls12_map_fp2_to_g2;
+    _ = p256verify;
+    _ = point_evaluation;
+    _ = blake2f;
+    _ = modexp;
+    _ = ecrecover;
+    _ = sha256;
+    _ = ripemd160;
+    _ = identity;
 }

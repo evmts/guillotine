@@ -26,7 +26,7 @@ fn runPlainTransfer(comptime hardfork: evm.Hardfork, gas: u64) !TxOutcome {
         .gas_limit = 60_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1,
         .blob_versioned_hashes = &.{},
     }, .{ .gas_limit = gas, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 1, sender);

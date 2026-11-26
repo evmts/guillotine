@@ -306,7 +306,7 @@ test "EIP-4844 - BLOBHASH with large indices" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     
-    const blob_hash = [_]u8{0xAB} ** 32;
+    const blob_hash = @as([32]u8, @splat(0xAB));
     const blob_hashes = [_][32]u8{blob_hash};
     
     const block_info = BlockInfo.init();
@@ -358,8 +358,8 @@ test "EIP-4844 - Blob context available during contract execution" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     
-    const contract_address = [_]u8{0x42} ** 20;
-    const blob_hash = [_]u8{0x01} ++ [_]u8{0xEF} ** 31; // Versioned hash
+    const contract_address = @as([20]u8, @splat(0x42));
+    const blob_hash = [_]u8{0x01} ++ @as([31]u8, @splat(0xEF)); // Versioned hash
     const blob_hashes = [_][32]u8{blob_hash};
     const blob_base_fee: u256 = 7_777_777_777;
     

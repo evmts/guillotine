@@ -9,6 +9,9 @@ pub const Row = struct {
     enable_fusion: bool,
     disable_tailcall_dispatch: bool,
     operations_per_call: u32,
+    /// Fork and gas budget this row ran under (see `workloads.Profile`).
+    hardfork: []const u8,
+    gas_limit: u64,
     status: []const u8 = "failed",
     stage: ?[]const u8 = null,
     reason: ?[]const u8 = null,
@@ -44,26 +47,28 @@ pub const Report = struct {
 };
 
 /// Atomic replacement: preserve the previous report if writing is interrupted.
-pub fn writeJson(path: []const u8, data: Report) !void {
+pub fn writeJson(io: std.Io, path: []const u8, data: Report) !void {
     var buffer: [16384]u8 = undefined;
-    var file = try std.fs.cwd().atomicFile(path, .{ .write_buffer = &buffer, .make_path = true });
-    defer file.deinit();
-    try std.json.Stringify.value(data, .{ .whitespace = .indent_2 }, &file.file_writer.interface);
-    try file.file_writer.interface.writeByte('\n');
-    try file.finish();
+    var file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true, .replace = true });
+    defer file.deinit(io);
+    var file_writer = file.file.writer(io, &buffer);
+    try std.json.Stringify.value(data, .{ .whitespace = .indent_2 }, &file_writer.interface);
+    try file_writer.interface.writeByte('\n');
+    try file_writer.interface.flush();
+    try file.replace(io);
 }
 
 pub fn markdown(writer: *std.Io.Writer, rows: []const Row) !void {
-    try writer.writeAll("| Benchmark | Dispatch | ns/op | Median ns/call | Mean ns/call | p95 ns/call | ops/sec | Gas/call | MGas/sec | Status |\n");
-    try writer.writeAll("|:--|:--|--:|--:|--:|--:|--:|--:|--:|:--|\n");
+    try writer.writeAll("| Benchmark | Dispatch | Fork | ns/op | Median ns/call | Mean ns/call | p95 ns/call | ops/sec | Gas/call | MGas/sec | Status |\n");
+    try writer.writeAll("|:--|:--|:--|--:|--:|--:|--:|--:|--:|--:|:--|\n");
     for (rows) |row| {
         if (row.statistics) |value| {
-            try writer.print("| {s} | {s} | {d:.2} | {d:.2} | {d:.2} | {d} | {d:.2} | {d} | {d:.2} | {s} |\n", .{
-                row.name,          row.mode,       row.ns_per_op.?,    value.median_ns, value.mean_ns, value.p95_ns,
-                value.ops_per_sec, row.gas_used.?, value.mgas_per_sec, row.status,
+            try writer.print("| {s} | {s} | {s} | {d:.2} | {d:.2} | {d:.2} | {d} | {d:.2} | {d} | {d:.2} | {s} |\n", .{
+                row.name,      row.mode,          row.hardfork,   row.ns_per_op.?,    value.median_ns, value.mean_ns,
+                value.p95_ns,  value.ops_per_sec, row.gas_used.?, value.mgas_per_sec, row.status,
             });
         } else {
-            try writer.print("| {s} | {s} | — | — | — | — | — | — | — | {s}: {s} |\n", .{ row.name, row.mode, row.status, row.reason orelse "unknown failure" });
+            try writer.print("| {s} | {s} | {s} | — | — | — | — | — | — | — | {s}: {s} |\n", .{ row.name, row.mode, row.hardfork, row.status, row.reason orelse "unknown failure" });
         }
     }
 }
@@ -77,6 +82,8 @@ test "JSON keeps unavailable timings null and escapes names" {
         .enable_fusion = true,
         .disable_tailcall_dispatch = false,
         .operations_per_call = 128,
+        .hardfork = "OSAKA",
+        .gas_limit = 16_777_216,
         .status = "unavailable",
         .reason = "missing opcode",
     }};
@@ -90,32 +97,36 @@ test "JSON keeps unavailable timings null and escapes names" {
     try std.testing.expect(row.get("statistics").? == .null);
     try std.testing.expect(row.get("gas_used").? == .null);
     try std.testing.expectEqualStrings("unavailable", row.get("status").?.string);
+    try std.testing.expectEqualStrings("OSAKA", row.get("hardfork").?.string);
+    try std.testing.expectEqual(@as(i64, 16_777_216), row.get("gas_limit").?.integer);
 }
 
 test "Markdown carries measured rates and explicit unavailable reasons" {
     var samples = [_]u64{ 10, 20 };
     const rows = [_]Row{
-        .{ .name = "opcode/ADD", .category = "opcode", .mode = "tailcall+fusions", .enable_fusion = true, .disable_tailcall_dispatch = false, .operations_per_call = 128, .status = "ok", .gas_used = 100, .ns_per_op = 15.0 / 128.0, .statistics = try stats.summarize(&samples, 128, 100) },
-        .{ .name = "opcode/CLZ", .category = "opcode", .mode = "tailcall+fusions", .enable_fusion = true, .disable_tailcall_dispatch = false, .operations_per_call = 128, .status = "unavailable", .reason = "handler absent" },
+        .{ .name = "opcode/ADD", .category = "opcode", .mode = "tailcall+fusions", .enable_fusion = true, .disable_tailcall_dispatch = false, .operations_per_call = 128, .hardfork = "PRAGUE", .gas_limit = 3_000_000_000, .status = "ok", .gas_used = 100, .ns_per_op = 15.0 / 128.0, .statistics = try stats.summarize(&samples, 128, 100) },
+        .{ .name = "opcode/CLZ", .category = "opcode", .mode = "tailcall+fusions", .enable_fusion = true, .disable_tailcall_dispatch = false, .operations_per_call = 128, .hardfork = "OSAKA", .gas_limit = 16_777_216, .status = "unavailable", .reason = "handler absent" },
     };
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
     try markdown(&output.writer, &rows);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "p95 ns/call") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "| 100 |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "| opcode/ADD | tailcall+fusions | PRAGUE |") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "unavailable: handler absent") != null);
 }
 
 test "atomic JSON report is readable and can be replaced" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const parent = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    const io = std.testing.io;
+    const parent = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
     defer std.testing.allocator.free(parent);
-    const path = try std.fs.path.join(std.testing.allocator, &.{ parent, "nested", "report.json" });
+    const path = try std.Io.Dir.path.join(std.testing.allocator, &.{ parent, "nested", "report.json" });
     defer std.testing.allocator.free(path);
-    try writeJson(path, .{ .timestamp_unix = 1, .iterations = 1, .warmup = 0, .results = &.{} });
-    try writeJson(path, .{ .timestamp_unix = 2, .iterations = 2, .warmup = 0, .results = &.{} });
-    const bytes = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 16384);
+    try writeJson(io, path, .{ .timestamp_unix = 1, .iterations = 1, .warmup = 0, .results = &.{} });
+    try writeJson(io, path, .{ .timestamp_unix = 2, .iterations = 2, .warmup = 0, .results = &.{} });
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, std.testing.allocator, .limited(16384));
     defer std.testing.allocator.free(bytes);
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
     defer parsed.deinit();

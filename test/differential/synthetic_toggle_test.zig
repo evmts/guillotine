@@ -4,7 +4,7 @@ const DifferentialTestor = @import("differential_testor.zig").DifferentialTestor
 const testing = std.testing;
 
 fn small_add_program(allocator: std.mem.Allocator) ![]u8 {
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     errdefer bc.deinit(allocator);
     // PUSH1 2; DUP1; PUSH1 3; SWAP1; ADD; MSTORE 0; RETURN 32
     // The DUP+SWAP sequence breaks PUSH+ADD fusion, exercising non-synthetic handlers

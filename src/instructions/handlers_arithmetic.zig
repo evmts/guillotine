@@ -2,60 +2,8 @@ const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const GasConstants = @import("voltaire").GasConstants;
 const log = @import("../log.zig");
-
-/// (a + b) mod n with arbitrary-precision intermediate; n == 0 yields 0.
-pub fn addmodWord(comptime T: type, a: T, b: T, n: T) T {
-    if (n == 0) return 0;
-    if (a < n and b < n) {
-        @branchHint(.likely);
-        // a + b < 2n, so at most one subtraction of n is needed. When the add
-        // overflows, the true sum is 2^bits + sum[0] and the remainder is
-        // 2^bits + sum[0] - n, which equals sum[0] -% n in mod 2^bits arithmetic.
-        const sum = @addWithOverflow(a, b);
-        if (sum[1] == 1 or sum[0] >= n) return sum[0] -% n;
-        return sum[0];
-    }
-    const Wide = std.meta.Int(.unsigned, @bitSizeOf(T) + 1);
-    return @intCast((@as(Wide, a) + @as(Wide, b)) % @as(Wide, n));
-}
-
-/// (a * b) mod n with a double-width product; n == 0 yields 0.
-pub fn mulmodWord(comptime T: type, a: T, b: T, n: T) T {
-    if (n == 0) return 0;
-    if (a == 0 or b == 0) return 0;
-    const Wide = std.meta.Int(.unsigned, 2 * @bitSizeOf(T));
-    return @intCast((@as(Wide, a) * @as(Wide, b)) % @as(Wide, n));
-}
-
-/// base ** exponent mod 2^bits.
-pub fn expWord(comptime T: type, base: T, exponent: T) T {
-    const bits = @bitSizeOf(T);
-    if (exponent == 0) return 1;
-    if (exponent == 1) return base;
-    if (base == 0) return 0;
-    if (base == 1) return 1;
-    if ((base & 1) == 0) {
-        // base = 2^tz * odd, so base^e is a multiple of 2^(tz*e); tz >= 1 here.
-        if (exponent >= bits) return 0;
-        const tz: u32 = @ctz(base);
-        const shift = tz * @as(u32, @intCast(exponent));
-        if (shift >= bits) return 0;
-        if ((base & (base - 1)) == 0) {
-            // base is a power of two: base^e = 2^(tz*e)
-            return @as(T, 1) << @intCast(shift);
-        }
-    }
-    var result: T = 1;
-    var square = base;
-    var remaining = exponent;
-    while (true) {
-        if ((remaining & 1) == 1) result *%= square;
-        remaining >>= 1;
-        if (remaining == 0) break;
-        square *%= square;
-    }
-    return result;
-}
+const eips = @import("../eips_and_hardforks/eips.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// Arithmetic opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -66,233 +14,276 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
-        pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.ADD, cursor);
+        pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .ADD, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top +% second;
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+            return N.next(self, .ADD, cursor, s.sp, gas);
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
-        pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MUL, cursor);
+        pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .MUL, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top *% second;
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MUL);
+            return N.next(self, .MUL, cursor, s.sp, gas);
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
-        pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SUB, cursor);
+        pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SUB, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top -% second; // SUB: µs[0] - µs[1] = top - second
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SUB);
+            return N.next(self, .SUB, cursor, s.sp, gas);
         }
 
         const from_native = FrameType.UintN.from_native;
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
-        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.DIV, cursor);
-            
-            // Get values before the operation for logging
-            const divisor = self.stack.stack_ptr[0];  // Top of stack
-            const dividend = self.stack.stack_ptr[1]; // Second on stack
+        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .DIV, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return from_native(top).wrapping_div(from_native(second)).to_native();
                 }
             }.op);
-            
-            const result = self.stack.stack_ptr[0];  // Result is now at top
-            log.debug("[DIV] 0x{x:0>64} / 0x{x:0>64} = 0x{x:0>64}", .{ dividend, divisor, result });
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .DIV);
+            return N.next(self, .DIV, cursor, s.sp, gas);
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
-        /// Fully branchless implementation verified via Bitwuzla/Z3 + Lean 4 + LLVM 20 IR:
-        /// `UintN.wrapping_div(x, 0) == 0` and `(0 ^ m) -% m == 0` handles `second == 0`,
-        /// and `absTwoComp(MIN_SIGNED) == MIN_SIGNED`, `wrapping_div(MIN_SIGNED, 1) == MIN_SIGNED`,
-        /// `sign = 1 ^ 1 = 0` handles `MIN_SIGNED / -1 == MIN_SIGNED` with zero branches.
-        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SDIV, cursor);
-            const verified_ops = @import("../verified_ops.zig");
-            const top = self.stack.pop_unsafe();
-            const second = self.stack.peek_unsafe();
+        ///
+        /// Branchless: unsigned division of the operands' magnitudes, then the sign is
+        /// re-applied by `verified_ops.sdivFromUnsignedQuotient`. That function is the
+        /// one the SMT and Lean proofs cover (`sdiv_branchless_equiv`); with
+        /// `wrapping_div(x, 0) == 0` it yields 0 for a zero divisor and `MIN_SIGNED` for
+        /// `MIN_SIGNED / -1` without a special case.
+        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SDIV, cursor, s.sp, gas);
+            const top = s.pop_unsafe();
+            const second = s.peek_unsafe();
 
-            if (comptime WordType == u256) {
-                const top_abs = verified_ops.absTwoComp(top);
-                const second_abs = verified_ops.absTwoComp(second);
-                const quotient = FrameType.UintN.from_native(top_abs)
-                    .wrapping_div(FrameType.UintN.from_native(second_abs))
-                    .to_native();
-                const result = verified_ops.sdivFromUnsignedQuotient(top, second, quotient);
-                self.stack.set_top_unsafe(result);
-            } else {
-                const top_sign = top >> (@bitSizeOf(WordType) - 1);
-                const second_sign = second >> (@bitSizeOf(WordType) - 1);
-                const top_mask = @as(WordType, 0) -% top_sign;
-                const second_mask = @as(WordType, 0) -% second_sign;
-                const top_abs = (top ^ top_mask) -% top_mask;
-                const second_abs = (second ^ second_mask) -% second_mask;
-                const quotient = FrameType.UintN.from_native(top_abs)
-                    .wrapping_div(FrameType.UintN.from_native(second_abs))
-                    .to_native();
-                const result_mask = @as(WordType, 0) -% (top_sign ^ second_sign);
-                self.stack.set_top_unsafe((quotient ^ result_mask) -% result_mask);
-            }
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
+            const top_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(top));
+            const second_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(second));
+            const quotient = top_abs.wrapping_div(second_abs).to_native();
+
+            s.set_top_unsafe(verified_ops.sdivFromUnsignedQuotient(top, second, quotient));
+            return N.next(self, .SDIV, cursor, s.sp, gas);
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
-        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MOD, cursor);
+        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .MOD, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return from_native(top).wrapping_rem(from_native(second)).to_native();
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MOD);
+            return N.next(self, .MOD, cursor, s.sp, gas);
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
-        /// Fully branchless implementation verified via Bitwuzla/Z3 + Lean 4 + LLVM 20 IR:
-        /// `UintN.wrapping_rem(x, 0) == 0` and `wrapping_rem(MIN_SIGNED, 1) == 0` handle both
-        /// edge cases with zero branches.
-        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SMOD, cursor);
-            const verified_ops = @import("../verified_ops.zig");
-            const top = self.stack.pop_unsafe();
-            const second = self.stack.peek_unsafe();
+        ///
+        /// Branchless: unsigned remainder of the operands' magnitudes, then the dividend's
+        /// sign is re-applied by `verified_ops.smodFromUnsignedRem`, the function the SMT
+        /// and Lean proofs cover (`smod_branchless_equiv`). With `wrapping_rem(x, 0) == 0`
+        /// it yields 0 for a zero divisor and for `MIN_SIGNED % -1` without a special case.
+        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SMOD, cursor, s.sp, gas);
+            const top = s.pop_unsafe();
+            const second = s.peek_unsafe();
 
-            if (comptime WordType == u256) {
-                const top_abs = verified_ops.absTwoComp(top);
-                const second_abs = verified_ops.absTwoComp(second);
-                const remainder = FrameType.UintN.from_native(top_abs)
-                    .wrapping_rem(FrameType.UintN.from_native(second_abs))
-                    .to_native();
-                const result = verified_ops.smodFromUnsignedRem(top, remainder);
-                self.stack.set_top_unsafe(result);
-            } else {
-                const top_sign = top >> (@bitSizeOf(WordType) - 1);
-                const second_sign = second >> (@bitSizeOf(WordType) - 1);
-                const top_mask = @as(WordType, 0) -% top_sign;
-                const second_mask = @as(WordType, 0) -% second_sign;
-                const top_abs = (top ^ top_mask) -% top_mask;
-                const second_abs = (second ^ second_mask) -% second_mask;
-                const remainder = FrameType.UintN.from_native(top_abs)
-                    .wrapping_rem(FrameType.UintN.from_native(second_abs))
-                    .to_native();
-                self.stack.set_top_unsafe((remainder ^ top_mask) -% top_mask);
-            }
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
+            const top_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(top));
+            const second_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(second));
+            const remainder = top_abs.wrapping_rem(second_abs).to_native();
+
+            s.set_top_unsafe(verified_ops.smodFromUnsignedRem(top, remainder));
+            return N.next(self, .SMOD, cursor, s.sp, gas);
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.ADDMOD, cursor);
-            const addend1 = self.stack.pop_unsafe(); // Top of stack (a)
-            const addend2 = self.stack.pop_unsafe(); // Second on stack (b)
-            const modulus = self.stack.pop_unsafe(); // Third on stack (N)
-            self.stack.push_unsafe(addmodWord(WordType, addend1, addend2, modulus));
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADDMOD);
+        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .ADDMOD, cursor, s.sp, gas);
+            const addend1 = s.pop_unsafe(); // Top of stack (a)
+            const addend2 = s.pop_unsafe(); // Second on stack (b)
+            const modulus = s.pop_unsafe(); // Third on stack (N)
+            var result: WordType = 0;
+            if (modulus == 0) {
+                result = 0;
+            } else {
+                // This implementation correctly handles modular addition with potential u256 overflow.
+                // It first reduces the addends modulo N, then performs a wrapping addition.
+                // The `if (sum[1] == 1 or r >= modulus)` check handles two cases:
+                // 1. `sum[1] == 1`: The addition of the reduced addends overflowed u256.
+                // 2. `r >= modulus`: The sum is valid but still needs to be wrapped by the modulus.
+                // In both cases, a single subtraction of the modulus yields the correct result.
+                const addend1_reduced = addend1 % modulus;
+                const addend2_reduced = addend2 % modulus;
+                const sum = @addWithOverflow(addend1_reduced, addend2_reduced);
+                var r = sum[0];
+                // If overflow occurred or r >= modulus, subtract once
+                if (sum[1] == 1 or r >= modulus) {
+                    @branchHint(.unlikely);
+                    r -%= modulus;
+                }
+                result = r;
+            }
+            s.push_unsafe(result);
+            return N.next(self, .ADDMOD, cursor, s.sp, gas);
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MULMOD, cursor);
-            const factor1 = self.stack.pop_unsafe(); // Top of stack (a)
-            const factor2 = self.stack.pop_unsafe(); // Second on stack (b)
-            const modulus = self.stack.pop_unsafe(); // Third on stack (N)
-            self.stack.push_unsafe(mulmodWord(WordType, factor1, factor2, modulus));
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MULMOD);
+        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .MULMOD, cursor, s.sp, gas);
+            const factor1 = s.pop_unsafe(); // Top of stack (a)
+            const factor2 = s.pop_unsafe(); // Second on stack (b)
+            const modulus = s.pop_unsafe(); // Third on stack (N)
+            var result: WordType = undefined;
+            if (modulus == 0) {
+                result = 0;
+            } else {
+                result = mulmod_safe(factor1, factor2, modulus);
+            }
+            s.push_unsafe(result);
+            return N.next(self, .MULMOD, cursor, s.sp, gas);
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
-        pub fn mulmod_safe(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
-            return mulmodWord(WordType, factor1, factor2, modulus);
+        fn mulmod_safe(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
+            if (modulus == 0) return 0;
+            if (factor1 == 0 or factor2 == 0) return 0;
+            if (modulus == 1) return 0;
+
+            // Reduce operands first
+            const factor1_mod = factor1 % modulus;
+            const factor2_mod = factor2 % modulus;
+
+            // Use double-width arithmetic to prevent overflow
+            if (WordType == u256) {
+                const wide_factor1 = @as(u512, factor1_mod);
+                const wide_factor2 = @as(u512, factor2_mod);
+                const wide_modulus = @as(u512, modulus);
+                const wide_product = (wide_factor1 * wide_factor2) % wide_modulus;
+                return @intCast(wide_product);
+            } else {
+                // For other word types, fall back to addition-based approach
+                return mulmod_by_addition(factor1_mod, factor2_mod, modulus);
+            }
+        }
+
+        /// Fallback modular multiplication using repeated addition for non-u256 types.
+        fn mulmod_by_addition(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
+            var result: WordType = 0;
+            var base = factor1 % modulus;
+            var multiplier = factor2 % modulus;
+
+            while (multiplier > 0) {
+                if (multiplier & 1 == 1) {
+                    result = addmod_safe(result, base, modulus);
+                }
+                multiplier = std.math.shr(WordType, multiplier, 1);
+                if (multiplier > 0) {
+                    base = addmod_safe(base, base, modulus);
+                }
+            }
+
+            return result;
         }
 
         /// Safe modular addition that prevents overflow.
-        pub fn addmod_safe(addend1: WordType, addend2: WordType, modulus: WordType) WordType {
-            return addmodWord(WordType, addend1, addend2, modulus);
+        fn addmod_safe(addend1: WordType, addend2: WordType, modulus: WordType) WordType {
+            const addend1_mod = addend1 % modulus;
+            const addend2_mod = addend2 % modulus;
+
+            // Check if addition would overflow
+            if (addend1_mod > modulus - addend2_mod) {
+                @branchHint(.unlikely);
+                // Overflow case: (addend1 + addend2) = modulus + (addend1 + addend2 - modulus)
+                return (addend1_mod - (modulus - addend2_mod));
+            } else {
+                // No overflow case
+                return (addend1_mod + addend2_mod) % modulus;
+            }
         }
 
         /// EXP opcode (0x0a) - Exponential operation.
-        pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             // Pop base (top), then exponent (second); compute base^exponent
             self.beforeInstruction(.EXP, cursor);
             const base = self.stack.pop_unsafe(); // Top of stack (base)
             const exponent = self.stack.peek_unsafe(); // Below top (exponent)
 
-            // EIP-160: EXP costs 10 + 50 * byte_len(exponent).
-            // The 10 gas base is static and already charged with the basic block
-            // (OPCODE_INFO[EXP].gas_cost); the handler charges only the dynamic part.
-            // Verified branchless `@clz` byte-length (replaces 32-iteration shift loop).
-            // Gas is charged before any fast path so every path pays the same.
-            const verified_ops = @import("../verified_ops.zig");
-            const exp_bytes: u32 = if (comptime WordType == u256)
-                verified_ops.expGasByteLenFast(exponent)
-            else
-                (@as(u32, @bitSizeOf(WordType) + 7) - @as(u32, @clz(exponent))) >> 3;
+            // EXP costs 10 + byte_gas * byte_len(exponent), where byte_gas is 10 before
+            // EIP-160 (Spurious Dragon) and 50 from then on. The 10 gas base is static and
+            // already charged with the basic block (OPCODE_INFO[EXP].gas_cost); the handler
+            // charges only the dynamic part.
+            // Byte length of the exponent, from the verified branchless form
+            // (`exp_gas_bytes_equiv`).
+            const exp_bytes: u64 = verified_ops.expGasByteLenFast(exponent);
 
-            const exp_byte_gas: u32 = 50;
+            const exp_byte_gas: u64 = comptime @intCast((eips.Eips{ .hardfork = FrameType.config.hardfork }).eip_160_exp_byte_gas_cost());
             const gas_cost = exp_byte_gas * exp_bytes;
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(gas_cost);
-            if (self.gas_remaining < 0) {
+            if (self.gas_remaining < 0 or gas_cost > @as(u64, @intCast(self.gas_remaining))) {
                 self.afterComplete(.EXP);
                 return Error.OutOfGas;
             }
+            self.gas_remaining -= @intCast(gas_cost);
 
-            self.stack.set_top_unsafe(expWord(WordType, base, exponent));
+            // Calculate base^exponent with wrapping multiplication (mod 2^256)
+            var result: WordType = 1;
+            var base_working = base;
+            var exponent_working = exponent;
+            while (exponent_working > 0) : (exponent_working = std.math.shr(WordType, exponent_working, 1)) {
+                if (exponent_working & 1 == 1) {
+                    result *%= base_working;
+                }
+                base_working *%= base_working;
+            }
+            self.stack.set_top_unsafe(result);
             return dispatch_next.nextInstruction(FrameType, self, cursor, .EXP);
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
-        /// Verified branchless arithmetic-shift implementation (Bitwuzla + Lean 4 + LLVM 20 IR).
-        pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SIGNEXTEND, cursor);
-            const verified_ops = @import("../verified_ops.zig");
-            const ext = self.stack.pop_unsafe(); // Extension byte index (top of stack)
-            const value = self.stack.peek_unsafe(); // Value to extend (second element)
-
-            const result: WordType = if (comptime WordType == u256)
-                verified_ops.signextendFast(ext, value)
-            else blk: {
-                const max_bytes = @bitSizeOf(WordType) / 8;
-                if (ext >= max_bytes - 1) break :blk value;
-                const byte_index: u8 = @truncate(ext);
-                const shift: std.math.Log2Int(WordType) = @intCast((@bitSizeOf(WordType) - 8) - (@as(u16, byte_index) << 3));
-                const SignedWord = std.meta.Int(.signed, @bitSizeOf(WordType));
-                const shifted: SignedWord = @bitCast(value << shift);
-                break :blk @bitCast(shifted >> shift);
-            };
-
-            self.stack.set_top_unsafe(result);
-
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SIGNEXTEND);
+        /// Uses `verified_ops.signextendFast`, the branchless form the SMT and Lean
+        /// proofs show equal to the Yellow Paper definition (`signextend_branchless_equiv`).
+        pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SIGNEXTEND, cursor, s.sp, gas);
+            const ext = s.pop_unsafe(); // Extension byte index (top of stack)
+            const value = s.peek_unsafe(); // Value to extend (second element)
+            s.set_top_unsafe(verified_ops.signextendFast(ext, value));
+            return N.next(self, .SIGNEXTEND, cursor, s.sp, gas);
         }
     };
 }
@@ -1370,50 +1361,4 @@ test "SUB opcode - ERC20 bug reproduction (2^64 - 1)" {
     const expected: u256 = 0xffffffffffffffff; // 18446744073709551615
 
     try testing.expectEqual(expected, result);
-}
-
-test "addmodWord - overflow fast path at modulus boundaries" {
-    const max = std.math.maxInt(u256);
-    // n = 2^256 - 1: (n-1) + (n-1) = 2n - 2 ≡ n - 2 (mod n)
-    try testing.expectEqual(max - 2, addmodWord(u256, max - 1, max - 1, max));
-    // n = 2^255 + 1: (n-1) + (n-1) = 2n - 2 ≡ n - 2 (mod n)
-    const n: u256 = (@as(u256, 1) << 255) + 1;
-    try testing.expectEqual(n - 2, addmodWord(u256, n - 1, n - 1, n));
-    // Unreduced operands take the widened path
-    try testing.expectEqual(@as(u256, (max % 7 + max % 7) % 7), addmodWord(u256, max, max, 7));
-    try testing.expectEqual(@as(u256, 0), addmodWord(u256, 5, 6, 0));
-}
-
-test "mulmodWord - single 512-bit reduction" {
-    const max = std.math.maxInt(u256);
-    try testing.expectEqual(@as(u256, 0), mulmodWord(u256, max, max, 0));
-    try testing.expectEqual(@as(u256, 0), mulmodWord(u256, 0, max, 7));
-    // Full-width operands: compare against a direct u512 reference
-    const expected: u256 = @intCast((@as(u512, max) * @as(u512, max)) % 12);
-    try testing.expectEqual(expected, mulmodWord(u256, max, max, 12));
-    try testing.expectEqual(@as(u256, 4), mulmodWord(u256, 10, 20, 7));
-}
-
-test "expWord - closed-form fast paths" {
-    try testing.expectEqual(@as(u256, 1), expWord(u256, 0, 0));
-    try testing.expectEqual(@as(u256, 0), expWord(u256, 0, 5));
-    try testing.expectEqual(@as(u256, 1), expWord(u256, 1, std.math.maxInt(u256)));
-    try testing.expectEqual(@as(u256, 1) << 255, expWord(u256, 2, 255));
-    try testing.expectEqual(@as(u256, 0), expWord(u256, 2, 256));
-    try testing.expectEqual(@as(u256, 1) << 248, expWord(u256, 256, 31));
-    try testing.expectEqual(@as(u256, 0), expWord(u256, 256, 32));
-    // 6^200: tz * e = 200 < 256, so the loop runs; 6^256 must vanish
-    var reference: u256 = 1;
-    for (0..200) |_| reference *%= 6;
-    try testing.expectEqual(reference, expWord(u256, 6, 200));
-    try testing.expectEqual(@as(u256, 0), expWord(u256, 6, 256));
-    // Odd base with huge exponent: 3^(2^256 - 1) mod 2^256
-    var odd: u256 = 1;
-    var square: u256 = 3;
-    var remaining: u256 = std.math.maxInt(u256);
-    while (remaining > 0) : (remaining >>= 1) {
-        if (remaining & 1 == 1) odd *%= square;
-        square *%= square;
-    }
-    try testing.expectEqual(odd, expWord(u256, 3, std.math.maxInt(u256)));
 }

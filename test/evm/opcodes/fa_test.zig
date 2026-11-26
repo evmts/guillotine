@@ -46,7 +46,7 @@ test "STATICCALL ModExp preserves Prague pricing and activates Osaka bounds" {
                         .balance = 0,
                         .nonce = 0,
                         .code_hash = hash,
-                        .storage_root = [_]u8{0} ** 32,
+                        .storage_root = @as([32]u8, @splat(0)),
                     });
                     var engine = try Engine.init(allocator, &database, .{
                         .chain_id = 1,
@@ -56,7 +56,7 @@ test "STATICCALL ModExp preserves Prague pricing and activates Osaka bounds" {
                         .gas_limit = 60_000_000,
                         .coinbase = primitives.ZERO_ADDRESS,
                         .base_fee = 0,
-                        .prev_randao = [_]u8{0} ** 32,
+                        .prev_randao = @as([32]u8, @splat(0)),
                         .blob_base_fee = 1,
                         .blob_versioned_hashes = &.{},
                     }, .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
@@ -78,7 +78,7 @@ test "STATICCALL ModExp preserves Prague pricing and activates Osaka bounds" {
                     else
                         forwarded_gas == 32768 and (fork == .PRAGUE or base_length == 1024);
                     const expected_success: u8 = @intFromBool(accepted);
-                    var expected = [_]u8{0} ** 32;
+                    var expected = @as([32]u8, @splat(0));
                     expected[31] = expected_success;
                     try std.testing.expect(result.success);
                     try std.testing.expect(reference_result.success);
@@ -109,8 +109,8 @@ test "opcode 0xfa differential test" {
     var database = evm.Database.init(allocator);
     defer database.deinit();
 
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
 
     // Set the bytecode on the contract account
     const code_hash = try database.set_code(bytecode);
@@ -119,15 +119,15 @@ test "opcode 0xfa differential test" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Set up caller as EOA with balance
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32, // Empty code hash for EOA
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)), // Empty code hash for EOA
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const block_info = evm.BlockInfo{
@@ -138,7 +138,7 @@ test "opcode 0xfa differential test" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };

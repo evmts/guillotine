@@ -50,7 +50,7 @@ test "opcode overrides - replace ADD with custom handler" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -66,14 +66,14 @@ test "opcode overrides - replace ADD with custom handler" {
     // With our custom handler, this should compute 3 * 2 = 6 instead of 3 + 2 = 5
     const bytecode = [_]u8{ 0x60, 0x03, 0x60, 0x02, 0x01, 0x00 };
     
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x42} ** 20 };
+    const contract_address = primitives.Address{ .bytes = @as([20]u8, @splat(0x42)) };
     const code_hash = try db.set_code(&bytecode);
     
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_address.bytes, account);
 
@@ -128,7 +128,7 @@ test "opcode overrides - add handler for invalid opcode 0xFE" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -145,14 +145,14 @@ test "opcode overrides - add handler for invalid opcode 0xFE" {
     // With override, it should stop gracefully
     const bytecode = [_]u8{ 0x60, 0x01, 0xFE };
     
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x43} ** 20 };
+    const contract_address = primitives.Address{ .bytes = @as([20]u8, @splat(0x43)) };
     const code_hash = try db.set_code(&bytecode);
     
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_address.bytes, account);
 
@@ -230,7 +230,7 @@ test "opcode overrides - multiple overrides" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -246,14 +246,14 @@ test "opcode overrides - multiple overrides" {
     // With overrides: ADD returns 42, MUL returns 99
     const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01, 0x60, 0x02, 0x02, 0x00 };
     
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x44} ** 20 };
+    const contract_address = primitives.Address{ .bytes = @as([20]u8, @splat(0x44)) };
     const code_hash = try db.set_code(&bytecode);
     
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_address.bytes, account);
 

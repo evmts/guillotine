@@ -672,7 +672,7 @@ test "size function" {
     const bytes2 = [_]u8{};
     try testing.expectEqual(@as(usize, 0), size(&bytes2));
 
-    const bytes3 = [_]u8{0x01} ** 1000;
+    const bytes3 = @as([1000]u8, @splat(0x01));
     try testing.expectEqual(@as(usize, 1000), size(&bytes3));
 }
 

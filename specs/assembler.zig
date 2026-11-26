@@ -1,5 +1,4 @@
 const std = @import("std");
-const lll = @import("lll.zig");
 
 // Label tracking for [[n]] syntax
 const LabelInfo = struct {
@@ -9,18 +8,18 @@ const LabelInfo = struct {
 
 // Replace <contract:...> and <eoa:...> placeholders with hex addresses
 fn replacePlaceholders(allocator: std.mem.Allocator, code: []const u8) ![]u8 {
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
 
     var i: usize = 0;
     while (i < code.len) {
-        // Only "<contract:" and "<eoa:" start a placeholder; a bare '<' is the LLL
-        // less-than operator and must not swallow code up to the next '>'.
-        if (std.mem.startsWith(u8, code[i..], "<contract:") or std.mem.startsWith(u8, code[i..], "<eoa:")) {
+        if (code[i] == '<') {
             // Look for closing >
             if (std.mem.indexOfPos(u8, code, i, ">")) |end_idx| {
                 const placeholder = code[i..end_idx + 1];
-                {
+                // Check if it's a contract or eoa placeholder
+                if (std.mem.indexOf(u8, placeholder, "contract:") != null or
+                    std.mem.indexOf(u8, placeholder, "eoa:") != null) {
                     // Extract the hex address (last occurrence of 0x)
                     if (std.mem.lastIndexOf(u8, placeholder, "0x")) |addr_start| {
                         const addr = placeholder[addr_start..placeholder.len - 1]; // Remove trailing >
@@ -45,7 +44,7 @@ pub fn compileAssembly(allocator: std.mem.Allocator, asm_code: []const u8) ![]u8
     const code_with_addresses = try replacePlaceholders(allocator, asm_code);
     defer allocator.free(code_with_addresses);
 
-    var code: []const u8 = std.mem.trim(u8, code_with_addresses, " \t\n\r");
+    var code: []const u8 = code_with_addresses;
 
     // Handle :asm prefix - simple assembly format
     if (std.mem.startsWith(u8, code, ":asm ")) {
@@ -67,23 +66,6 @@ pub fn compileAssembly(allocator: std.mem.Allocator, asm_code: []const u8) ![]u8
     // Handle { ... } format (may contain multiple expressions)
     if (std.mem.startsWith(u8, code, "{") and std.mem.endsWith(u8, code, "}")) {
         code = std.mem.trim(u8, code[1..code.len-1], " \t\n\r");
-        // Keep `{ (asm ...) }` on the raw-assembly path.
-        if (!std.mem.startsWith(u8, code, "(asm ")) {
-            // Compile LLL programs with the LLL compiler first (proper statement POPs,
-            // minimal PUSH sizes, `(lll ...)` meta-compilation, and trailing STOP `0x00`
-            // matching `lllc`); fall back to the legacy assembler for raw-opcode blocks
-            // or label syntax such as `{ (PUSH1 0x01) (PUSH1 0x02) (ADD) }`.
-            if (lll.compileProgram(allocator, code, getOpcode)) |compiled| {
-                defer allocator.free(compiled);
-                var with_stop = try allocator.alloc(u8, compiled.len + 1);
-                @memcpy(with_stop[0..compiled.len], compiled);
-                with_stop[compiled.len] = 0x00; // STOP
-                return with_stop;
-            } else |err| switch (err) {
-                error.UnknownOpcode, error.InvalidFormat => {},
-                else => return err,
-            }
-        }
         return compileComplexExpression(allocator, code);
     }
 
@@ -129,7 +111,7 @@ fn parseLllExpression(allocator: std.mem.Allocator, code: []const u8) !LllExpr {
     // Check if this is a list (starts with '(')
     if (code[pos] == '(') {
         pos += 1; // Skip '('
-        var items = std.ArrayList(LllExpr){};
+        var items = std.ArrayList(LllExpr).empty;
         errdefer {
             for (items.items) |*item| {
                 item.deinit(allocator);
@@ -168,7 +150,7 @@ fn parseLllExpressionAt(allocator: std.mem.Allocator, code: []const u8, pos: *us
     // Check if this is a list
     if (code[pos.*] == '(') {
         pos.* += 1; // Skip '('
-        var items = std.ArrayList(LllExpr){};
+        var items = std.ArrayList(LllExpr).empty;
         errdefer {
             for (items.items) |*item| {
                 item.deinit(allocator);
@@ -251,7 +233,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
     switch (expr) {
         .opcode => |name| {
             // Single opcode
-            var bytecode = std.ArrayList(u8){};
+            var bytecode = std.ArrayList(u8).empty;
             defer bytecode.deinit(allocator);
             const opcode = try getOpcode(name);
             try bytecode.append(allocator, opcode);
@@ -263,7 +245,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
         },
         .mload => |index| {
             // @x compiles to: PUSH index, MLOAD
-            var bytecode = std.ArrayList(u8){};
+            var bytecode = std.ArrayList(u8).empty;
             defer bytecode.deinit(allocator);
             const push_bytes = try compilePushValue(allocator, index);
             defer allocator.free(push_bytes);
@@ -281,7 +263,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
 
                 // Handle (seq ...) - sequential execution
                 if (std.mem.eql(u8, op_name, "seq")) {
-                    var bytecode = std.ArrayList(u8){};
+                    var bytecode = std.ArrayList(u8).empty;
                     defer bytecode.deinit(allocator);
 
                     // Compile each expression in sequence
@@ -302,7 +284,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
                     const inner_bytecode = try compileLllExpr(allocator, items[1], labels, 0);
                     defer allocator.free(inner_bytecode);
 
-                    var bytecode = std.ArrayList(u8){};
+                    var bytecode = std.ArrayList(u8).empty;
                     defer bytecode.deinit(allocator);
 
                     // Push the bytecode length
@@ -331,7 +313,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
                 }
 
                 // Regular opcode with arguments - compile in REVERSE order
-                var bytecode = std.ArrayList(u8){};
+                var bytecode = std.ArrayList(u8).empty;
                 defer bytecode.deinit(allocator);
 
                 // Push arguments in reverse order (prefix -> postfix)
@@ -357,7 +339,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
 
 // Helper to compile a PUSH for a value
 fn compilePushValue(allocator: std.mem.Allocator, value: u256) ![]u8 {
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     // For addresses (20 bytes), use PUSH20
@@ -418,7 +400,7 @@ fn compileComplexExpression(allocator: std.mem.Allocator, code: []const u8) ![]u
         return compileSingleExpression(allocator, trimmed_code);
     }
 
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     var labels = std.StringHashMap(LabelInfo).init(allocator);
@@ -470,7 +452,7 @@ fn compileComplexExpression(allocator: std.mem.Allocator, code: []const u8) ![]u
                         if (!gop.found_existing) {
                             gop.value_ptr.* = LabelInfo{
                                 .position = bytecode.items.len,
-                                .references = std.ArrayList(usize){},
+                                .references = std.ArrayList(usize).empty,
                             };
                         } else {
                             gop.value_ptr.position = bytecode.items.len;
@@ -624,7 +606,7 @@ fn compileComplexExpression(allocator: std.mem.Allocator, code: []const u8) ![]u
 // Compile expression with label and contract reference support
 fn compileExpressionWithLabels(allocator: std.mem.Allocator, code: []const u8, labels: *std.StringHashMap(LabelInfo), current_pos: usize) ![]u8 {
     // Tokenize the assembly code, preserving special tokens
-    var tokens = std.ArrayList([]const u8){};
+    var tokens = std.ArrayList([]const u8).empty;
     defer tokens.deinit(allocator);
 
     var pos: usize = 0;
@@ -692,7 +674,7 @@ fn compileExpressionWithLabels(allocator: std.mem.Allocator, code: []const u8, l
 
 // Compile tokens with label reference support
 fn compileTokensWithLabels(allocator: std.mem.Allocator, tokens: [][]const u8, labels: *std.StringHashMap(LabelInfo), current_pos: usize) ![]u8 {
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     var i: usize = 0;
@@ -710,7 +692,7 @@ fn compileTokensWithLabels(allocator: std.mem.Allocator, tokens: [][]const u8, l
             if (!gop.found_existing) {
                 gop.value_ptr.* = LabelInfo{
                     .position = 0, // Will be set when label is defined
-                    .references = std.ArrayList(usize){},
+                    .references = std.ArrayList(usize).empty,
                 };
             }
             try gop.value_ptr.references.append(allocator, current_pos + bytecode.items.len);
@@ -789,7 +771,7 @@ fn compileTokensWithLabels(allocator: std.mem.Allocator, tokens: [][]const u8, l
 // Compile a single expression (no wrapper)
 fn compileSingleExpression(allocator: std.mem.Allocator, code: []const u8) ![]u8 {
     // Tokenize the assembly code
-    var tokens = std.ArrayList([]const u8){};
+    var tokens = std.ArrayList([]const u8).empty;
     defer tokens.deinit(allocator);
 
     var it = std.mem.tokenizeAny(u8, code, " \t\n\r()");
@@ -798,7 +780,7 @@ fn compileSingleExpression(allocator: std.mem.Allocator, code: []const u8) ![]u8
     }
 
     // Compile tokens to bytecode
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     var i: usize = 0;
@@ -954,8 +936,6 @@ fn getOpcode(name: []const u8) !u8 {
     if (std.mem.eql(u8, name, "CHAINID")) return 0x46;
     if (std.mem.eql(u8, name, "SELFBALANCE")) return 0x47;
     if (std.mem.eql(u8, name, "BASEFEE")) return 0x48;
-    if (std.mem.eql(u8, name, "BLOBHASH")) return 0x49;
-    if (std.mem.eql(u8, name, "BLOBBASEFEE")) return 0x4a;
 
     // Memory
     if (std.mem.eql(u8, name, "POP")) return 0x50;
@@ -970,9 +950,6 @@ fn getOpcode(name: []const u8) !u8 {
     if (std.mem.eql(u8, name, "MSIZE")) return 0x59;
     if (std.mem.eql(u8, name, "GAS")) return 0x5a;
     if (std.mem.eql(u8, name, "JUMPDEST")) return 0x5b;
-    if (std.mem.eql(u8, name, "TLOAD")) return 0x5c;
-    if (std.mem.eql(u8, name, "TSTORE")) return 0x5d;
-    if (std.mem.eql(u8, name, "MCOPY")) return 0x5e;
 
     // Push operations
     if (std.mem.eql(u8, name, "PUSH0")) return 0x5f;
@@ -1062,7 +1039,7 @@ fn getOpcode(name: []const u8) !u8 {
     if (std.mem.eql(u8, name, "STATICCALL")) return 0xfa;
     if (std.mem.eql(u8, name, "REVERT")) return 0xfd;
     if (std.mem.eql(u8, name, "INVALID")) return 0xfe;
-    if (std.mem.eql(u8, name, "SELFDESTRUCT") or std.mem.eql(u8, name, "SUICIDE")) return 0xff;
+    if (std.mem.eql(u8, name, "SELFDESTRUCT")) return 0xff;
 
     return error.UnknownOpcode;
 }
@@ -1100,10 +1077,4 @@ test "compile { } format assembly" {
     // Expected: PUSH1 0x01=0x60 0x01, PUSH1 0x02=0x60 0x02, ADD=0x01
     const expected1 = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 };
     try std.testing.expectEqualSlices(u8, &expected1, bytecode1);
-}
-test "placeholders: LLL less-than before a contract placeholder survives" {
-    const allocator = std.testing.allocator;
-    const out = try replacePlaceholders(allocator, "(< @i 5) (CALL 1 <contract:0x1000000000000000000000000000000000000003> 0)");
-    defer allocator.free(out);
-    try std.testing.expectEqualStrings("(< @i 5) (CALL 1 0x1000000000000000000000000000000000000003 0)", out);
 }

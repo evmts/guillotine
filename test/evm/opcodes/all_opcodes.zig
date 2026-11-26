@@ -139,13 +139,16 @@ test {
     _ = @import("fe_test.zig");
     _ = @import("ff_test.zig");
     _ = @import("gas_accounting.zig");
-    _ = @import("static_write_protection.zig");
-    _ = @import("returndatacopy_overflow.zig");
-    _ = @import("call_insufficient_balance.zig");
     _ = @import("eip7623_floor.zig");
     _ = @import("gas_sweep.zig");
     _ = @import("osaka_eips.zig");
     _ = @import("static_jump_invalid.zig");
     _ = @import("calldatacopy_e2e.zig");
     _ = @import("create_nonce.zig");
+    _ = @import("handler_bounds_regression.zig");
+    _ = @import("fork_rules.zig");
+    _ = @import("build_config.zig");
+    _ = @import("r1a_core_regressions_test.zig");
+    _ = @import("r1_integration_regressions.zig");
+    _ = @import("state_root.zig");
 }

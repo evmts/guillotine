@@ -6,18 +6,15 @@ pub const Options = struct {
     iterations: usize = 100,
     warmup: usize = 10,
     compare: bool = false,
-    allow_unavailable: bool = false,
     help: bool = false,
 };
 
 pub const usage =
     \\Usage: guillotine-bench [--json <path>] [--filter <substring>]
-    \\                        [--iterations <N>] [--warmup <N>] [--compare]
-    \\                        [--allow-unavailable] [--help]
+    \\                        [--iterations <N>] [--warmup <N>] [--compare] [--help]
     \\
     \\Defaults: 100 samples, 10 warmups, JSON at bench/results/latest.json.
     \\--compare runs fused and unfused EVMs and records loop availability.
-    \\--allow-unavailable exits 0 if cases are unavailable (failed cases still fail).
     \\Filter is a case-insensitive substring; no matches is an error.
     \\Timing includes simulate() and result copying, excludes setup/validation.
     \\
@@ -34,10 +31,6 @@ pub fn parse(args: []const []const u8) !Options {
         }
         if (std.mem.eql(u8, arg, "--compare")) {
             options.compare = true;
-            continue;
-        }
-        if (std.mem.eql(u8, arg, "--allow-unavailable")) {
-            options.allow_unavailable = true;
             continue;
         }
         const json = std.mem.eql(u8, arg, "--json");

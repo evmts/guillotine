@@ -2,6 +2,10 @@ import Std.Tactic.BVDecide
 
 namespace GuillotineVerify.Arithmetic
 
+-- The Boolean simp sets below are deliberately broad so the proofs do not depend on
+-- the exact normal form of `BitVec.getLsbD_not` in a given Lean release.
+set_option linter.unusedSimpArgs false
+
 abbrev Word := BitVec 256
 
 /-- The reference's repeated shift, using natural division by 256 for each shift. -/
@@ -45,7 +49,8 @@ theorem expGasByteLenFast_eq_ref (x : Word) :
     · subst x
       have z : (0 : Word).clz.toNat = 256 :=
         congrArg BitVec.toNat (BitVec.clz_eq_iff_eq_zero.mpr rfl)
-      have : n = 0 := by change (263 - (0 : Word).clz.toNat) / 8 = 0; rw [z]
+      have unfolded : n = (263 - (0 : Word).clz.toNat) / 8 := rfl
+      have : n = 0 := by omega
       omega
     · have lower := BitVec.two_pow_sub_clz_le_toNat_of_ne_zero (by decide : 0 < 256) hz
       have np : n ≤ expByteLoop x.toNat := by
@@ -55,7 +60,8 @@ theorem expGasByteLenFast_eq_ref (x : Word) :
         rw [bytePower] at tooSmall
         have bound : 2^(8 * (n - 1)) ≤ 2^(255 - x.clz.toNat) :=
           Nat.pow_le_pow_right (by decide) (by dsimp [n]; omega)
-        exact (Nat.not_lt_of_ge (Nat.le_trans bound lower)) tooSmall
+        rw [show 256 - 1 - x.clz.toNat = 255 - x.clz.toNat by omega] at lower
+        omega
       omega
   apply BitVec.eq_of_toNat_eq
   unfold expGasByteLenFast expGasByteLenRef
@@ -111,16 +117,15 @@ private theorem signextendShift (value : Word) (b : Nat) (hb : b < 256) :
         apply hn
         apply BitVec.eq_of_getLsbD_eq
         intro i _
-        change (value &&& ((1 : Word) <<< b)).getLsbD i = (0#256).getLsbD i
         by_cases hi : b = i
-        · subst i
-          simp only [BitVec.getLsbD_and, signBit, hs, Bool.false_and, BitVec.getLsbD_zero]
-        · simp only [BitVec.getLsbD_and, signBit, hi, decide_false, Bool.and_false, BitVec.getLsbD_zero]
+        · rw [BitVec.getLsbD_and, signBit, ← hi, hs]
+          simp
+        · rw [BitVec.getLsbD_and, signBit]
+          simp [hi]
     · intro hs hz
-      have atBit := congrArg (fun w : Word => w.getLsbD b) hz
-      change (value &&& ((1 : Word) <<< b)).getLsbD b = (0#256).getLsbD b at atBit
-      simp only [BitVec.getLsbD_and, signBit, decide_true, Bool.and_true, hs,
-        BitVec.getLsbD_zero, Bool.true_eq_false] at atBit
+      have atBit : (value &&& ((1 : Word) <<< b)).getLsbD b = (0 : Word).getLsbD b := by rw [hz]
+      rw [BitVec.getLsbD_and, signBit, hs] at atBit
+      simp at atBit
   have shiftedSign : (value <<< (255 - b)).msb = value.getLsbD b := by
     rw [BitVec.msb_eq_getLsbD_last, BitVec.getLsbD_shiftLeft]
     change (decide (255 < 256) && !decide (255 < 255 - b) &&
@@ -142,20 +147,25 @@ private theorem signextendShift (value : Word) (b : Nat) (hb : b < 256) :
   by_cases low : i ≤ b
   · rw [if_pos (show 255 - b + i < 256 by omega), shifted low]
     by_cases eq : i = b
-    · subst i
-      cases value.getLsbD b <;>
-        simp only [Bool.false_eq_true, if_false, if_true, BitVec.getLsbD_and,
-          BitVec.getLsbD_or, BitVec.getLsbD_not, maskBit, Nat.lt_irrefl, hi,
-          decide_true, decide_false, Bool.and_false, Bool.not_false, Bool.true_and, Bool.or_true]
-    · cases value.getLsbD b <;>
-        simp only [Bool.false_eq_true, if_false, if_true, BitVec.getLsbD_and,
-          BitVec.getLsbD_or, BitVec.getLsbD_not, maskBit, show i < b by omega, hi,
-          decide_true, Bool.not_true, Bool.and_true, Bool.and_false, Bool.or_false]
+    · rw [eq]
+      cases hv : value.getLsbD b <;>
+        simp only [hv, eq_self, Bool.false_eq_true, if_true, if_false, BitVec.getLsbD_and,
+          BitVec.getLsbD_or, BitVec.getLsbD_not, maskBit, hb, Nat.lt_irrefl, decide_true,
+          decide_false, Bool.and_true, Bool.true_and, Bool.and_false, Bool.false_and,
+          Bool.or_true, Bool.true_or, Bool.or_false, Bool.false_or, Bool.not_true, Bool.not_false]
+    · have below : i < b := by omega
+      cases hv : value.getLsbD b <;>
+        simp only [hv, eq_self, Bool.false_eq_true, if_true, if_false, BitVec.getLsbD_and,
+          BitVec.getLsbD_or, BitVec.getLsbD_not, maskBit, hi, below, decide_true,
+          decide_false, Bool.and_true, Bool.true_and, Bool.and_false, Bool.false_and,
+          Bool.or_true, Bool.true_or, Bool.or_false, Bool.false_or, Bool.not_true, Bool.not_false]
   · rw [if_neg (show ¬ 255 - b + i < 256 by omega)]
-    cases value.getLsbD b <;>
-      simp only [Bool.false_eq_true, if_false, if_true, BitVec.getLsbD_and,
-        BitVec.getLsbD_or, BitVec.getLsbD_not, maskBit, hi, show ¬ i < b by omega,
-        decide_true, decide_false, Bool.not_false, Bool.and_true, Bool.and_false, Bool.or_true]
+    have above : ¬ i < b := by omega
+    cases hv : value.getLsbD b <;>
+      simp only [hv, eq_self, Bool.false_eq_true, if_true, if_false, BitVec.getLsbD_and,
+        BitVec.getLsbD_or, BitVec.getLsbD_not, maskBit, hi, above, decide_true,
+        decide_false, Bool.and_true, Bool.true_and, Bool.and_false, Bool.false_and,
+        Bool.or_true, Bool.true_or, Bool.or_false, Bool.false_or, Bool.not_true, Bool.not_false]
 
 theorem signextendFast_eq_ref (ext value : Word) : signextendFast ext value = signextendRef ext value := by
   unfold signextendFast signextendRef
@@ -184,21 +194,9 @@ def sarRef (shift value : Word) : Word :=
 def sarFast (shift value : Word) : Word :=
   value.sshiftRight ((if shift.toNat ≥ 255 then 255 else shift.setWidth 8 : BitVec 8).toNat)
 
-private theorem sar_at_sign (v : Word) :
-    v.sshiftRight 255 = if v.msb then BitVec.allOnes 256 else 0#256 := by
-  apply BitVec.eq_of_getLsbD_eq
-  intro i hi
-  rw [BitVec.getLsbD_sshiftRight]
-  have inside : ¬ 256 ≤ i := by omega
-  have fromSign : (if 255 + i < 256 then v.getLsbD (255 + i) else v.msb) = v.msb := by
-    split
-    · rw [show 255 + i = 255 by omega]
-      exact (BitVec.msb_eq_getLsbD_last v).symm
-    · rfl
-  rw [fromSign]
-  cases v.msb <;> simp only [inside, decide_false, Bool.not_false, Bool.true_and,
-    Bool.false_eq_true, if_false, if_true, BitVec.getLsbD_allOnes, BitVec.getLsbD_zero, hi,
-    decide_true]
+private theorem sar_at_sign (v : BitVec 256) :
+    v.sshiftRight 255 = if v.msb then BitVec.allOnes 256 else 0 := by
+  bv_decide
 
 theorem sarFast_eq_ref (shift value : Word) : sarFast shift value = sarRef shift value := by
   unfold sarFast sarRef
@@ -248,28 +246,13 @@ def absTwoComp (x : Word) : Word :=
 
 def signedAbs (x : Word) : Word := if x.msb then -x else x
 
-private theorem signWord (x : Word) :
+private theorem signWord (x : BitVec 256) :
     x >>> 255 = if x.msb then 1 else 0 := by
-  change x >>> (255 : BitVec 8).toNat = _
-  apply BitVec.eq_of_getLsbD_eq
-  intro i hi
-  rw [BitVec.getLsbD_ushiftRight]
-  change x.getLsbD (255 + i) = _
-  by_cases zero : i = 0
-  · subst i
-    rw [show x.getLsbD (255 + 0) = x.msb from (BitVec.msb_eq_getLsbD_last x).symm]
-    cases x.msb <;> decide
-  · rw [BitVec.getLsbD_of_ge (x := x) (i := 255 + i) (by omega)]
-    cases x.msb
-    · exact (BitVec.getLsbD_zero (w := 256) (i := i)).symm
-    · simp only [if_true]
-      change false = (2^0 : Nat).testBit i
-      rw [Nat.testBit_two_pow_of_ne (n := 0) (by omega)]
+  bv_decide
 
-private theorem applyNegativeMask (x : Word) :
+private theorem applyNegativeMask (x : BitVec 256) :
     (x ^^^ BitVec.allOnes 256) - BitVec.allOnes 256 = -x := by
-  rw [BitVec.xor_allOnes, BitVec.sub_eq_add_neg, ← BitVec.neg_one_eq_allOnes, BitVec.neg_neg]
-  exact (BitVec.neg_eq_not_add x).symm
+  bv_decide
 
 theorem absTwoComp_eq_abs (x : Word) : absTwoComp x = signedAbs x := by
   unfold absTwoComp signedAbs
@@ -277,17 +260,6 @@ theorem absTwoComp_eq_abs (x : Word) : absTwoComp x = signedAbs x := by
   cases x.msb
   · simp
   · exact applyNegativeMask x
-
-theorem absTwoComp_toNat_eq_natAbs (x : Word) : (absTwoComp x).toNat = x.toInt.natAbs := by
-  rw [absTwoComp_eq_abs]
-  unfold signedAbs
-  cases h : x.msb
-  · rw [BitVec.toInt_eq_toNat_of_msb h]
-    rfl
-  · rw [BitVec.toInt_eq_neg_toNat_neg_of_msb_true h]
-    change (-x).toNat = (-(Int.ofNat (-x).toNat)).natAbs
-    rw [Int.natAbs_neg]
-    rfl
 
 def sdivFromUnsignedQuotient (top second q : Word) : Word :=
   let mask := 0 - ((top >>> 255) ^^^ (second >>> 255))
@@ -336,7 +308,8 @@ theorem smodFast_eq_ref (top second : Word) : smodFast top second = smodRef top 
     cases top.msb <;> cases second.msb <;> first | rfl | apply applyNegativeMask | simp
 
 theorem sdivFast_zero (top : Word) : sdivFast top 0 = 0 := by
-  exact (sdivFast_eq_ref top 0).trans BitVec.sdiv_zero
+  rw [sdivFast_eq_ref]
+  exact BitVec.sdiv_zero
 
 theorem sdivFast_min_neg_one : sdivFast (BitVec.intMin 256) (-1) = BitVec.intMin 256 := by
   decide

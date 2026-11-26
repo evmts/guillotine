@@ -65,12 +65,12 @@ rsync -az --delete \
 # 2. Ensure Zig 0.15.2 is installed in isolated ~/.local/opt/zig-${ZIG_VERSION} without touching host default zig
 ssh "${HOST}" bash -s -- "${REMOTE_DIR}" "${ZIG_VERSION}" "${MODE}" "${SECONDS_BUDGET}" "${THREADS}" "${FILTER}" <<'REMOTE_EOF'
 set -euo pipefail
-REMOTE_DIR="${1/#\~/$HOME}"
+REMOTE_DIR="$1"
 ZIG_VERSION="$2"
 MODE="$3"
 SECONDS_BUDGET="$4"
 THREADS="$5"
-FILTER="${6:-}"
+FILTER="$6"
 
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.bun/bin:/usr/local/bin:$PATH"
 
@@ -102,6 +102,8 @@ run_zig_corpus() {
     "${ZIG_BIN}" build test-fuzz -Dtest-filter="${FILTER}"
   else
     "${ZIG_BIN}" build test-fuzz
+    echo "[remote] === 1b. guillotine-mini fuzz corpus ==="
+    "${ZIG_BIN}" build test-mini-fuzz
   fi
 }
 
@@ -134,7 +136,7 @@ run_campaign() {
   if [ -n "${FILTER}" ]; then
     target_args=("--target=${FILTER}")
   fi
-  "${ZIG_BIN}" build fuzz-campaign -Doptimize=ReleaseSafe -- "--seconds=${SECONDS_BUDGET}" "--threads=${THREADS}" ${target_args[@]+"${target_args[@]}"}
+  "${ZIG_BIN}" build fuzz-campaign -- "--seconds=${SECONDS_BUDGET}" "--threads=${THREADS}" "${target_args[@]}"
 }
 
 run_rust() {

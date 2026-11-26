@@ -18,8 +18,8 @@ const TransactionContext = evm_mod.TransactionContext;
 // ============================================================================
 
 const BENCHMARK_GAS_LIMIT: u64 = 100_000_000;
-const CALLER_ADDRESS: Address = [_]u8{0x11} ** 20;
-const CONTRACT_ADDRESS: Address = [_]u8{0x22} ** 20;
+const CALLER_ADDRESS: Address = @as([20]u8, @splat(0x11));
+const CONTRACT_ADDRESS: Address = @as([20]u8, @splat(0x22));
 
 // ============================================================================
 // Benchmark Registration
@@ -356,7 +356,7 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
         .difficulty = 0,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Set up transaction context
@@ -394,7 +394,7 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
         .balance = 0,
         .nonce = 0,
         .code_hash = HashUtils.EMPTY_KECCAK256,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     account.code_hash = code_hash;
@@ -432,7 +432,7 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
         .difficulty = 0,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Set up transaction context
@@ -470,7 +470,7 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
         .balance = 0,
         .nonce = 0,
         .code_hash = HashUtils.EMPTY_KECCAK256,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     account.code_hash = code_hash;

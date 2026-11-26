@@ -11,6 +11,7 @@ const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
 const opcode_data = evm.OpcodeData;
 
 const allocator = std.heap.c_allocator;
+const log = std.log.scoped(.bytecode_c);
 
 // ============================================================================
 // ERROR CODES
@@ -47,21 +48,25 @@ pub fn evm_bytecode_create(data: [*]const u8, data_len: usize) callconv(.c) ?*CB
 }
 
 pub fn evm_bytecode_create_with_allocator(alloc: std.mem.Allocator, data: [*]const u8, data_len: usize) ?*CBytecodeHandle {
-    const handle = alloc.create(CBytecodeHandle) catch return null;
+    // `errdefer` does not run on `return null`, so the fallible work lives in
+    // `createHandle`, whose errdefers free the handle and the copied input.
+    return createHandle(alloc, data[0..data_len]) catch |err| {
+        log.debug("evm_bytecode_create rejected {d} bytes: {s}", .{ data_len, @errorName(err) });
+        return null;
+    };
+}
+
+/// Copy `data`, validate it, and return an owned handle. On error nothing leaks.
+pub fn createHandle(alloc: std.mem.Allocator, data: []const u8) !*CBytecodeHandle {
+    const handle = try alloc.create(CBytecodeHandle);
     errdefer alloc.destroy(handle);
 
     // Copy input (may include Solidity metadata suffix)
-    const owned_data = alloc.dupe(u8, data[0..data_len]) catch {
-        alloc.destroy(handle);
-        return null;
-    };
+    const owned_data = try alloc.dupe(u8, data);
     errdefer alloc.free(owned_data);
 
     // Validate and build bitmaps against runtime portion
-    var bytecode = BytecodeType.init(alloc, owned_data) catch {
-        return null;
-    };
-    errdefer bytecode.deinit();
+    const bytecode = try BytecodeType.init(alloc, owned_data);
 
     handle.* = .{
         .allocator = alloc,
@@ -70,6 +75,7 @@ pub fn evm_bytecode_create_with_allocator(alloc: std.mem.Allocator, data: [*]con
     };
     return handle;
 }
+
 
 /// Destroy bytecode and free memory
 /// @param handle Bytecode handle
@@ -205,10 +211,7 @@ pub const CFusionInfo = extern struct {
 /// Fusion type enum for C
 pub const CFusionType = enum(u8) {
     constant_fold = 0,
-    multi_push = 1,
-    multi_pop = 2,
     iszero_jumpi = 3,
-    dup2_mstore_push = 4,
 };
 
 /// C structure for jump fusion entry
@@ -254,6 +257,9 @@ pub fn evm_bytecode_analyze(handle: ?*const CBytecodeHandle, analysis_out: *CByt
 }
 
 pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*const CBytecodeHandle, analysis_out: *CBytecodeAnalysis) c_int {
+    // Zero the output first: on every failure path the caller holds an empty analysis
+    // that evm_bytecode_free_analysis accepts, never uninitialized pointers and counts.
+    analysis_out.* = std.mem.zeroes(CBytecodeAnalysis);
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
     
     // Call the Zig analyzer with correct types
@@ -262,7 +268,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
         end: BytecodeType.PcType,
     };
     const FusionInfo = struct {
-        fusion_type: enum { constant_fold, multi_push, multi_pop, iszero_jumpi, dup2_mstore_push },
+        fusion_type: enum { constant_fold, iszero_jumpi },
         original_length: BytecodeType.PcType,
         folded_value: u256 = 0,
         count: u8 = 0,
@@ -351,10 +357,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
                 .info = .{
                     .fusion_type = switch (fusion.fusion_type) {
                         .constant_fold => CFusionType.constant_fold,
-                        .multi_push => CFusionType.multi_push,
-                        .multi_pop => CFusionType.multi_pop,
                         .iszero_jumpi => CFusionType.iszero_jumpi,
-                        .dup2_mstore_push => CFusionType.dup2_mstore_push,
                     },
                     .original_length = @intCast(fusion.original_length),
                     .folded_value_low = @truncate(fusion.folded_value),
@@ -421,7 +424,7 @@ pub fn evm_bytecode_free_analysis_with_allocator(alloc: std.mem.Allocator, analy
 /// @param opcode_value Opcode value (0-255)
 /// @return Opcode name, or "INVALID" if not recognized
 pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
-    const opcode = std.meta.intToEnum(Opcode, opcode_value) catch return "INVALID";
+    const opcode = std.enums.fromInt(Opcode, opcode_value) orelse return "INVALID";
     
     return switch (opcode) {
         .STOP => "STOP",
@@ -583,7 +586,7 @@ pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
 /// @param opcode_value Opcode value (0-255)
 /// @return 1 if valid opcode, 0 otherwise
 pub fn evm_bytecode_is_valid_opcode(opcode_value: u8) callconv(.c) c_int {
-    _ = std.meta.intToEnum(Opcode, opcode_value) catch return 0;
+    _ = std.enums.fromInt(Opcode, opcode_value) orelse return 0;
     return 1;
 }
 

@@ -112,11 +112,12 @@ theorem execFused_eq_execSeq (f : Fusion) (s : State) :
     | cons a tail =>
       by_cases full : cap ≤ tail.length + 1
       · simp [Fusion.ops, execFused, execSeq, step, push, full]
-      · by_cases z : a = 0#256 <;>
-          simp [Fusion.ops, execFused, execSeq, step, push, full, z, jump] <;> split <;> rfl
+      · by_cases z : a = 0#256 <;> by_cases ok : valid dest = true <;>
+          simp [Fusion.ops, execFused, execSeq, step, push, jump, full, z, ok]
   | pushAddDup1 v =>
     cases stack with
-    | nil => simp [Fusion.ops, execFused, execSeq, step, push]; split <;> rfl
+    | nil =>
+      by_cases full : cap ≤ 0 <;> simp [Fusion.ops, execFused, execSeq, step, push, full]
     | cons a tail =>
       by_cases full : cap ≤ tail.length + 1 <;>
         simp [Fusion.ops, execFused, execSeq, step, push, full, Bin.eval]

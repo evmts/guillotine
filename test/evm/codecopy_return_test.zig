@@ -37,7 +37,7 @@ test "CODECOPY and RETURN differential test" {
     
     // Deploy contract
     const contract_address = primitives.Address{ 
-        .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 
+        .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) 
     };
     
     // Set the bytecode on the contract
@@ -46,20 +46,20 @@ test "CODECOPY and RETURN differential test" {
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Caller address
     const caller_address = primitives.Address{ 
-        .bytes = [_]u8{0x10} ++ [_]u8{0} ** 19
+        .bytes = [_]u8{0x10} ++ @as([19]u8, @splat(0))
     };
     
     // Give caller some ETH
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Setup EVM
@@ -71,7 +71,7 @@ test "CODECOPY and RETURN differential test" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };

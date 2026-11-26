@@ -12,26 +12,35 @@
 ;; This file asserts ONLY the hypotheses. Expected `sat`: the hypotheses
 ;; are consistent, so the companion `unsat` proof is not vacuous.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:173 (memoryGasCost)
+;; --- src/core/verified_ops.zig:173 (memoryGasCost)
 ;;   | pub inline fn memoryGasCost(words: u64) u64 {
 ;;   |     return (words * 3) + ((words * words) >> 9);
 ;;   | }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)
 (set-info :status sat)
-(set-logic QF_NIA)
+(set-logic QF_BV)
+(define-sort Word () (_ BitVec 256))
 
-; Exact unbounded integer arithmetic model for words <= 524288 (16 MiB).
-; Proves u64 intermediate w*w < 2^64, cost <= 538443776 < 2^63, tightness, and monotonicity.
-(declare-const w1 Int)
-(declare-const w2 Int)
-(define-fun exactCost ((w Int)) Int (+ (* 3 w) (div (* w w) 512)))
+; A u64 `words <= 524288 = 2^19` is exactly the zero extension of a 20-bit value.
+(declare-const a1 (_ BitVec 20))
+(declare-const a2 (_ BitVec 20))
+(define-fun w1 () (_ BitVec 64) ((_ zero_extend 44) a1))
+(define-fun w2 () (_ BitVec 64) ((_ zero_extend 44) a2))
+; verified_ops.zig memoryGasCost (u64 wrapping model)
+(define-fun memoryGasCost ((words (_ BitVec 64))) (_ BitVec 64)
+  (bvadd (bvmul words #x0000000000000003) (bvlshr (bvmul words words) #x0000000000000009)))
+; Exact integer cost in 128 bits
+(define-fun exactCost ((words (_ BitVec 64))) (_ BitVec 128)
+  (let ((x ((_ zero_extend 64) words)))
+    (bvadd (bvmul x ((_ zero_extend 64) #x0000000000000003))
+           (bvlshr (bvmul x x) ((_ zero_extend 64) #x0000000000000009)))))
 
 ;; ---- Hypotheses
-; domain: 0 <= w1 <= 524288
-(assert (and (<= 0 w1) (<= w1 524288)))
-; domain: 0 <= w2 <= 524288
-(assert (and (<= 0 w2) (<= w2 524288)))
+; domain: w1 <= 524288
+(assert (bvule a1 #x80000))
+; domain: w2 <= 524288
+(assert (bvule a2 #x80000))
 
 (check-sat)
 (exit)

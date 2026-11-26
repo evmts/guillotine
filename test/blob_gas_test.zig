@@ -36,12 +36,12 @@ test "blob gas pricing and excess accumulation across hardforks" {
 test "blob transaction validation table" {
     const cancun = Eips{ .hardfork = .CANCUN };
     const prague = Eips{ .hardfork = .PRAGUE };
-    const to = Address{ .bytes = [_]u8{0x22} ** 20 };
-    const valid_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ [_]u8{0x44} ** 31;
-    const invalid_hash = [_]u8{0x02} ++ [_]u8{0x44} ** 31;
+    const to = Address{ .bytes = @as([20]u8, @splat(0x22)) };
+    const valid_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ @as([31]u8, @splat(0x44));
+    const invalid_hash = [_]u8{0x02} ++ @as([31]u8, @splat(0x44));
     const cancun_max = cancun.max_blob_gas() / blob.BLOB_GAS_PER_BLOB;
     const prague_max = prague.max_blob_gas() / blob.BLOB_GAS_PER_BLOB;
-    var too_many: [10][32]u8 = [_][32]u8{valid_hash} ** 10;
+    var too_many: [10][32]u8 = @as([10][32]u8, @splat(valid_hash));
 
     try std.testing.expectError(error.NoBlobs, cancun.validate_blob_gas(true, &.{}, 1, 1, to));
     try std.testing.expectError(error.TooManyBlobs, cancun.validate_blob_gas(true, too_many[0 .. cancun_max + 1], 1, 1, to));
@@ -55,10 +55,10 @@ test "blob transaction validation table" {
 test "blob fee settlement burns blob fee when execution gas price is zero" {
     const allocator = std.testing.allocator;
     const DefaultEvm = evm.Evm(.{});
-    const origin = Address{ .bytes = [_]u8{0x11} ** 20 };
-    const recipient = Address{ .bytes = [_]u8{0x22} ** 20 };
-    const coinbase = Address{ .bytes = [_]u8{0x33} ** 20 };
-    const versioned_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ [_]u8{0x55} ** 31;
+    const origin = Address{ .bytes = @as([20]u8, @splat(0x11)) };
+    const recipient = Address{ .bytes = @as([20]u8, @splat(0x22)) };
+    const coinbase = Address{ .bytes = @as([20]u8, @splat(0x33)) };
+    const versioned_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ @as([31]u8, @splat(0x55));
     const blob_base_fee: u256 = 2;
     const required = @as(u256, blob.BLOB_GAS_PER_BLOB) * blob_base_fee;
 
@@ -68,7 +68,7 @@ test "blob fee settlement burns blob fee when execution gas price is zero" {
         .balance = required,
         .nonce = 0,
         .code_hash = primitives.EMPTY_CODE_HASH,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     try database.set_account(recipient.bytes, evm.Account.zero());
 
@@ -79,7 +79,7 @@ test "blob fee settlement burns blob fee when execution gas price is zero" {
         .gas_limit = 30_000_000,
         .coinbase = coinbase,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = blob_base_fee,
     };
     const tx_context = evm.TransactionContext{
@@ -114,10 +114,10 @@ test "blob fee settlement burns blob fee when execution gas price is zero" {
 test "blob fee settlement credits only priority fee and burns base fees" {
     const allocator = std.testing.allocator;
     const DefaultEvm = evm.Evm(.{});
-    const origin = Address{ .bytes = [_]u8{0x41} ** 20 };
-    const recipient = Address{ .bytes = [_]u8{0x42} ** 20 };
-    const coinbase = Address{ .bytes = [_]u8{0x43} ** 20 };
-    const versioned_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ [_]u8{0x66} ** 31;
+    const origin = Address{ .bytes = @as([20]u8, @splat(0x41)) };
+    const recipient = Address{ .bytes = @as([20]u8, @splat(0x42)) };
+    const coinbase = Address{ .bytes = @as([20]u8, @splat(0x43)) };
+    const versioned_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ @as([31]u8, @splat(0x66));
     const initial_sender: u256 = 10_000_000;
     const initial_coinbase: u256 = 100;
     const gas_price: u256 = 7;
@@ -126,8 +126,8 @@ test "blob fee settlement credits only priority fee and burns base fees" {
 
     var database = evm.Database.init(allocator);
     defer database.deinit();
-    try database.set_account(origin.bytes, .{ .balance = initial_sender, .nonce = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = [_]u8{0} ** 32 });
-    try database.set_account(coinbase.bytes, .{ .balance = initial_coinbase, .nonce = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = [_]u8{0} ** 32 });
+    try database.set_account(origin.bytes, .{ .balance = initial_sender, .nonce = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = @as([32]u8, @splat(0)) });
+    try database.set_account(coinbase.bytes, .{ .balance = initial_coinbase, .nonce = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = @as([32]u8, @splat(0)) });
     try database.set_account(recipient.bytes, evm.Account.zero());
 
     const block_info = evm.BlockInfo{
@@ -137,7 +137,7 @@ test "blob fee settlement credits only priority fee and burns base fees" {
         .gas_limit = 30_000_000,
         .coinbase = coinbase,
         .base_fee = base_fee,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = blob_base_fee,
     };
     const tx_context = evm.TransactionContext{
@@ -173,18 +173,18 @@ test "blob fee settlement credits only priority fee and burns base fees" {
 test "upfront balance check rejects required minus one without nonce bump" {
     const allocator = std.testing.allocator;
     const DefaultEvm = evm.Evm(.{});
-    const origin = Address{ .bytes = [_]u8{0x71} ** 20 };
-    const recipient = Address{ .bytes = [_]u8{0x72} ** 20 };
-    const coinbase = Address{ .bytes = [_]u8{0x73} ** 20 };
-    const versioned_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ [_]u8{0x77} ** 31;
+    const origin = Address{ .bytes = @as([20]u8, @splat(0x71)) };
+    const recipient = Address{ .bytes = @as([20]u8, @splat(0x72)) };
+    const coinbase = Address{ .bytes = @as([20]u8, @splat(0x73)) };
+    const versioned_hash = [_]u8{blob.BLOB_COMMITMENT_VERSION_KZG} ++ @as([31]u8, @splat(0x77));
     const required: u256 = 100_000 + blob.BLOB_GAS_PER_BLOB;
 
     var database = evm.Database.init(allocator);
     defer database.deinit();
-    try database.set_account(origin.bytes, .{ .balance = required - 1, .nonce = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = [_]u8{0} ** 32 });
+    try database.set_account(origin.bytes, .{ .balance = required - 1, .nonce = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = @as([32]u8, @splat(0)) });
     try database.set_account(recipient.bytes, evm.Account.zero());
 
-    const block_info = evm.BlockInfo{ .number = 20_000_000, .timestamp = 1_710_338_135, .difficulty = 0, .gas_limit = 30_000_000, .coinbase = coinbase, .base_fee = 0, .prev_randao = [_]u8{0} ** 32, .blob_base_fee = 1 };
+    const block_info = evm.BlockInfo{ .number = 20_000_000, .timestamp = 1_710_338_135, .difficulty = 0, .gas_limit = 30_000_000, .coinbase = coinbase, .base_fee = 0, .prev_randao = @as([32]u8, @splat(0)), .blob_base_fee = 1 };
     const tx_context = evm.TransactionContext{ .gas_limit = 100_000, .coinbase = coinbase, .chain_id = 1, .blob_versioned_hashes = &.{versioned_hash}, .is_blob_transaction = true, .max_fee_per_gas = 1, .max_fee_per_blob_gas = 1 };
     var instance = try DefaultEvm.init(allocator, &database, block_info, tx_context, 1, origin);
     defer instance.deinit();

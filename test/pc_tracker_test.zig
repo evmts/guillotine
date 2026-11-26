@@ -6,7 +6,6 @@ const primitives = @import("voltaire");
 const pc_tracker_mod = @import("../src/tracer/pc_tracker.zig");
 
 test "PC tracker validates correct bytecode execution" {
-    const allocator = testing.allocator;
 
     // Create simple bytecode: PUSH1 5, PUSH1 3, ADD, STOP
     const bytecode = [_]u8{
@@ -22,7 +21,7 @@ test "PC tracker validates correct bytecode execution" {
     // Mock frame with stack
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {
@@ -119,7 +118,7 @@ test "PC tracker handles JUMP correctly" {
 
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {
@@ -181,7 +180,7 @@ test "PC tracker handles JUMPI with condition true" {
 
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {
@@ -238,7 +237,7 @@ test "PC tracker handles JUMPI with condition false" {
 
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {
@@ -294,7 +293,7 @@ test "PC tracker detects invalid jump destination" {
 
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {

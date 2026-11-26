@@ -12,7 +12,7 @@ fn benchEncodeSmallBytes(allocator: std.mem.Allocator) void {
 
 // Benchmark: RLP encode large byte string (>55 bytes)
 fn benchEncodeLargeBytes(allocator: std.mem.Allocator) void {
-    const data = [_]u8{0xab} ** 100;
+    const data = @as([100]u8, @splat(0xab));
     const encoded = rlp.encodeBytes(allocator, &data) catch unreachable;
     defer allocator.free(encoded);
 }

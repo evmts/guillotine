@@ -36,37 +36,56 @@ This document covers gas calculation, costs, and metering patterns across both E
 
 ### Static Gas Costs
 
-Fixed cost per opcode. Both EVMs import the constants from the vendored Voltaire library as `GasConstants` (`@import("voltaire").GasConstants` in `src/`, `@import("primitives").GasConstants` in `mini/src/`):
+Fixed cost per opcode, defined in gas constants:
 
 ```zig
-// lib/voltaire/src/primitives/gas_constants.zig
-// Zero tier (STOP, RETURN, REVERT) has no named constant.
-pub const GasQuickStep: u64 = 2;    // Base: ADDRESS, ORIGIN, CALLER, CALLVALUE, ...
-pub const GasFastestStep: u64 = 3;  // VeryLow: ADD, SUB, NOT, LT, GT, ...
-pub const GasFastStep: u64 = 5;     // Low: MUL, DIV, SDIV, MOD, SMOD
-pub const GasMidStep: u64 = 8;      // Mid: ADDMOD, MULMOD, JUMP
-pub const GasSlowStep: u64 = 10;    // High: JUMPI
-pub const GasExtStep: u64 = 20;     // BLOCKHASH
+// From primitives/GasConstants
+pub const GasConstants = struct {
+    // Tier: Zero (0 gas)
+    pub const GasZero: u64 = 0;
 
-// EIP-2929 access costs
-pub const WarmStorageReadCost: u64 = 100;
-pub const ColdSloadCost: u64 = 2100;
-pub const ColdAccountAccessCost: u64 = 2600;
+    // Tier: Base (2 gas)
+    pub const GasBase: u64 = 2;
+
+    // Tier: VeryLow (3 gas)
+    pub const GasVeryLow: u64 = 3;  // ADD, SUB, NOT, LT, GT, etc.
+
+    // Tier: Low (5 gas)
+    pub const GasLow: u64 = 5;  // MUL, DIV, SDIV, MOD, SMOD
+
+    // Tier: Mid (8 gas)
+    pub const GasMid: u64 = 8;  // ADDMOD, MULMOD
+
+    // Tier: High (10 gas)
+    pub const GasHigh: u64 = 10;  // JUMPI
+
+    // Tier: ExtCode (100-2600 gas, EIP-2929)
+    pub const WarmStorageReadCost: u64 = 100;
+    pub const ColdSloadCost: u64 = 2100;
+    pub const ColdAccountAccessCost: u64 = 2600;
+};
 ```
 
 ### Dynamic Gas Costs
 
-Calculated at runtime from operation parameters. Each opcode handler computes its own dynamic cost:
+Calculated based on operation parameters:
 
-| Cost | Mini (`mini/src/`) | Performance (`src/`) |
-|------|--------------------|----------------------|
-| Memory expansion | `Frame.memoryExpansionCost(end_bytes)` in `frame.zig` | `Memory.get_expansion_cost(new_size)` in `memory/memory.zig` |
-| SSTORE | `GasConstants.sstoreGasCostWithHardfork(...)` plus refunds in `instructions/handlers_storage.zig` | `sstore` in `instructions/handlers_storage.zig` |
-| EXP | `exp` in `instructions/handlers_arithmetic.zig` | `exp` in `instructions/handlers_arithmetic.zig` |
-| KECCAK256 | `instructions/handlers_keccak.zig` | `instructions/handlers_keccak.zig` |
-| CALL family | `instructions/handlers_system.zig` | `instructions/handlers_system.zig` |
+```zig
+// Memory expansion
+fn memoryExpansionCost(current_words: u64, new_words: u64) u64;
 
-`gas_constants.zig` also exports helpers such as `memoryGasCost`, `keccak256GasCost`, `copyGasCost`, `logGasCost` and `createGasCost`, but neither EVM calls them from its handlers.
+// SSTORE (depends on original, current, new values)
+fn sstoreGasCost(original: u256, current: u256, new_value: u256) u64;
+
+// EXP (depends on exponent bit length)
+fn expGasCost(exponent: u256) u64;
+
+// SHA3/KECCAK256 (depends on data size)
+fn keccakGasCost(size: u64) u64;
+
+// CALL family (depends on value transfer, account existence)
+fn callGasCost(value: u256, exists: bool) u64;
+```
 
 ## Memory Expansion
 
@@ -99,15 +118,15 @@ Memory expands in 32-byte words with quadratic cost:
 ```
 
 ```zig
-// lib/voltaire/src/primitives/gas_constants.zig (MemoryGas = 3, QuadCoeffDiv = 512)
-pub fn memoryGasCost(current_size: u64, new_size: u64) u64 {
+// Formula: cost = 3*words + words²/512
+fn memoryExpansionCost(current_size: u64, new_size: u64) u64 {
     if (new_size <= current_size) return 0;
 
-    const current_words = wordCount(current_size);
-    const new_words = wordCount(new_size);
+    const current_words = (current_size + 31) / 32;
+    const new_words = (new_size + 31) / 32;
 
-    const current_cost = MemoryGas * current_words + (current_words * current_words) / QuadCoeffDiv;
-    const new_cost = MemoryGas * new_words + (new_words * new_words) / QuadCoeffDiv;
+    const current_cost = 3 * current_words + (current_words * current_words) / 512;
+    const new_cost = 3 * new_words + (new_words * new_words) / 512;
 
     return new_cost - current_cost;
 }
@@ -199,7 +218,7 @@ pub fn memoryGasCost(current_size: u64, new_size: u64) u64 {
 | X | X | X | 100 | 0 | No-op: same value |
 | X | X | 0 | 2900 | +4800 | Clear: value → empty |
 | X | X | Y | 2900 | 0 | Modify: value → different |
-| X | 0 | X | 100 | -2000 (-4800 +2800) | Restore: cleared → original |
+| X | 0 | X | 100 | +2800 | Restore: cleared → original |
 | X | 0 | Y | 100 | -4800 | Re-set: cleared → different |
 | X | Y | X | 100 | +2800 | Restore: modified → original |
 | X | Y | 0 | 100 | +4800 | Clear: modified → empty |
@@ -209,38 +228,60 @@ pub fn memoryGasCost(current_size: u64, new_size: u64) u64 {
 
 ### Code Implementation
 
-The Performance EVM computes SSTORE gas and refunds inline in the handler (condensed; Istanbul+ gas and London+ refund paths only):
-
 ```zig
-// src/instructions/handlers_storage.zig, sstore()
-const warm_cost: u64 = if (evm.is_hardfork_at_least(.BERLIN))
-    GasConstants.WarmStorageReadCost // 100
-else
-    800; // EIP-2200 Istanbul SLOAD_GAS
-const base_gas_cost: u64 = if (current_value == value) warm_cost
-    else if (original_value == current_value)
-        (if (original_value == 0) GasConstants.SstoreSetGas // 20000
-         else GasConstants.SstoreResetGas - GasConstants.ColdSloadCost) // 2900 (Berlin+)
-    else warm_cost;
-const total_gas_cost: u64 = base_gas_cost +
-    (if (is_cold and evm.is_hardfork_at_least(.BERLIN)) GasConstants.ColdSloadCost else 0);
-
-// Refunds (London+): three independent checks
-if (current_value != value) {
-    if (original_value != 0 and current_value != 0 and value == 0)
-        evm.add_gas_refund(GasConstants.SstoreRefundGas); // +4800
-    if (original_value != 0 and current_value == 0)
-        evm.gas_refund_counter -|= GasConstants.SstoreRefundGas; // -4800
-    if (original_value == value) {
-        if (original_value == 0)
-            evm.add_gas_refund(GasConstants.SstoreSetGas - GasConstants.WarmStorageReadCost) // +19900
-        else
-            evm.add_gas_refund(GasConstants.SstoreResetGas - GasConstants.ColdSloadCost - GasConstants.WarmStorageReadCost); // +2800
+// src/frame/fork_gas.zig (shared by Frame and MinimalFrame)
+pub fn sstoreCost(hardfork: Hardfork, original: u256, current: u256, new: u256, is_cold: bool) SstoreCost {
+    if (sstoreScheme(hardfork) == .legacy) {
+        const gas: u64 = if (current == 0 and new != 0) sstore_set_gas else sstore_reset_gas;
+        const refund: i64 = if (current != 0 and new == 0) 15000 else 0;
+        return .{ .gas = gas, .refund = refund };
     }
+
+    const berlin = hardfork.isAtLeast(.BERLIN);
+    const noop_gas = sstoreNoopGas(hardfork);
+    // EIP-2929 moved the cold-read part of a reset out of SSTORE_RESET_GAS.
+    const reset_gas: u64 = if (berlin) sstore_reset_gas - cold_sload_cost else sstore_reset_gas;
+    const clear_refund: i64 = @intCast(sstoreClearRefund(hardfork));
+
+    var gas: u64 = 0;
+    var refund: i64 = 0;
+
+    if (berlin and is_cold) gas += cold_sload_cost;
+
+    if (current == new) {
+        gas += noop_gas;
+        return .{ .gas = gas, .refund = 0 };
+    }
+
+    if (original == current) {
+        if (original == 0) {
+            gas += sstore_set_gas;
+        } else {
+            gas += reset_gas;
+            if (new == 0) refund += clear_refund;
+        }
+        return .{ .gas = gas, .refund = refund };
+    }
+
+    // Dirty slot: already changed earlier in this transaction.
+    gas += noop_gas;
+    if (original != 0) {
+        if (current == 0) {
+            refund -= clear_refund;
+        } else if (new == 0) {
+            refund += clear_refund;
+        }
+    }
+    if (original == new) {
+        if (original == 0) {
+            refund += @intCast(sstore_set_gas - noop_gas);
+        } else {
+            refund += @intCast(reset_gas - noop_gas);
+        }
+    }
+    return .{ .gas = gas, .refund = refund };
 }
 ```
-
-The Mini EVM gets the gas cost from `GasConstants.sstoreGasCostWithHardfork(current, original, new, is_cold, is_berlin_or_later, is_istanbul_or_later)` and applies refunds inline in `mini/src/instructions/handlers_storage.zig`.
 
 ## EXP Gas
 
@@ -260,7 +301,7 @@ Dynamic cost based on exponent size:
 │   │ 1-255                │ 1         │ 60                                  ││
 │   │ 256-65535            │ 2         │ 110                                 ││
 │   │ 65536-16777215       │ 3         │ 160                                 ││
-│   │ 2^32 to 2^40-1       │ 5         │ 260                                 ││
+│   │ 2^32-2^40            │ 5         │ 260                                 ││
 │   │ 2^256-1 (max)        │ 32        │ 1610                                ││
 │   └──────────────────────┴───────────┴─────────────────────────────────────┘│
 │                                                                             │
@@ -271,11 +312,8 @@ Dynamic cost based on exponent size:
 ```
 
 ```zig
-// Illustrative. Neither EVM has an expGasCost function: the Performance EVM
-// charges the 10 gas base with the basic block and the 50 * bytes part inside
-// exp() in src/instructions/handlers_arithmetic.zig.
 // Gas = 10 + 50 * byte_length(exponent)
-fn expGasCost(exponent: u256) u64 {
+pub fn expGasCost(exponent: u256) u64 {
     if (exponent == 0) return 10;
 
     // Count bytes needed to represent exponent
@@ -317,11 +355,10 @@ Dynamic cost based on data size:
 ```
 
 ```zig
-// lib/voltaire/src/primitives/gas_constants.zig
-// Gas = 30 + 6 * word_count (Keccak256Gas = 30, Keccak256WordGas = 6)
-pub inline fn keccak256GasCost(data_size: usize) u64 {
-    const word_count = wordCount(data_size);
-    return Keccak256Gas + (word_count * Keccak256WordGas);
+// Gas = 30 + 6 * word_count
+pub fn keccakGasCost(size: u64) u64 {
+    const words = (size + 31) / 32;
+    return 30 + 6 * words;
 }
 ```
 
@@ -369,9 +406,7 @@ pub inline fn keccak256GasCost(data_size: usize) u64 {
 ```
 
 ```zig
-// Illustrative spec logic. The CALL-family handlers in
-// src/instructions/handlers_system.zig compute these costs inline.
-fn callGasCost(
+pub fn callGasCost(
     value: u256,
     to_exists: bool,
     is_cold: bool,
@@ -400,7 +435,7 @@ fn callGasCost(
 }
 
 // Gas forwarding (63/64 rule - EIP-150)
-fn gasToForward(available: u64, requested: u64) u64 {
+pub fn gasToForward(available: u64, requested: u64) u64 {
     const max_forward = available - available / 64;
     return @min(requested, max_forward);
 }
@@ -420,7 +455,6 @@ Transaction base cost:
 │   ├── Is CREATE transaction?                                                │
 │   │   │                                                                     │
 │   │   YES ──▶ +32000                                                       │
-│   │          +2 per 32-byte word of initcode (EIP-3860, Shanghai+)          │
 │   │                                                                         │
 │   ├── Calldata cost                                                         │
 │   │   │                                                                     │
@@ -436,45 +470,55 @@ Transaction base cost:
 │   │                                                                         │
 │   TOTAL = 21000 + create + calldata + access_list                           │
 │                                                                             │
-│   Prague+ (EIP-7623): the transaction pays at least                         │
-│   21000 + 10 * calldata_tokens (tokens = zero bytes + 4 * non-zero bytes)   │
-│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```zig
-// src/eips_and_hardforks/eips.zig: methods on `Eips` (EvmConfig.eips); src/evm.zig calls them
-pub fn intrinsic_gas_cost(_: Self, is_create: bool) u64;      // 21000, or 53000 for CREATE
-pub fn tokens_in_calldata(self: Self, input: []const u8) u64; // zero bytes + 4 * non-zero bytes (Istanbul+)
-pub fn calldata_gas_cost(self: Self, calldata_tokens: u64, is_create: bool, input_len: usize) u64; // 4 * tokens + EIP-3860 initcode words
-pub fn floor_gas_cost(self: Self, calldata_tokens: u64) u64;  // EIP-7623 floor, 0 before Prague
+pub fn intrinsicGas(
+    data: []const u8,
+    is_create: bool,
+    access_list: []const AccessListItem,
+) u64 {
+    var gas: u64 = 21000;  // Base transaction cost
+
+    // Create cost
+    if (is_create) {
+        gas += 32000;
+    }
+
+    // Data cost
+    for (data) |byte| {
+        if (byte == 0) {
+            gas += 4;   // Zero byte
+        } else {
+            gas += 16;  // Non-zero byte
+        }
+    }
+
+    // Access list cost (EIP-2930)
+    for (access_list) |item| {
+        gas += 2400;  // Address cost
+        gas += item.storage_keys.len * 1900;  // Storage key cost
+    }
+
+    return gas;
+}
 ```
 
 ## Gas Refunds
 
 ### Tracking
 
-Both EVMs keep the refund counter as an unsigned integer on the EVM struct:
-
 ```zig
-// src/evm.zig (Performance)
-gas_refund_counter: u64,
+// Refunds tracked as signed integer (can go negative temporarily)
+gas_refund: i64 = 0,
 
-pub fn add_gas_refund(self: *Self, amount: u64) void {
-    self.gas_refund_counter += amount;
-}
-// SSTORE reverses an earlier clear refund with a saturating subtract:
-// evm.gas_refund_counter -|= GasConstants.SstoreRefundGas;
-
-// mini/src/evm.zig (Mini)
-gas_refund: u64,
-
-pub fn add_refund(self: *Self, amount: u64) void {
-    self.gas_refund += amount;
+pub fn addRefund(self: *Self, amount: u64) void {
+    self.gas_refund += @intCast(amount);
 }
 
-pub fn sub_refund(self: *Self, amount: u64) void {
-    self.gas_refund -= amount;
+pub fn subRefund(self: *Self, amount: u64) void {
+    self.gas_refund -= @intCast(amount);
 }
 ```
 
@@ -502,40 +546,41 @@ pub fn sub_refund(self: *Self, amount: u64) void {
 ```
 
 ```zig
-// src/eips_and_hardforks/eips.zig, applied at transaction end by src/evm.zig
-pub fn eip_3529_gas_refund_cap(self: Self, gas_used: u64, refund_counter: u64) u64 {
-    if (!self.hardfork.isAtLeast(.LONDON)) return @min(refund_counter, gas_used / 2);
-    return @min(refund_counter, gas_used / 5);
-}
+// Applied at transaction end
+pub fn applyRefundCap(gas_used: u64, gas_refund: i64, hardfork: Hardfork) u64 {
+    if (gas_refund <= 0) return 0;
 
-pub fn eip_3529_apply_gas_refund(self: Self, initial_gas: u64, gas_left: u64, gas_refund_counter: u64) u64 {
-    const gas_used = initial_gas - gas_left;
-    const capped_refund = self.eip_3529_gas_refund_cap(gas_used, gas_refund_counter);
-    return @min(initial_gas, gas_left + capped_refund);
+    const max_refund = if (hardfork.isAtLeast(.LONDON))
+        gas_used / 5   // EIP-3529: 20% cap
+    else
+        gas_used / 2;  // Pre-London: 50% cap
+
+    return @min(@intCast(gas_refund), max_refund);
 }
 ```
 
 ## Gas Metering Patterns
 
-### Mini: Per-Operation
+### MinimalEvm: Per-Operation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      MINI GAS METERING PATTERN                              │
+│                      MINIMALEVM GAS METERING PATTERN                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Every opcode handler:                                                     │
 │                                                                             │
-│   pub fn add(frame: *FrameType) EvmError!void {                            │
-│       try frame.consumeGas(3);  // ← Check EVERY operation                 │
+│   0x01 => {  // ADD, in MinimalFrame.executeOpcode                          │
+│       try self.consumeGas(3);  // ← Check EVERY operation                   │
 │       // ... operation logic                                                │
-│   }                                                                         │
+│   },                                                                        │
 │                                                                             │
-│   pub fn consumeGas(self: *Self, amount: u64) EvmError!void {              │
-│       if (self.gas_remaining < amount) {                                   │
-│           return error.OutOfGas;  // ← Branch on every op                  │
+│   pub fn consumeGas(self: *Self, amount: u64) MinimalEvmError!void {        │
+│       if (self.gas_remaining < @as(i64, @intCast(amount))) {                │
+│           self.gas_remaining = 0;                                           │
+│           return error.OutOfGas;  // ← Branch on every op                   │
 │       }                                                                     │
-│       self.gas_remaining -= amount;                                        │
+│       self.gas_remaining -= @intCast(amount);                               │
 │   }                                                                         │
 │                                                                             │
 │   Cost: 1 comparison + 1 subtraction + 1 branch per opcode                 │
@@ -586,13 +631,13 @@ pub fn eip_3529_apply_gas_refund(self: Self, initial_gas: u64, gas_left: u64, ga
 │                      BERLIN GAS CHANGES (EIP-2929)                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   ISTANBUL (flat costs, EIP-1884):     BERLIN+ (warm/cold):                 │
+│   BEFORE BERLIN (flat costs):          BERLIN+ (warm/cold):                │
 │   ─────────────────────────────        ──────────────────────               │
 │                                                                             │
-│   SLOAD:       800                     Cold: 2100, Warm: 100                │
-│   BALANCE:     700                     Cold: 2600, Warm: 100                │
+│   SLOAD:       200                     Cold: 2100, Warm: 100                │
+│   BALANCE:     400                     Cold: 2600, Warm: 100                │
 │   EXTCODESIZE: 700                     Cold: 2600, Warm: 100                │
-│   EXTCODEHASH: 700                     Cold: 2600, Warm: 100                │
+│   EXTCODEHASH: 400                     Cold: 2600, Warm: 100                │
 │   EXTCODECOPY: 700                     Cold: 2600, Warm: 100                │
 │   CALL:        700                     Cold: 2600, Warm: 100                │
 │                                                                             │
@@ -630,13 +675,13 @@ pub fn eip_3529_apply_gas_refund(self: Self, initial_gas: u64, gas_left: u64, ga
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Warm COINBASE:                                                            │
-│   Coinbase address pre-warmed at transaction start.                         │
+│   Coinbase address pre-warmed at transaction start.                        │
 │                                                                             │
 │   Before Shanghai:                                                          │
-│   BALANCE(coinbase) or CALL to coinbase → cold access → 2600 gas            │
+│   COINBASE → cold access → 2600 gas                                        │
 │                                                                             │
 │   Shanghai+:                                                                │
-│   BALANCE(coinbase) or CALL to coinbase → warm access → 100 gas             │
+│   COINBASE → warm access → 100 gas                                         │
 │                                                                             │
 │   Why? Builder/proposer payments commonly access coinbase.                  │
 │                                                                             │
@@ -706,8 +751,8 @@ log.debug("Op: {} Gas before: {} Cost: {} After: {}", .{
 | G_coldaccountaccess | 2600 | Cold account access |
 | G_coldsload | 2100 | Cold SLOAD |
 | G_sset | 20000 | SSTORE 0→non-zero |
-| G_sreset | 2900 | SSTORE non-zero→non-zero (Berlin+; 5000 before) |
-| G_sclear | 4800 | SSTORE clear refund (London+; 15000 before) |
+| G_sreset | 2900 | SSTORE non-zero→non-zero |
+| G_sclear | 4800 | SSTORE clear refund |
 | G_callvalue | 9000 | Value transfer in CALL |
 | G_callstipend | 2300 | Stipend for value transfer |
 | G_newaccount | 25000 | Creating new account |

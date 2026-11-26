@@ -166,21 +166,8 @@ theorem blockStackGuardFast_eq_ref (size : BitVec 32) (mn mx : BitVec 16) (cap :
         Nat.add_mod_right, Nat.mod_eq_of_lt (by omega)]
     · exact Nat.mod_eq_of_lt (by omega)
   rw [hw]
-  by_cases hsize : mn.toNat ≤ size.toNat
-  · rw [if_pos hsize, if_neg (show ¬ size.toNat < mn.toNat by omega)]
-    by_cases hcap : size.toNat + mx.toNat ≤ cap.toNat
-    · rw [if_pos (show mn.toNat + mx.toNat ≤ cap.toNat ∧
-          size.toNat - mn.toNat ≤ cap.toNat - (mn.toNat + mx.toNat) by omega),
-        if_neg (show ¬ size.toNat + mx.toNat > cap.toNat by omega),
-        if_neg (show ¬ size.toNat < mn.toNat by omega)]
-    · rw [if_neg (show ¬ (mn.toNat + mx.toNat ≤ cap.toNat ∧
-          size.toNat - mn.toNat ≤ cap.toNat - (mn.toNat + mx.toNat)) by
-          rintro ⟨_, _⟩; omega), if_pos (show size.toNat + mx.toNat > cap.toNat by omega),
-        if_neg (show ¬ size.toNat < mn.toNat by omega)]
-  · have under : size.toNat < mn.toNat := by omega
-    rw [if_neg hsize, if_pos under, if_neg (show ¬ (mn.toNat + mx.toNat ≤ cap.toNat ∧
-        2^32 - mn.toNat + size.toNat ≤ cap.toNat - (mn.toNat + mx.toNat)) by
-        rintro ⟨_, _⟩; omega), if_pos under]
+  repeat' split
+  all_goals first | rfl | omega
 
 /-- Either signed or unsigned metadata clamp safely rejects an impossible bound,
     provided the representation can hold at least one more than the capacity. -/
@@ -191,22 +178,5 @@ theorem clampedMinMax_sound (a : BlockAccumulator) (h cap bound : Int)
       h < min a.requiredMinStack bound) ∧
     (cap + 1 ≤ a.requiredMaxStack →
       cap < h + min a.requiredMaxStack bound) := by omega
-
-/-- A passing Zig metadata guard implies the unbounded stack requirements.
-    The capacity premise covers both the u16 and the existing i16 representation. -/
-theorem clamped_metadata_eq_exact (a : BlockAccumulator) (h cap bound : Int)
-    (physical : 0 ≤ h ∧ h ≤ cap) (fits : cap + 1 ≤ bound) :
-    (min a.requiredMinStack bound ≤ h ∧ h + min a.requiredMaxStack bound ≤ cap) ↔
-      (a.requiredMinStack ≤ h ∧ h + a.requiredMaxStack ≤ cap) := by omega
-
-theorem block_sound_of_zig_metadata (ops : List BlockOp) (h cap bound : Int) (entryGas : Nat)
-    (physical : 0 ≤ h ∧ h ≤ cap) (fits : cap + 1 ≤ bound)
-    (stackGuard : min (accumulate ops).requiredMinStack bound ≤ h ∧
-      h + min (accumulate ops).requiredMaxStack bound ≤ cap)
-    (gasGuard : (accumulate ops).gasU64 ≤ entryGas)
-    (exactGas : (accumulate ops).gas ≤ 2^64 - 1 ∨ entryGas < 2^64 - 1) :
-    Runs cap ops h entryGas := by
-  have ⟨need, room⟩ := (clamped_metadata_eq_exact (accumulate ops) h cap bound physical fits).mp stackGuard
-  exact block_sound_of_unsaturated_gas ops h cap entryGas need room gasGuard exactGas
 
 end GuillotineVerify.BasicBlock

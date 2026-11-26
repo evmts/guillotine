@@ -1,10 +1,8 @@
 const std = @import("std");
-const limits = @import("evm_limits");
 const log = @import("../log.zig");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const primitives = @import("voltaire");
 const Address = primitives.Address;
-const GasConstants = primitives.GasConstants;
 // Access to call params through the call params module
 const call_params_mod = @import("../frame/call_params.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
@@ -23,927 +21,372 @@ pub fn Handlers(FrameType: type) type {
         const CallParams = call_params_mod.CallParams(.{});
         const address_utils = @import("address_utils.zig");
 
-        /// CALL opcode (0xf1) - Message-call into an account.
-        /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn call(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.CALL, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            (&self.getEvm().tracer).assert(self.stack.size() >= 7, "CALL requires 7 stack items");
+        const dispatch_next = @import("dispatch_next.zig");
+        const fork_gas = @import("../frame/fork_gas.zig");
+        const GasConstants = primitives.GasConstants;
+        const hardfork = FrameType.config.hardfork;
+
+        const CallKind = enum { call, callcode, delegatecall, staticcall };
+
+        /// End (exclusive) of the memory range `[offset, offset + size)`, or 0 for an empty
+        /// range, whatever its offset. Null when the range lies beyond the memory limit:
+        /// no gas limit can pay for such an expansion, so callers halt with OutOfGas.
+        fn memoryEnd(offset: WordType, size: WordType) ?u32 {
+            if (size == 0) return 0;
+            // MemoryConfig.validate bounds the limit by maxInt(u32), so the sum of two
+            // operands at most the limit fits in u64 and the result fits in u32.
+            const limit: u64 = FrameType.Memory.MEMORY_LIMIT;
+            if (offset > limit or size > limit) return null;
+            const end: u64 = @as(u64, @intCast(offset)) + @as(u64, @intCast(size));
+            if (end > limit) return null;
+            return @intCast(end);
+        }
+
+        /// Deduct `amount` from the gas left. False when the frame cannot pay.
+        fn chargeGas(self: *FrameType, amount: u64) bool {
+            const charge = std.math.cast(FrameType.GasType, amount) orelse return false;
+            if (charge > self.gas_remaining) return false;
+            self.gas_remaining -= charge;
+            return true;
+        }
+
+        /// True when `addr` does not exist or is empty (EIP-161 "dead").
+        fn isDeadAccount(self: *FrameType, addr: Address) Error!bool {
+            const account = self.getEvm().database.get_account(addr.bytes) catch return Error.AllocationError;
+            if (account) |existing| return existing.is_empty();
+            return true;
+        }
+
+        /// The address a delegated EOA (EIP-7702) runs the code of, or null.
+        fn delegateOf(self: *FrameType, addr: Address) Error!?Address {
+            const account = self.getEvm().database.get_account(addr.bytes) catch return Error.AllocationError;
+            const existing = account orelse return null;
+            return existing.get_effective_code_address();
+        }
+
+        /// CALL, CALLCODE, DELEGATECALL and STATICCALL (execution-specs
+        /// `vm/instructions/system.py`). The flat price of the opcode (40, 700 or the
+        /// warm access cost, by fork) is static gas already charged with the basic
+        /// block; this charges memory expansion, the cold surcharge, the value-transfer
+        /// and new-account costs and the gas forwarded to the callee.
+        fn callFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime kind: CallKind) Error![*]const FrameType.Dispatch.Item {
+            const opcode: Dispatch.UnifiedOpcode = comptime switch (kind) {
+                .call => .CALL,
+                .callcode => .CALLCODE,
+                .delegatecall => .DELEGATECALL,
+                .staticcall => .STATICCALL,
+            };
+            const has_value_argument = comptime (kind == .call or kind == .callcode);
+
+            self.beforeInstruction(opcode, cursor);
+            (&self.getEvm().tracer).assert(self.stack.size() >= (if (has_value_argument) 7 else 6), "CALL-family opcode requires its stack arguments");
+
             const gas_param = self.stack.pop_unsafe();
-            const address_u256 = self.stack.pop_unsafe();
-            const value = self.stack.pop_unsafe();
+            const address_word = self.stack.pop_unsafe();
+            const value: WordType = if (has_value_argument) self.stack.pop_unsafe() else 0;
             const input_offset = self.stack.pop_unsafe();
             const input_size = self.stack.pop_unsafe();
             const output_offset = self.stack.pop_unsafe();
             const output_size = self.stack.pop_unsafe();
 
-            const addr = address_utils.fromWord(WordType,address_u256);
+            const addr = address_utils.fromWord(WordType, address_word);
+            const evm = self.getEvm();
 
-            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below,
-            // never treated as call failure.
-            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
-                std.math.maxInt(u64)
-            else
-                @as(u64, @intCast(gas_param));
+            // Memory expansion covers the input and the output range. A range that no gas
+            // limit can pay for is an out-of-gas halt, never a failed call.
+            const input_end = memoryEnd(input_offset, input_size) orelse {
+                self.afterComplete(opcode);
+                return Error.OutOfGas;
+            };
+            const output_end = memoryEnd(output_offset, output_size) orelse {
+                self.afterComplete(opcode);
+                return Error.OutOfGas;
+            };
+            const memory_end = @max(input_end, output_end);
+            const memory_cost: u64 = if (memory_end > 0) self.memory.get_expansion_cost(memory_end) else 0;
 
-            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
-            // Oversized or overflowing memory bounds cost infinite expansion gas -> Error.OutOfGas.
-            var input_offset_usize: usize = 0;
-            var input_size_usize: usize = 0;
-            var input_mem_end: usize = 0;
-            if (input_size > 0) {
-                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.CALL);
-                    return Error.OutOfGas;
+            // EIP-2929 (Berlin+): cold surcharge on top of the warm cost charged statically.
+            // Earlier forks report the warm cost for every access, so the surcharge is 0.
+            const access_cost = evm.access_address(addr) catch {
+                self.afterComplete(opcode);
+                return Error.AllocationError;
+            };
+            var extra_gas: u64 = access_cost -| fork_gas.warm_access_cost;
+
+            // EIP-7702 (Prague+), execution-specs `access_delegation`: a call to a delegated
+            // EOA also pays the full warm or cold access cost of the delegate, which
+            // becomes warm.
+            if (comptime hardfork.isAtLeast(.PRAGUE)) {
+                if (try delegateOf(self, addr)) |delegate| {
+                    extra_gas += evm.access_address(delegate) catch {
+                        self.afterComplete(opcode);
+                        return Error.AllocationError;
+                    };
                 }
-                input_offset_usize = @as(usize, @intCast(input_offset));
-                input_size_usize = @as(usize, @intCast(input_size));
-                const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.CALL);
-                    return Error.OutOfGas;
-                }
-                input_mem_end = overflow[0];
             }
 
-            var output_offset_usize: usize = 0;
-            var output_size_usize: usize = 0;
-            var output_mem_end: usize = 0;
-            if (output_size > 0) {
-                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.CALL);
-                    return Error.OutOfGas;
-                }
-                output_offset_usize = @as(usize, @intCast(output_offset));
-                output_size_usize = @as(usize, @intCast(output_size));
-                const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.CALL);
-                    return Error.OutOfGas;
-                }
-                output_mem_end = overflow[0];
+            if (value != 0) extra_gas += GasConstants.CallValueTransferGas;
+
+            if (comptime kind == .call) {
+                // New-account surcharge. Spurious Dragon+ (EIP-161): only when value goes to
+                // a dead account. Earlier forks: whenever the target does not exist.
+                const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork))
+                    value != 0 and try isDeadAccount(self, addr)
+                else
+                    !evm.database.account_exists(addr.bytes);
+                if (charge_new_account) extra_gas += fork_gas.new_account_gas;
             }
 
-            const max_mem_end = @max(input_mem_end, output_mem_end);
-
-            if (max_mem_end > limits.max_memory_size) {
-                self.afterComplete(.CALL);
+            if (!chargeGas(self, memory_cost + extra_gas)) {
+                self.afterComplete(opcode);
                 return Error.OutOfGas;
             }
 
-            // Calculate and charge memory expansion gas
-            if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
-                const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
-                self.gas_remaining -= expansion_cost_i64;
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.CALL);
-                    return Error.OutOfGas;
+            // EIP-214: sending value from a static context is an exceptional halt.
+            if (comptime kind == .call) {
+                if (value != 0 and evm.is_static_context()) {
+                    self.afterComplete(opcode);
+                    return Error.WriteProtection;
                 }
             }
 
-            // Calculate and charge CALL-specific gas costs (EIP-150, EIP-2929)
-            const evm = self.getEvm();
+            if (memory_end > 0) {
+                self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch {
+                    self.afterComplete(opcode);
+                    return Error.AllocationError;
+                };
+            }
 
-            // Access address for warm/cold accounting (EIP-2929)
-            const access_cost = evm.access_address(addr) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                },
+            // Gas forwarded to the callee, taken from what is left after the costs above.
+            // EIP-150 (Tangerine Whistle+): at most all but one 64th. Earlier forks forward
+            // exactly the requested amount and halt when it is not available.
+            const available: u64 = @intCast(self.gas_remaining);
+            const forwarded: u64 = if (comptime fork_gas.hasAllButOne64th(hardfork)) blk: {
+                const requested: u64 = if (gas_param > std.math.maxInt(u64)) std.math.maxInt(u64) else @intCast(gas_param);
+                break :blk @min(requested, available - available / 64);
+            } else blk: {
+                if (gas_param > available) {
+                    self.afterComplete(opcode);
+                    return Error.OutOfGas;
+                }
+                break :blk @intCast(gas_param);
             };
+            self.gas_remaining -= @intCast(forwarded);
 
-            // Charge additional access cost beyond base (cold adds 2500, warm adds 0)
-            // Base cost of 100 is already charged by dispatch, access_address returns 2600 for cold or 100 for warm
-            if (access_cost > GasConstants.CALL_BASE_COST) {
-                const additional_access_cost = access_cost - GasConstants.CALL_BASE_COST;
-                self.gas_remaining -= @intCast(additional_access_cost);
-                if (self.gas_remaining < 0) {
-                    return Error.OutOfGas;
+            // A value transfer adds the 2300 stipend to the callee's gas at no cost to
+            // the caller; what the callee does not use comes back with its leftover gas.
+            const stipend: u64 = if (value != 0) GasConstants.CallStipend else 0;
+
+            const input: []const u8 = if (input_size != 0)
+                self.memory.get_slice(@intCast(input_offset), @intCast(input_size)) catch {
+                    self.afterComplete(opcode);
+                    return Error.OutOfBounds;
                 }
-            }
+            else
+                &.{};
 
-            // Check if this is a value transfer and if the account exists
-            const has_value_transfer = value != 0;
-            const account_exists = evm.database.account_exists(addr.bytes);
-            const is_new_account = !account_exists and has_value_transfer;
-
-            // Charge value transfer cost (9000 gas)
-            if (has_value_transfer) {
-                self.gas_remaining -= @intCast(GasConstants.CALL_VALUE_TRANSFER_COST);
-                if (self.gas_remaining < 0) {
-                    return Error.OutOfGas;
-                }
-            }
-
-            // Charge new account creation cost (25000 gas)
-            if (is_new_account) {
-                self.gas_remaining -= @intCast(GasConstants.CALL_NEW_ACCOUNT_COST);
-                if (self.gas_remaining < 0) {
-                    return Error.OutOfGas;
-                }
-            }
-
-            if (input_size_usize > 0) {
-                const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            if (output_size_usize > 0) {
-                const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            var input_data: []const u8 = &.{};
-            if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // EIP-214: a CALL transferring value is forbidden in a static context and must
-            // fail the frame (exceptional halt). Matches execution-specs (system.py: call).
-            if (value != 0 and self.getEvm().is_static_context()) {
-                self.afterComplete(.CALL);
-                return Error.WriteProtection;
-            }
-
-            // EIP-150: compute the 63/64 forwardable cap on the gas remaining AFTER all call
-            // costs. EIP-150 value calls also grant the callee a 2300 gas stipend (free to the
-            // caller — unused stipend is refunded on return).
-            const avail_after_costs: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const max_forwardable: u64 = avail_after_costs - (avail_after_costs / 64);
-            const forwarded: u64 = @min(gas_u64_raw, max_forwardable);
-            const callee_gas: u64 = forwarded + (if (has_value_transfer) GasConstants.CallStipend else 0);
-
-            const params = CallParams{
-                .call = .{
+            const params: CallParams = switch (kind) {
+                .call => .{ .call = .{
                     .caller = self.contract_address,
                     .to = addr,
                     .value = value,
-                    .input = input_data,
-                    .gas = callee_gas,
-                },
+                    .input = input,
+                    .gas = forwarded + stipend,
+                } },
+                .callcode => .{ .callcode = .{
+                    .caller = self.contract_address,
+                    .to = addr,
+                    .value = value,
+                    .input = input,
+                    .gas = forwarded + stipend,
+                } },
+                // DELEGATECALL keeps this frame's sender and runs with this contract's
+                // address and storage.
+                .delegatecall => .{ .delegatecall = .{
+                    .caller = self.caller,
+                    .to = addr,
+                    .input = input,
+                    .gas = forwarded,
+                    .context_address = self.contract_address,
+                } },
+                .staticcall => .{ .staticcall = .{
+                    .caller = self.contract_address,
+                    .to = addr,
+                    .input = input,
+                    .gas = forwarded,
+                } },
             };
 
-            var result = self.getEvm().inner_call(params);
-            // Use main allocator for deinit since precompile outputs are allocated with it
-            defer result.deinit(self.getEvm().allocator);
+            // The result's output lives in the call arena; only the trace owns memory.
+            var result = evm.inner_call(params);
+            defer if (result.trace) |*trace| trace.deinit();
 
-            // EIP-140: copy return data into caller memory on both RETURN and REVERT
-            // (exceptional halts have empty output).
-            if (output_size_usize > 0 and result.output.len > 0) {
-                const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            // Unused callee gas (including unused stipend, and all of it when the call
+            // was refused for depth or balance) returns to this frame.
+            const returned = std.math.cast(FrameType.GasType, result.gas_left) orelse {
+                self.afterComplete(opcode);
+                return Error.GasOverflow;
+            };
+            self.gas_remaining += returned;
+
+            // RETURN data and REVERT data are both copied to the output range.
+            const copy_len: usize = @min(@as(usize, @intCast(output_size)), result.output.len);
+            if (copy_len > 0) {
+                self.memory.set_data(evm.getCallArenaAllocator(), @intCast(output_offset), result.output[0..copy_len]) catch {
+                    self.afterComplete(opcode);
+                    return Error.AllocationError;
                 };
             }
 
-            // Caller pays the forwarded gas and is refunded the callee's leftover (which may
-            // include unused stipend): final = avail_after_costs - forwarded + leftover.
-            const reconciled_call: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded) + @as(i128, @intCast(result.gas_left));
-            self.gas_remaining = if (reconciled_call < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_call));
-            (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
+            (&evm.tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
             self.stack.push_unsafe(if (result.success) 1 else 0);
-            const op_data = dispatch.getOpData(.CALL);
-            self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return dispatch_next.nextInstruction(FrameType, self, cursor, opcode);
+        }
+
+        /// CALL opcode (0xf1) - Message-call into an account.
+        /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
+        pub fn call(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            return callFamily(self, cursor, .call);
         }
 
         /// CALLCODE opcode (0xf2) - Message-call with alternative account's code but current context.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn callcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.CALLCODE, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            (&self.getEvm().tracer).assert(self.stack.size() >= 7, "CALLCODE requires 7 stack items");
-            const gas_param = self.stack.pop_unsafe();
-            const address_u256 = self.stack.pop_unsafe();
+        pub fn callcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            return callFamily(self, cursor, .callcode);
+        }
+
+        /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code, keeping sender and value.
+        /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
+        pub fn delegatecall(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            return callFamily(self, cursor, .delegatecall);
+        }
+
+        /// STATICCALL opcode (0xfa) - Static message-call into an account.
+        /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
+        pub fn staticcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            return callFamily(self, cursor, .staticcall);
+        }
+
+        /// CREATE and CREATE2 (execution-specs `vm/instructions/system.py`).
+        ///
+        /// The opcode's whole charge is dynamic: memory expansion, CreateGas, the
+        /// EIP-3860 init code word cost (Shanghai+) and, for CREATE2, the hash cost. A
+        /// frame that cannot pay it, that runs in a static context, or whose init code
+        /// exceeds the EIP-3860 limit halts exceptionally. It does not push 0 and go on.
+        fn createFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime is_create2: bool) Error![*]const FrameType.Dispatch.Item {
+            const opcode: Dispatch.UnifiedOpcode = comptime if (is_create2) .CREATE2 else .CREATE;
+
+            self.beforeInstruction(opcode, cursor);
+            (&self.getEvm().tracer).assert(self.stack.size() >= (if (is_create2) 4 else 3), "CREATE-family opcode requires its stack arguments");
+
             const value = self.stack.pop_unsafe();
-            const input_offset = self.stack.pop_unsafe();
-            const input_size = self.stack.pop_unsafe();
-            const output_offset = self.stack.pop_unsafe();
-            const output_size = self.stack.pop_unsafe();
+            const offset = self.stack.pop_unsafe();
+            const size = self.stack.pop_unsafe();
+            const salt: WordType = if (is_create2) self.stack.pop_unsafe() else 0;
 
-            const addr = address_utils.fromWord(WordType,address_u256);
+            const evm = self.getEvm();
 
-            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below.
-            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
-                std.math.maxInt(u64)
-            else
-                @as(u64, @intCast(gas_param));
-
-            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
-            var input_offset_usize: usize = 0;
-            var input_size_usize: usize = 0;
-            var input_mem_end: usize = 0;
-            if (input_size > 0) {
-                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
-                }
-                input_offset_usize = @as(usize, @intCast(input_offset));
-                input_size_usize = @as(usize, @intCast(input_size));
-                const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
-                }
-                input_mem_end = overflow[0];
-            }
-
-            var output_offset_usize: usize = 0;
-            var output_size_usize: usize = 0;
-            var output_mem_end: usize = 0;
-            if (output_size > 0) {
-                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
-                }
-                output_offset_usize = @as(usize, @intCast(output_offset));
-                output_size_usize = @as(usize, @intCast(output_size));
-                const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
-                }
-                output_mem_end = overflow[0];
-            }
-
-            const max_mem_end = @max(input_mem_end, output_mem_end);
-
-            if (max_mem_end > limits.max_memory_size) {
-                self.afterComplete(.CALLCODE);
+            // Memory for the init code is charged like any other memory access. A
+            // zero-size init code touches no memory, whatever the offset.
+            const memory_end = memoryEnd(offset, size) orelse {
+                self.afterComplete(opcode);
+                return Error.OutOfGas;
+            };
+            const memory_cost: u64 = if (memory_end > 0) self.memory.get_expansion_cost(memory_end) else 0;
+            if (!chargeGas(self, memory_cost)) {
+                self.afterComplete(opcode);
                 return Error.OutOfGas;
             }
 
-            // Calculate and charge memory expansion gas
-            if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
-                const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
-                self.gas_remaining -= expansion_cost_i64;
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.CALLCODE);
+            // EIP-3860 (Shanghai+): init code longer than 49152 bytes is an out-of-gas halt
+            // of the creating frame.
+            const init_code_len: u64 = @intCast(size);
+            if (comptime hardfork.isAtLeast(.SHANGHAI)) {
+                if (init_code_len > GasConstants.MaxInitcodeSize) {
+                    self.afterComplete(opcode);
                     return Error.OutOfGas;
                 }
             }
 
-            // EIP-2929: the static 100 already paid covers a warm access; a cold one adds
-            // the difference. Value-bearing CALLCODE also pays G_callvalue (9000), which is
-            // what funds the 2300 stipend below. It never pays G_newaccount: the value goes
-            // to the caller's own account.
-            const evm_cc = self.getEvm();
-            const access_cost_cc = evm_cc.access_address(addr) catch {
-                self.afterComplete(.CALLCODE);
-                return Error.AllocationError;
-            };
-            if (access_cost_cc > GasConstants.CALL_BASE_COST) {
-                self.gas_remaining -= @intCast(access_cost_cc - GasConstants.CALL_BASE_COST);
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
-                }
-            }
-            if (value != 0) {
-                self.gas_remaining -= @intCast(GasConstants.CALL_VALUE_TRANSFER_COST);
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
-                }
-            }
-
-            if (input_size_usize > 0) {
-                const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            if (output_size_usize > 0) {
-                const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            var input_data: []const u8 = &.{};
-            if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // EIP-150: 63/64 forwardable cap on the gas remaining after the call's costs;
-            // value-transferring callcode also grants the callee a 2300 gas stipend.
-            const avail_after_costs_cc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const forwarded_cc: u64 = @min(gas_u64_raw, avail_after_costs_cc - (avail_after_costs_cc / 64));
-            const callee_gas_cc: u64 = forwarded_cc + (if (value != 0) GasConstants.CallStipend else 0);
-            const call_params = CallParams{
-                .callcode = .{
-                    .caller = self.contract_address,
-                    .to = addr,
-                    .value = value,
-                    .input = input_data,
-                    .gas = callee_gas_cc,
-                },
-            };
-
-            var result = self.getEvm().inner_call(call_params);
-            defer result.deinit(self.getEvm().allocator);
-
-            // EIP-140: copy return data into caller memory on both RETURN and REVERT.
-            if (output_size_usize > 0 and result.output.len > 0) {
-                const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Refund the callee's unused gas (incl. unused stipend): final = avail_after_costs - forwarded + leftover.
-            const reconciled_cc: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded_cc) + @as(i128, @intCast(result.gas_left));
-            self.gas_remaining = if (reconciled_cc < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_cc));
-
-            (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-            self.stack.push_unsafe(if (result.success) 1 else 0);
-
-            const op_data = dispatch.getOpData(.CALLCODE);
-            self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
-
-        /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code but current values.
-        /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn delegatecall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.DELEGATECALL, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            (&self.getEvm().tracer).assert(self.stack.size() >= 6, "DELEGATECALL requires 6 stack items");
-            const gas_param = self.stack.pop_unsafe();
-            const address_u256 = self.stack.pop_unsafe();
-            const input_offset = self.stack.pop_unsafe();
-            const input_size = self.stack.pop_unsafe();
-            const output_offset = self.stack.pop_unsafe();
-            const output_size = self.stack.pop_unsafe();
-
-            const addr = address_utils.fromWord(WordType,address_u256);
-
-            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below.
-            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
-                std.math.maxInt(u64)
-            else
-                @as(u64, @intCast(gas_param));
-
-            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
-            var input_offset_usize: usize = 0;
-            var input_size_usize: usize = 0;
-            var input_mem_end: usize = 0;
-            if (input_size > 0) {
-                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.DELEGATECALL);
-                    return Error.OutOfGas;
-                }
-                input_offset_usize = @as(usize, @intCast(input_offset));
-                input_size_usize = @as(usize, @intCast(input_size));
-                const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.DELEGATECALL);
-                    return Error.OutOfGas;
-                }
-                input_mem_end = overflow[0];
-            }
-
-            var output_offset_usize: usize = 0;
-            var output_size_usize: usize = 0;
-            var output_mem_end: usize = 0;
-            if (output_size > 0) {
-                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.DELEGATECALL);
-                    return Error.OutOfGas;
-                }
-                output_offset_usize = @as(usize, @intCast(output_offset));
-                output_size_usize = @as(usize, @intCast(output_size));
-                const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.DELEGATECALL);
-                    return Error.OutOfGas;
-                }
-                output_mem_end = overflow[0];
-            }
-
-            const max_mem_end = @max(input_mem_end, output_mem_end);
-
-            if (max_mem_end > limits.max_memory_size) {
-                self.afterComplete(.DELEGATECALL);
+            // CreateGas, the init code word cost and the CREATE2 hash cost are deducted by
+            // Evm.executeCreate / executeCreate2 from the gas passed in. The frame must be
+            // able to pay them, otherwise it halts out of gas here.
+            const words: u64 = (init_code_len + 31) / 32;
+            var overhead: u64 = GasConstants.CreateGas;
+            if (comptime hardfork.isAtLeast(.SHANGHAI)) overhead += words * GasConstants.InitcodeWordGas;
+            if (is_create2) overhead += words * GasConstants.Keccak256WordGas;
+            const available: u64 = @intCast(self.gas_remaining);
+            if (available < overhead) {
+                self.afterComplete(opcode);
                 return Error.OutOfGas;
             }
 
-            // Calculate and charge memory expansion gas
-            if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
-                const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
-                self.gas_remaining -= expansion_cost_i64;
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.DELEGATECALL);
-                    return Error.OutOfGas;
-                }
+            // EIP-214: creation in a static context is an exceptional halt.
+            if (evm.is_static_context()) {
+                self.afterComplete(opcode);
+                return Error.WriteProtection;
             }
 
-            // EIP-2929: warm/cold target account access. Base 100 is charged by dispatch;
-            // cold access adds 2500 (2600 - 100).
-            const evm_dc = self.getEvm();
-            const access_cost_dc = evm_dc.access_address(addr) catch {
-                self.afterComplete(.DELEGATECALL);
-                return Error.AllocationError;
+            var init_code: []const u8 = &.{};
+            if (memory_end > 0) {
+                self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch {
+                    self.afterComplete(opcode);
+                    return Error.AllocationError;
+                };
+                init_code = self.memory.get_slice(@intCast(offset), @intCast(size)) catch {
+                    self.afterComplete(opcode);
+                    return Error.OutOfBounds;
+                };
+            }
+
+            const params: CallParams = if (is_create2) .{ .create2 = .{
+                .caller = self.contract_address,
+                .value = value,
+                .init_code = init_code,
+                .salt = salt,
+                .gas = available,
+            } } else .{ .create = .{
+                .caller = self.contract_address,
+                .value = value,
+                .init_code = init_code,
+                .gas = available,
+            } };
+
+            // The result's output lives in the call arena; only the trace owns memory.
+            // Evm.inner_call maintains the EIP-211 return data buffer.
+            var result = evm.inner_call(params);
+            defer if (result.trace) |*trace| trace.deinit();
+
+            self.gas_remaining = std.math.cast(FrameType.GasType, result.gas_left) orelse {
+                self.afterComplete(opcode);
+                return Error.GasOverflow;
             };
-            if (access_cost_dc > GasConstants.CALL_BASE_COST) {
-                self.gas_remaining -= @intCast(access_cost_dc - GasConstants.CALL_BASE_COST);
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.DELEGATECALL);
-                    return Error.OutOfGas;
-                }
+
+            // Push created contract address or 0 on failure
+            (&evm.tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
+            if (result.success and result.created_address != null) {
+                self.stack.push_unsafe(address_utils.toWord(WordType, result.created_address.?));
+            } else {
+                self.stack.push_unsafe(0);
             }
-
-            if (input_size_usize > 0) {
-                const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            if (output_size_usize > 0) {
-                const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            var input_data: []const u8 = &.{};
-            if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // EIP-150: 63/64 forwardable cap on the gas remaining after the call's access cost.
-            const avail_after_costs_dc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const forwarded_dc: u64 = @min(gas_u64_raw, avail_after_costs_dc - (avail_after_costs_dc / 64));
-            const params = CallParams{
-                .delegatecall = .{
-                    .caller = self.caller,
-                    .to = addr,
-                    .input = input_data,
-                    .gas = forwarded_dc,
-                },
-            };
-            var result = self.getEvm().inner_call(params);
-            // Use main allocator for deinit since precompile outputs are allocated with it
-            defer result.deinit(self.getEvm().allocator);
-
-            // EIP-140: copy return data into caller memory on both RETURN and REVERT.
-            if (output_size_usize > 0 and result.output.len > 0) {
-                const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Refund the callee's unused gas: final = avail_after_costs - forwarded + leftover.
-            const reconciled_dc: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded_dc) + @as(i128, @intCast(result.gas_left));
-            self.gas_remaining = if (reconciled_dc < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_dc));
-
-            (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-            self.stack.push_unsafe(if (result.success) 1 else 0);
-
-            const op_data = dispatch.getOpData(.DELEGATECALL);
-            self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
-
-        /// STATICCALL opcode (0xfa) - Static message-call (no state changes allowed).
-        /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn staticcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.STATICCALL, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            (&self.getEvm().tracer).assert(self.stack.size() >= 6, "STATICCALL requires 6 stack items");
-            const gas_param = self.stack.pop_unsafe();
-            const address_u256 = self.stack.pop_unsafe();
-            const input_offset = self.stack.pop_unsafe();
-            const input_size = self.stack.pop_unsafe();
-            const output_offset = self.stack.pop_unsafe();
-            const output_size = self.stack.pop_unsafe();
-
-            const addr = address_utils.fromWord(WordType,address_u256);
-
-            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below.
-            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
-                std.math.maxInt(u64)
-            else
-                @as(u64, @intCast(gas_param));
-
-            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
-            var input_offset_usize: usize = 0;
-            var input_size_usize: usize = 0;
-            var input_mem_end: usize = 0;
-            if (input_size > 0) {
-                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.STATICCALL);
-                    return Error.OutOfGas;
-                }
-                input_offset_usize = @as(usize, @intCast(input_offset));
-                input_size_usize = @as(usize, @intCast(input_size));
-                const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.STATICCALL);
-                    return Error.OutOfGas;
-                }
-                input_mem_end = overflow[0];
-            }
-
-            var output_offset_usize: usize = 0;
-            var output_size_usize: usize = 0;
-            var output_mem_end: usize = 0;
-            if (output_size > 0) {
-                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
-                    self.afterComplete(.STATICCALL);
-                    return Error.OutOfGas;
-                }
-                output_offset_usize = @as(usize, @intCast(output_offset));
-                output_size_usize = @as(usize, @intCast(output_size));
-                const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
-                if (overflow[1] != 0) {
-                    self.afterComplete(.STATICCALL);
-                    return Error.OutOfGas;
-                }
-                output_mem_end = overflow[0];
-            }
-
-            const max_mem_end = @max(input_mem_end, output_mem_end);
-
-            if (max_mem_end > limits.max_memory_size) {
-                self.afterComplete(.STATICCALL);
-                return Error.OutOfGas;
-            }
-
-            // Calculate and charge memory expansion gas
-            if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
-                const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
-                self.gas_remaining -= expansion_cost_i64;
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.STATICCALL);
-                    return Error.OutOfGas;
-                }
-            }
-
-            // EIP-2929: warm/cold target account access. Base 100 is charged by dispatch;
-            // cold access adds 2500 (2600 - 100).
-            const evm_sc = self.getEvm();
-            const access_cost_sc = evm_sc.access_address(addr) catch {
-                self.afterComplete(.STATICCALL);
-                return Error.AllocationError;
-            };
-            if (access_cost_sc > GasConstants.CALL_BASE_COST) {
-                self.gas_remaining -= @intCast(access_cost_sc - GasConstants.CALL_BASE_COST);
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.STATICCALL);
-                    return Error.OutOfGas;
-                }
-            }
-
-            // Ensure memory capacity for input
-            if (input_size_usize > 0) {
-                const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Ensure memory capacity for output
-            if (output_size_usize > 0) {
-                const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Extract input data
-            var input_data: []const u8 = &.{};
-            if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // EIP-150: 63/64 forwardable cap on the gas remaining after the call's access cost.
-            const avail_after_costs_sc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const forwarded_sc: u64 = @min(gas_u64_raw, avail_after_costs_sc - (avail_after_costs_sc / 64));
-            // Perform the static call through the host interface
-            const params = CallParams{
-                .staticcall = .{
-                    .caller = self.contract_address,
-                    .to = addr,
-                    .input = input_data,
-                    .gas = forwarded_sc,
-                },
-            };
-            var result = self.getEvm().inner_call(params);
-            // Use main allocator for deinit since precompile outputs are allocated with it
-            defer result.deinit(self.getEvm().allocator);
-
-            // EIP-140: copy return data into caller memory on both RETURN and REVERT.
-            if (output_size_usize > 0 and result.output.len > 0) {
-                const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Return data is now managed by EVM's return_data field
-            // which is automatically updated after inner_call
-
-            // Update caller gas: subtract only gas actually used by callee
-            // Refund the callee's unused gas: final = avail_after_costs - forwarded + leftover.
-            const reconciled_sc: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded_sc) + @as(i128, @intCast(result.gas_left));
-            self.gas_remaining = if (reconciled_sc < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_sc));
-
-            // Push success status (1 for success, 0 for failure)
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-            }
-            self.stack.push_unsafe(if (result.success) 1 else 0);
-
-            const op_data = dispatch.getOpData(.STATICCALL);
-            self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return dispatch_next.nextInstruction(FrameType, self, cursor, opcode);
         }
 
         /// CREATE opcode (0xf0) - Create a new account with associated code.
         /// Stack: [value, offset, size] → [address]
-        /// EIP-214: CREATE not allowed in static context - handled by host implementation
-        pub fn create(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.CREATE, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-
-            // EIP-214: CREATE is forbidden in a static context and must halt the frame.
-            if (self.getEvm().is_static_context()) {
-                self.afterComplete(.CREATE);
-                return Error.WriteProtection;
-            }
-
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 3, "CREATE requires 3 stack items");
-            }
-            const value = self.stack.pop_unsafe();
-            const offset = self.stack.pop_unsafe();
-            const size = self.stack.pop_unsafe();
-
-            // Memory for the init code is charged like any other memory access: a range
-            // that cannot be paid for halts this frame out of gas (it does not push 0).
-            // A zero-size init code touches no memory, whatever the offset.
-            var init_code: []const u8 = &.{};
-            if (size != 0) {
-                if (offset > limits.max_memory_size or
-                    size > limits.max_memory_size or
-                    offset + size > limits.max_memory_size)
-                {
-                    self.afterComplete(.CREATE);
-                    return Error.OutOfGas;
-                }
-                const offset_u32: u32 = @intCast(offset);
-                const size_u32: u32 = @intCast(size);
-                const memory_end: u32 = offset_u32 + size_u32;
-                self.gas_remaining -= @intCast(self.memory.get_expansion_cost(memory_end));
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.CREATE);
-                    return Error.OutOfGas;
-                }
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
-                    self.afterComplete(.CREATE);
-                    return Error.AllocationError;
-                };
-                init_code = self.memory.get_slice(offset_u32, size_u32) catch {
-                    self.afterComplete(.CREATE);
-                    return Error.OutOfBounds;
-                };
-            }
-
-            // execution-specs: the opcode charges GAS_CREATE and init code words with its
-            // memory expansion; a shortfall halts this frame (it does not push 0).
-            if (self.gas_remaining < @as(FrameType.GasType, @intCast(@TypeOf(self.getEvm().*).create_opcode_charge(init_code.len, false)))) {
-                self.afterComplete(.CREATE);
-                return Error.OutOfGas;
-            }
-
-            // Perform the create through the host interface
-            const params = CallParams{
-                .create = .{
-                    .caller = self.contract_address,
-                    .value = value,
-                    .init_code = init_code,
-                    .gas = @as(u64, @intCast(@max(0, self.gas_remaining))),
-                },
-            };
-            var result = self.getEvm().inner_call(params);
-            // Use main allocator for deinit since precompile outputs are allocated with it
-            defer result.deinit(self.getEvm().allocator);
-
-            // EIP-211 / EIP-140: After CREATE (Byzantium+), clear return data on success or
-            // exceptional failure, and preserve revert output when initcode executes REVERT.
-            if (self.getEvm().should_clear_returndata_on_create()) {
-                if (!result.success and result.output.len > 0) {
-                    self.getEvm().set_return_data(result.output) catch {
-                        self.getEvm().clear_return_data();
-                    };
-                } else {
-                    self.getEvm().clear_return_data();
-                }
-            }
-
-            // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_left);
-
-            // Push created contract address or 0 on failure
-            if (result.success and result.created_address != null) {
-                {
-                    (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                }
-                self.stack.push_unsafe(address_utils.toWord(WordType,result.created_address.?));
-            } else {
-                {
-                    (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                }
-                self.stack.push_unsafe(0);
-            }
-
-            const op_data = dispatch.getOpData(.CREATE);
-            self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        pub fn create(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            return createFamily(self, cursor, false);
         }
 
         /// CREATE2 opcode (0xf5) - Create a new account with deterministic address.
         /// Stack: [value, offset, size, salt] → [address]
-        /// EIP-214: CREATE2 not allowed in static context - handled by host implementation
-        pub fn create2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.CREATE2, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-
-            // EIP-214: CREATE2 is forbidden in a static context and must halt the frame.
-            if (self.getEvm().is_static_context()) {
-                self.afterComplete(.CREATE2);
-                return Error.WriteProtection;
-            }
-
-            // EVM pop order: value, offset, size, salt (top first)
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 4, "CREATE2 requires 4 stack items");
-            }
-            const value = self.stack.pop_unsafe();
-            const offset = self.stack.pop_unsafe();
-            const size = self.stack.pop_unsafe();
-            const salt = self.stack.pop_unsafe();
-
-            // Memory for the init code is charged like any other memory access: a range
-            // that cannot be paid for halts this frame out of gas (it does not push 0).
-            // A zero-size init code touches no memory, whatever the offset.
-            var init_code: []const u8 = &.{};
-            if (size != 0) {
-                if (offset > limits.max_memory_size or
-                    size > limits.max_memory_size or
-                    offset + size > limits.max_memory_size)
-                {
-                    self.afterComplete(.CREATE2);
-                    return Error.OutOfGas;
-                }
-                const offset_u32: u32 = @intCast(offset);
-                const size_u32: u32 = @intCast(size);
-                const memory_end: u32 = offset_u32 + size_u32;
-                self.gas_remaining -= @intCast(self.memory.get_expansion_cost(memory_end));
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.CREATE2);
-                    return Error.OutOfGas;
-                }
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
-                    self.afterComplete(.CREATE2);
-                    return Error.AllocationError;
-                };
-                init_code = self.memory.get_slice(offset_u32, size_u32) catch {
-                    self.afterComplete(.CREATE2);
-                    return Error.OutOfBounds;
-                };
-            }
-
-            // execution-specs: the opcode charges GAS_CREATE, init code words, and the init
-            // code hash words with its memory expansion; a shortfall halts this frame.
-            if (self.gas_remaining < @as(FrameType.GasType, @intCast(@TypeOf(self.getEvm().*).create_opcode_charge(init_code.len, true)))) {
-                self.afterComplete(.CREATE2);
-                return Error.OutOfGas;
-            }
-
-            // Convert salt to u256 if needed
-            const salt_u256: u256 = if (@bitSizeOf(WordType) < 256) @as(u256, salt) else salt;
-
-            // Perform the create2 through the host interface
-            const params = CallParams{
-                .create2 = .{
-                    .caller = self.contract_address,
-                    .value = value,
-                    .init_code = init_code,
-                    .salt = salt_u256,
-                    .gas = @as(u64, @intCast(@max(0, self.gas_remaining))),
-                },
-            };
-            var result = self.getEvm().inner_call(params);
-            // Use main allocator for deinit since precompile outputs are allocated with it
-            defer result.deinit(self.getEvm().allocator);
-
-            // EIP-211 / EIP-140 / EIP-1014: After CREATE2 (Byzantium+), clear return data on
-            // success or exceptional failure, and preserve revert output when initcode REVERTs.
-            if (self.getEvm().should_clear_returndata_on_create()) {
-                if (!result.success and result.output.len > 0) {
-                    self.getEvm().set_return_data(result.output) catch {
-                        self.getEvm().clear_return_data();
-                    };
-                } else {
-                    self.getEvm().clear_return_data();
-                }
-            }
-
-            // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_left);
-
-            // Push created contract address or 0 on failure
-            if (result.success and result.created_address != null) {
-                {
-                    (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                }
-                self.stack.push_unsafe(address_utils.toWord(WordType,result.created_address.?));
-            } else {
-                {
-                    (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                }
-                self.stack.push_unsafe(0);
-            }
-
-            const op_data = dispatch.getOpData(.CREATE2);
-            self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        pub fn create2(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            return createFamily(self, cursor, true);
         }
 
         /// RETURN opcode (0xf3) - Halt execution returning output data.
         /// Stack: [offset, size] → []
-        pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.RETURN, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
@@ -957,7 +400,8 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
-            // Zero-length RETURN touches no memory and ignores offset completely.
+            // A zero-size range neither touches nor expands memory, so the offset is
+            // ignored (execution-specs `calculate_gas_extend_memory` skips size 0).
             if (size == 0) {
                 self.output_data = &.{};
                 self.afterComplete(.RETURN);
@@ -966,18 +410,17 @@ pub fn Handlers(FrameType: type) type {
 
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                return Error.OutOfGas;
+                return Error.OutOfBounds;
             }
 
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Calculate gas cost for memory expansion (overflow-safe)
-            const memory_end = std.math.add(usize, offset_usize, size_usize) catch {
-                return Error.OutOfGas;
-            };
-            if (memory_end > limits.max_memory_size) {
-                return Error.OutOfGas;
+            // Calculate gas cost for memory expansion
+            const memory_end = std.math.add(usize, offset_usize, size_usize) catch return Error.OutOfBounds;
+            // Every value must lie within the configured memory limit.
+            if (offset_usize > FrameType.Memory.MEMORY_LIMIT or size_usize > FrameType.Memory.MEMORY_LIMIT or memory_end > FrameType.Memory.MEMORY_LIMIT) {
+                return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -986,24 +429,19 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (memory_end is guaranteed to fit in u24 from check above)
+            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32)
             self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
 
-            // Extract return data from memory and store it in thread-local storage
-            if (size_usize > 0) {
-                const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                    return Error.OutOfBounds;
-                };
-                // Allocate and copy output to thread-local storage
-                const new_output = self.getEvm().getCallArenaAllocator().alloc(u8, return_data.len) catch {
-                    return Error.AllocationError;
-                };
-                @memcpy(new_output, return_data);
-                self.output_data = new_output;
-            } else {
-                // Empty return data
-                self.output_data = &.{};
-            }
+            // Copy the output range out of frame memory into the call arena.
+            const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
+                return Error.OutOfBounds;
+            };
+            // Allocate and copy output to thread-local storage
+            const new_output = self.getEvm().getCallArenaAllocator().alloc(u8, return_data.len) catch {
+                return Error.AllocationError;
+            };
+            @memcpy(new_output, return_data);
+            self.output_data = new_output;
 
             // Return indicates successful execution
             self.afterComplete(.RETURN);
@@ -1012,7 +450,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// REVERT opcode (0xfd) - Halt execution reverting state changes.
         /// Stack: [offset, size] → []
-        pub fn revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.REVERT, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
@@ -1022,27 +460,27 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
-            // Zero-length REVERT touches no memory and ignores offset completely.
+            // A zero-size range neither touches nor expands memory, so the offset is
+            // ignored (execution-specs `calculate_gas_extend_memory` skips size 0).
             if (size == 0) {
-                self.output_data = &[_]u8{};
+                self.output_data = &.{};
                 self.afterComplete(.REVERT);
                 return Error.REVERT;
             }
 
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                return Error.OutOfGas;
+                return Error.OutOfBounds;
             }
 
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Calculate gas cost for memory expansion (overflow-safe)
-            const memory_end = std.math.add(usize, offset_usize, size_usize) catch {
-                return Error.OutOfGas;
-            };
-            if (memory_end > limits.max_memory_size) {
-                return Error.OutOfGas;
+            // Calculate gas cost for memory expansion
+            const memory_end = std.math.add(usize, offset_usize, size_usize) catch return Error.OutOfBounds;
+            // Every value must lie within the configured memory limit.
+            if (offset_usize > FrameType.Memory.MEMORY_LIMIT or size_usize > FrameType.Memory.MEMORY_LIMIT or memory_end > FrameType.Memory.MEMORY_LIMIT) {
+                return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -1051,24 +489,19 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (memory_end is guaranteed to fit in u24 from check above)
+            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32)
             self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
 
-            // Extract revert data from memory and store it in thread-local storage
-            if (size_usize > 0) {
-                const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                    return Error.OutOfBounds;
-                };
-                // Allocate and copy output to thread-local storage
-                const revert_output = self.getEvm().getCallArenaAllocator().alloc(u8, revert_data.len) catch {
-                    return Error.AllocationError;
-                };
-                @memcpy(revert_output, revert_data);
-                self.output_data = revert_output;
-            } else {
-                // Empty revert data
-                self.output_data = &[_]u8{};
-            }
+            // Copy the output range out of frame memory into the call arena.
+            const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
+                return Error.OutOfBounds;
+            };
+            // Allocate and copy output to thread-local storage
+            const revert_output = self.getEvm().getCallArenaAllocator().alloc(u8, revert_data.len) catch {
+                return Error.AllocationError;
+            };
+            @memcpy(revert_output, revert_data);
+            self.output_data = revert_output;
 
             // Reduce log noise: no verbose REVERT logging
 
@@ -1080,7 +513,7 @@ pub fn Handlers(FrameType: type) type {
         /// SELFDESTRUCT opcode (0xff) - Halt execution and mark account for later deletion.
         /// Stack: [recipient] → []
         /// EIP-214: STATICCALL prevents SELFDESTRUCT via null self_destruct and static host
-        pub fn selfdestruct(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn selfdestruct(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.SELFDESTRUCT, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "SELFDESTRUCT requires 1 stack item");
@@ -1089,55 +522,58 @@ pub fn Handlers(FrameType: type) type {
             const recipient = address_utils.fromWord(WordType, recipient_u256);
             const evm = self.getEvm();
 
-            // EIP-214: SELFDESTRUCT is forbidden in a static context.
-            if (evm.is_static_context()) {
-                self.afterComplete(.SELFDESTRUCT);
-                return Error.WriteProtection;
-            }
+            // The flat price (0 before Tangerine Whistle, 5000 after) is static gas. The
+            // dynamic part follows execution-specs `selfdestruct`.
+            var extra_gas: u64 = 0;
 
-            // EIP-2929: Cold beneficiary access adds 2600 gas on Berlin+ (static 5000 is already
-            // charged by the basic block; warm beneficiary adds 0 dynamic gas).
-            var dynamic_gas: u64 = 0;
+            // EIP-2929 (Berlin+): a cold beneficiary costs the full cold access price.
+            // SELFDESTRUCT has no warm access charge.
             const access_cost = evm.access_address(recipient) catch {
                 self.afterComplete(.SELFDESTRUCT);
                 return Error.AllocationError;
             };
-            if (evm.is_hardfork_at_least(.BERLIN) and access_cost > GasConstants.WarmStorageReadCost) {
-                dynamic_gas += access_cost;
+            if (comptime fork_gas.hasAccessLists(hardfork)) {
+                if (access_cost > fork_gas.warm_access_cost) extra_gas += fork_gas.cold_account_access_cost;
             }
 
-            // EIP-150 / EIP-161: Creating a new beneficiary account via SELFDESTRUCT costs 25000 gas.
-            if (evm.is_hardfork_at_least(.TANGERINE_WHISTLE)) {
-                const self_balance = evm.database.get_balance(self.contract_address.bytes) catch {
-                    self.afterComplete(.SELFDESTRUCT);
-                    return Error.AllocationError;
-                };
-                const recipient_dead = if (evm.is_hardfork_at_least(.SPURIOUS_DRAGON))
-                    (evm.database.is_empty(recipient.bytes) catch {
+            // New-account surcharge (EIP-150), restricted by EIP-161 to a dead beneficiary
+            // that actually receives a balance.
+            if (comptime hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+                const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork)) blk: {
+                    const balance = evm.database.get_balance(self.contract_address.bytes) catch {
                         self.afterComplete(.SELFDESTRUCT);
                         return Error.AllocationError;
-                    })
-                else
-                    !evm.database.account_exists(recipient.bytes);
-                if (recipient_dead and (self_balance > 0 or !evm.is_hardfork_at_least(.SPURIOUS_DRAGON))) {
-                    dynamic_gas += GasConstants.CALL_NEW_ACCOUNT_COST;
-                }
+                    };
+                    break :blk balance != 0 and try isDeadAccount(self, recipient);
+                } else !evm.database.account_exists(recipient.bytes);
+                if (charge_new_account) extra_gas += fork_gas.new_account_gas;
             }
 
-            self.gas_remaining -= @intCast(dynamic_gas);
-            if (self.gas_remaining < 0) {
+            if (!chargeGas(self, extra_gas)) {
                 self.afterComplete(.SELFDESTRUCT);
                 return Error.OutOfGas;
             }
 
+            // Refund (removed by EIP-3529 in London): once per destroyed contract.
+            const refund = comptime fork_gas.selfdestructRefund(hardfork);
+            const first_destruction = !evm.self_destruct.is_marked_for_destruction(self.contract_address);
+
             evm.mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
-                error.StaticCallViolation => return Error.WriteProtection,
+                error.StaticCallViolation => {
+                    self.afterComplete(.SELFDESTRUCT);
+                    return Error.WriteProtection;
+                },
                 else => {
                     @branchHint(.unlikely);
                     log.debug("SELFDESTRUCT failed with error: {}", .{err});
+                    self.afterComplete(.SELFDESTRUCT);
                     return Error.AllocationError;
                 },
             };
+            if (refund > 0 and first_destruction) evm.add_gas_refund(refund);
+
+            // According to EIP-6780 (Cancun hardfork), SELFDESTRUCT only actually destroys
+            // the contract if it was created in the same transaction. This is handled by the host.
             // SELFDESTRUCT always stops execution
             self.afterComplete(.SELFDESTRUCT);
             return Error.SelfDestruct;
@@ -1145,7 +581,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// STOP opcode (0x00) - Halt execution.
         /// Stack: [] → []
-        pub fn stop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn stop(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.STOP, cursor);
 
             // EIP-3529 gas refund is applied at the transaction level in evm.zig,
@@ -1153,292 +589,6 @@ pub fn Handlers(FrameType: type) type {
 
             self.afterComplete(.STOP);
             return Error.Stop;
-        }
-
-        /// AUTH opcode (0xf6) - EIP-3074: Authorize a trusted invoker
-        /// Stack: [authority, commitment, sig_v, sig_r, sig_s] → [success]
-        pub fn auth(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.AUTH, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-
-            // Pop authorization parameters from stack
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 5, "AUTH requires 5 stack items");
-            }
-            const sig_s = self.stack.pop_unsafe();
-            const sig_r = self.stack.pop_unsafe();
-            const sig_v = self.stack.pop_unsafe();
-            const commitment = self.stack.pop_unsafe();
-            const authority_u256 = self.stack.pop_unsafe();
-
-            // Convert authority to address
-            const authority = address_utils.fromWord(WordType,authority_u256);
-
-            // Validate signature components
-            if (sig_v > 28 or sig_r == 0 or sig_s == 0) {
-                // Invalid signature, push failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTH);
-                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            // Create authorization message
-            // Format: keccak256(0x04 || chainId || nonce || invokerAddress || commitment)
-            var message: [1 + 32 + 32 + 20 + 32]u8 = undefined;
-            message[0] = 0x04; // AUTH magic byte
-
-            // Get chain ID and nonce from context
-            const evm = self.getEvm();
-            const chain_id = evm.get_chain_id();
-            const nonce = evm.database.get_account(authority.bytes) catch {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTH);
-                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            } orelse {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTH);
-                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            };
-
-            // Encode chain ID (32 bytes, big-endian)
-            std.mem.writeInt(u256, message[1..33], chain_id, .big);
-            // Encode nonce (32 bytes, big-endian)
-            std.mem.writeInt(u256, message[33..65], nonce.nonce, .big);
-            // Encode invoker address (20 bytes)
-            @memcpy(message[65..85], &self.contract_address.bytes);
-            // Encode commitment (32 bytes)
-            if (@bitSizeOf(WordType) < 256) {
-                std.mem.writeInt(u256, message[85..117], @as(u256, commitment), .big);
-            } else {
-                std.mem.writeInt(u256, message[85..117], commitment, .big);
-            }
-
-            // Compute message hash
-            const crypto = @import("crypto");
-            const message_hash = crypto.Hash.keccak256(&message);
-
-            // Verify signature
-            const recovery_id = @as(u8, @intCast(sig_v - 27));
-
-            const recovered = crypto.secp256k1.unauditedRecoverAddress(&message_hash, recovery_id, sig_r, sig_s) catch {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTH);
-                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            };
-
-            // Check if recovered address matches authority
-            if (!std.mem.eql(u8, &recovered.bytes, &authority.bytes)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTH);
-                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            // Store authorized context in frame
-            self.authorized_address = authority;
-
-            // Push success
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-            }
-            self.stack.push_unsafe(1);
-            const op_data = dispatch.getOpData(.AUTH);
-            self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
-
-        /// AUTHCALL opcode (0xf7) - EIP-3074: Make a call as an authorized address
-        /// Stack: [gas, to, value, input_offset, input_size, output_offset, output_size, auth] → [success]
-        pub fn authcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.AUTHCALL, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-
-            // Pop call parameters from stack
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 8, "AUTHCALL requires 8 stack items");
-            }
-            const auth_flag = self.stack.pop_unsafe();
-            const output_size = self.stack.pop_unsafe();
-            const output_offset = self.stack.pop_unsafe();
-            const input_size = self.stack.pop_unsafe();
-            const input_offset = self.stack.pop_unsafe();
-            const value = self.stack.pop_unsafe();
-            const to_address = self.stack.pop_unsafe();
-            const gas_param = self.stack.pop_unsafe();
-
-            // Check if we have an authorized context (auth_flag must be 1)
-            if (auth_flag != 1 or self.authorized_address == null) {
-                // No authorization, push failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTHCALL);
-                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            // Convert to address
-            const to_addr = address_utils.fromWord(WordType,to_address);
-
-            // Bounds checking for gas parameter
-            if (gas_param > std.math.maxInt(u64)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTHCALL);
-                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            // Apply 63/64 gas forwarding rule (EIP-150)
-            const gas_u64_raw = @as(u64, @intCast(gas_param));
-            const caller_gas_available: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const max_forwardable: u64 = caller_gas_available - (caller_gas_available / 64);
-            const gas_u64 = if (gas_u64_raw < max_forwardable) gas_u64_raw else max_forwardable;
-
-            // Bounds checking for memory offsets and sizes
-            if (input_offset > std.math.maxInt(usize) or
-                input_size > std.math.maxInt(usize) or
-                output_offset > std.math.maxInt(usize) or
-                output_size > std.math.maxInt(usize))
-            {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTHCALL);
-                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const input_offset_usize = @as(usize, @intCast(input_offset));
-            const input_size_usize = @as(usize, @intCast(input_size));
-            const output_offset_usize = @as(usize, @intCast(output_offset));
-            const output_size_usize = @as(usize, @intCast(output_size));
-
-            // Calculate memory bounds with overflow checking
-            var input_mem_end: usize = 0;
-            var output_mem_end: usize = 0;
-
-            if (input_size_usize > 0) {
-                const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
-                if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                }
-                input_mem_end = overflow[0];
-            }
-
-            if (output_size_usize > 0) {
-                const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
-                if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                }
-                output_mem_end = overflow[0];
-            }
-
-            const max_mem_end = @max(input_mem_end, output_mem_end);
-
-            if (max_mem_end > limits.max_memory_size) {
-                // Memory expansion exceeds limit - return failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTHCALL);
-                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            // Calculate and charge memory expansion gas
-            if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
-                const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
-                self.gas_remaining -= expansion_cost_i64;
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.AUTHCALL);
-                    return Error.OutOfGas;
-                }
-            }
-
-            // Ensure memory capacity for input
-            if (input_size_usize > 0) {
-                const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Ensure memory capacity for output
-            if (output_size_usize > 0) {
-                const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Extract input data
-            var input_data: []const u8 = &.{};
-            if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Perform the authorized call through the host interface
-            // The call is made with the authorized address as the caller
-            const params = CallParams{
-                .call = .{
-                    .caller = self.authorized_address.?,
-                    .to = to_addr,
-                    .value = value,
-                    .input = input_data,
-                    .gas = gas_u64,
-                },
-            };
-
-            var result = self.getEvm().inner_call(params);
-            // Use main allocator for deinit since precompile outputs are allocated with it
-            defer result.deinit(self.getEvm().allocator);
-
-            // Write return data to memory if successful and output size > 0
-            if (result.success and output_size_usize > 0 and result.output.len > 0) {
-                const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-                };
-            }
-
-            // Return data is now managed by EVM's return_data field
-            // which is automatically updated after inner_call
-
-            // Update gas remaining using proper accounting (same as CALL)
-            const provided_gas_authcall: u64 = gas_u64;
-            const used_gas_authcall: u64 = if (result.gas_left > provided_gas_authcall) 0 else (provided_gas_authcall - result.gas_left);
-            const caller_gas_authcall: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const new_gas_authcall: u64 = if (used_gas_authcall > caller_gas_authcall) 0 else caller_gas_authcall - used_gas_authcall;
-            self.gas_remaining = @as(FrameType.GasType, @intCast(new_gas_authcall));
-
-            // Push success status
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-            }
-            self.stack.push_unsafe(if (result.success) 1 else 0);
-            const op_data = dispatch.getOpData(.AUTHCALL);
-            // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }
@@ -1609,7 +759,7 @@ test "RETURN opcode - 32 bytes with 0x42" {
     try testing.expectEqual(@as(usize, 32), frame.output.len);
 
     // Expected: 32 bytes with 0x42 in the last position (big-endian)
-    var expected = [_]u8{0} ** 32;
+    var expected = @as([32]u8, @splat(0));
     expected[31] = 0x42;
     try testing.expectEqualSlices(u8, &expected, frame.output);
 }
@@ -1908,7 +1058,7 @@ test "Address conversion - from_u256 edge cases" {
     // Test max u160 (max valid address)
     const max_u160 = std.math.maxInt(u160);
     const max_addr = test_address_utils.fromWord(u256, max_u160);
-    const expected_max = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable;
+    const expected_max = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable;
     try testing.expectEqual(expected_max, max_addr);
 
     // Test truncation from u256
@@ -1927,7 +1077,7 @@ test "Address conversion - to_u256 edge cases" {
     try testing.expectEqual(@as(u256, 0), zero_u256);
 
     // Test max address
-    const max_bytes = [_]u8{0xFF} ** 20;
+    const max_bytes = @as([20]u8, @splat(0xFF));
     const max_addr = Address.fromBytes(max_bytes) catch unreachable;
     const max_u256 = test_address_utils.toWord(u256, max_addr);
     try testing.expectEqual(@as(u256, std.math.maxInt(u160)), max_u256);
@@ -2205,7 +1355,7 @@ test "STATICCALL opcode - enforces no value" {
 // CREATE tests
 test "CREATE opcode - empty init code" {
     var evm = MockEvm.init(testing.allocator);
-    evm.create_result.created_address = Address.fromBytes([_]u8{0x42} ** 20) catch unreachable;
+    evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(0x42))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
@@ -2223,7 +1373,7 @@ test "CREATE opcode - empty init code" {
 
 test "CREATE opcode - with init code" {
     var evm = MockEvm.init(testing.allocator);
-    evm.create_result.created_address = Address.fromBytes([_]u8{0x11} ** 20) catch unreachable;
+    evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(0x11))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
@@ -2279,7 +1429,7 @@ test "CREATE opcode - out of bounds" {
 // CREATE2 tests
 test "CREATE2 opcode - deterministic address" {
     var evm = MockEvm.init(testing.allocator);
-    evm.create_result.created_address = Address.fromBytes([_]u8{0x22} ** 20) catch unreachable;
+    evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(0x22))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
@@ -2305,7 +1455,7 @@ test "CREATE2 opcode - different salts" {
     const salts = [_]u256{ 0, 1, std.math.maxInt(u256), 0x123456789ABCDEF };
 
     for (salts) |salt| {
-        evm.create_result.created_address = Address.fromBytes([_]u8{@truncate(salt)} ** 20) catch unreachable;
+        evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(@truncate(salt)))) catch unreachable;
 
         try frame.stack.push(0); // value
         try frame.stack.push(0); // offset
@@ -2561,30 +1711,6 @@ test "System opcodes - memory boundary checks" {
     }
 }
 
-test "AUTH handler - uses correct opcode tag" {
-    // Test that AUTH handler uses .AUTH opcode tag, not .AUTHCALL
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Push AUTH parameters (commitment, nonce, invoker address, yParity, r, s, authority)
-    try frame.stack.push(0xdead); // authority address
-    try frame.stack.push(0); // s
-    try frame.stack.push(0); // r
-    try frame.stack.push(27); // yParity (v)
-    try frame.stack.push(0); // invoker address
-    try frame.stack.push(0); // nonce
-    try frame.stack.push(0); // commitment
-
-    const dispatch = createMockDispatch();
-
-    // AUTH should fail signature verification and push 0, but shouldn't crash
-    // The key test is that it runs without error using .AUTH opcode
-    const result = TestFrame.SystemHandlers.auth(frame, dispatch);
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
-}
-
 test "CALLCODE handler - afterComplete on error paths" {
     var evm = MockEvm.init(testing.allocator);
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -2611,11 +1737,11 @@ test "CALLCODE handler - afterComplete on memory expansion error" {
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
-    // Test error path: exceeds u24 memory limit
+    // Test error path: exceeds the memory limit
     try frame.stack.push(100000); // gas
     try frame.stack.push(0x1234); // address
     try frame.stack.push(0); // value
-    try frame.stack.push(limits.max_memory_size + 1); // input_offset (exceeds limit)
+    try frame.stack.push(TestFrame.Memory.MEMORY_LIMIT + 1); // input_offset (exceeds limit)
     try frame.stack.push(1); // input_size
     try frame.stack.push(0); // output_offset
     try frame.stack.push(0); // output_size
@@ -2625,270 +1751,4 @@ test "CALLCODE handler - afterComplete on memory expansion error" {
     // Should return OutOfGas error after calling afterComplete
     const result = TestFrame.SystemHandlers.callcode(frame, dispatch);
     try testing.expectError(TestFrame.Error.OutOfGas, result);
-}
-
-test "AUTHCALL handler - afterInstruction on all error paths" {
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Test error path: no authorization
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(0); // input_offset
-    try frame.stack.push(0); // input_size
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(0); // auth_flag (0 = no auth)
-
-    const dispatch = createMockDispatch();
-
-    // Should complete without error, pushing 0 for failure
-    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
-}
-
-test "AUTHCALL handler - afterInstruction on memory bounds error" {
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set authorized address first
-    frame.authorized_address = Address.ZERO;
-
-    // Test error path: memory bounds exceed usize
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(std.math.maxInt(u256)); // input_offset (exceeds usize)
-    try frame.stack.push(0); // input_size
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-
-    // Should complete without error, pushing 0 for failure
-    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
-}
-
-test "AUTHCALL handler - gas forwarding 63/64 rule" {
-    var evm = MockEvm.init(testing.allocator);
-    evm.call_result.gas_left = 50000; // Simulate gas consumption
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set authorized address
-    frame.authorized_address = Address.ZERO;
-
-    const initial_gas = frame.gas_remaining;
-    const requested_gas: u64 = 1000000; // Request more than available
-
-    try frame.stack.push(requested_gas); // gas (will be capped)
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(0); // input_offset
-    try frame.stack.push(0); // input_size
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-    const result = try TestFrame.SystemHandlers.authcall(frame, dispatch);
-
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // success
-
-    // Verify gas was properly forwarded and accounted
-    // The actual gas forwarded should be max_forwardable, not requested_gas
-    try testing.expect(frame.gas_remaining < initial_gas);
-}
-
-test "AUTHCALL handler - memory expansion gas calculation" {
-    var evm = MockEvm.init(testing.allocator);
-    evm.call_result.gas_left = 50000;
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set authorized address
-    frame.authorized_address = Address.ZERO;
-
-    const initial_gas = frame.gas_remaining;
-
-    // Test with memory expansion
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(0); // input_offset
-    try frame.stack.push(1024); // input_size (causes memory expansion)
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(512); // output_size (more memory expansion)
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-    const result = try TestFrame.SystemHandlers.authcall(frame, dispatch);
-
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // success
-
-    // Verify gas was charged for memory expansion
-    try testing.expect(frame.gas_remaining < initial_gas);
-}
-
-test "AUTHCALL handler - memory expansion OutOfGas" {
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set very low gas
-    frame.gas_remaining = 10;
-
-    // Set authorized address
-    frame.authorized_address = Address.ZERO;
-
-    // Test with large memory expansion that should cause OutOfGas
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(0); // input_offset
-    try frame.stack.push(10000); // input_size (large expansion)
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(10000); // output_size
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-
-    // Should return OutOfGas after calling afterComplete
-    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
-    try testing.expectError(TestFrame.Error.OutOfGas, result);
-}
-
-test "AUTHCALL handler - memory overflow check" {
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set authorized address
-    frame.authorized_address = Address.ZERO;
-
-    // Test overflow detection in memory bounds calculation
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(std.math.maxInt(usize) - 10); // input_offset
-    try frame.stack.push(100); // input_size (causes overflow)
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-
-    // Should detect overflow and return failure
-    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
-}
-
-test "AUTHCALL handler - u24 memory limit check" {
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set authorized address
-    frame.authorized_address = Address.ZERO;
-
-    // Test that exceeding u24 limit is properly caught
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(limits.max_memory_size + 1); // input_offset (exceeds u24)
-    try frame.stack.push(1); // input_size
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-
-    // Should detect limit exceeded and return failure
-    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
-}
-
-test "AUTHCALL handler - proper gas accounting" {
-    var evm = MockEvm.init(testing.allocator);
-    evm.call_result.gas_left = 30000; // Gas left after call
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Set authorized address
-    frame.authorized_address = Address.ZERO;
-
-    const initial_gas = frame.gas_remaining;
-    const requested_gas: u64 = 50000;
-
-    try frame.stack.push(requested_gas); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(0); // input_offset
-    try frame.stack.push(0); // input_size
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(1); // auth_flag
-
-    const dispatch = createMockDispatch();
-    const result = try TestFrame.SystemHandlers.authcall(frame, dispatch);
-
-    try testing.expect(result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // success
-
-    // Calculate expected gas:
-    // Gas forwarded = min(requested_gas, max_forwardable) where max_forwardable = caller_gas - (caller_gas / 64)
-    const caller_gas_available: u64 = @as(u64, @intCast(initial_gas));
-    const max_forwardable: u64 = caller_gas_available - (caller_gas_available / 64);
-    const gas_forwarded = @min(requested_gas, max_forwardable);
-    const gas_used = gas_forwarded - evm.call_result.gas_left;
-    const expected_remaining = @as(i64, @intCast(caller_gas_available - gas_used));
-
-    try testing.expectEqual(expected_remaining, frame.gas_remaining);
-}
-
-test "AUTH and AUTHCALL integration - correct opcode separation" {
-    // This test verifies that AUTH and AUTHCALL use their respective opcodes
-    // and don't interfere with each other's dispatch handling
-    var evm = MockEvm.init(testing.allocator);
-    var frame = try createTestFrame(testing.allocator, &evm);
-    defer frame.deinit(testing.allocator);
-
-    // Test AUTH first
-    try frame.stack.push(0xdead); // authority
-    try frame.stack.push(0); // s
-    try frame.stack.push(0); // r
-    try frame.stack.push(27); // v
-    try frame.stack.push(0); // invoker
-    try frame.stack.push(0); // nonce
-    try frame.stack.push(0); // commitment
-
-    const dispatch = createMockDispatch();
-    const auth_result = TestFrame.SystemHandlers.auth(frame, dispatch);
-    try testing.expect(auth_result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // AUTH fails
-
-    // Now test AUTHCALL with no authorization
-    try frame.stack.push(100000); // gas
-    try frame.stack.push(0x1234); // to
-    try frame.stack.push(0); // value
-    try frame.stack.push(0); // input_offset
-    try frame.stack.push(0); // input_size
-    try frame.stack.push(0); // output_offset
-    try frame.stack.push(0); // output_size
-    try frame.stack.push(0); // auth_flag (no auth)
-
-    const authcall_result = TestFrame.SystemHandlers.authcall(frame, dispatch);
-    try testing.expect(authcall_result == TestFrame.Success.stop);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // AUTHCALL fails
 }

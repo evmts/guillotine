@@ -2,7 +2,6 @@
 /// This is a simplified, unoptimized EVM that orchestrates execution.
 /// Architecture mirrors evm.zig - MinimalEvm orchestrates, MinimalFrame executes
 const std = @import("std");
-const limits = @import("evm_limits");
 const primitives = @import("voltaire");
 const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
@@ -10,8 +9,24 @@ const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
 const precompiles = @import("precompiles");
 const log = @import("../log.zig");
+const native_stack = @import("../native_stack.zig");
 
 const Address = primitives.Address.Address;
+
+/// Native stack kept free below a nested call. MinimalEvm recurses on the native stack
+/// once per EVM call depth, and one level (a MinimalFrame's interpreter loop plus the
+/// deepest precompile or hash it can reach) must fit in this much.
+const native_stack_reserve = 512 * 1024;
+
+/// True when the calling thread's stack bounds are known and less than
+/// `native_stack_reserve` of it is left. A nested call must not start then: 1024 EVM
+/// call depths do not fit on a small thread stack (a 2 MiB pthread overflows long
+/// before the depth limit).
+fn nativeStackExhausted() bool {
+    if (comptime !native_stack.supported) return false;
+    const low = native_stack.lowAddress() orelse return false;
+    return @frameAddress() < low +| native_stack_reserve;
+}
 
 // Re-export host types for compatibility
 pub const HostInterface = minimal_host.HostInterface;
@@ -95,11 +110,18 @@ pub const MinimalEvm = struct {
     transient_storage: std.AutoHashMap(StorageSlotKey, u256),
     original_storage: std.AutoHashMap(StorageSlotKey, u256),
     balances: std.AutoHashMap(Address, u256),
-    code: std.AutoHashMap(Address, []const u8),
+    /// Account nonces. An account without an entry has nonce 0.
     nonces: std.AutoHashMap(Address, u64),
+    code: std.AutoHashMap(Address, []const u8),
+    /// Accounts created during the current transaction. EIP-6780 (Cancun) lets
+    /// SELFDESTRUCT delete an account only when it is in this set.
+    created_accounts: std.AutoHashMap(Address, void),
+    /// Contracts that already ran SELFDESTRUCT in the current transaction. The
+    /// pre-London refund is granted once per contract.
+    selfdestructed_accounts: std.AutoHashMap(Address, void),
     // EIP-2929 warm/cold tracking (minimal)
-    warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
-    warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
+    warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false),
+    warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false),
 
     // Transaction-scoped gas refund counter
     gas_refund: u64,
@@ -110,6 +132,8 @@ pub const MinimalEvm = struct {
     // Blockchain context
     chain_id: u64,
     block_number: u64,
+    /// Recent ancestor hashes, newest first (see `BlockInfo.block_hashes`).
+    block_hashes: []const [32]u8 = &.{},
     block_timestamp: u64,
     block_difficulty: u256,
     block_prevrandao: u256,
@@ -130,11 +154,13 @@ pub const MinimalEvm = struct {
         const storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const transient_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const balances_map = std.AutoHashMap(Address, u256).init(arena_allocator);
-        const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         const nonces_map = std.AutoHashMap(Address, u64).init(arena_allocator);
-        const warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
-        const warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
-        var frames_list = std.ArrayList(*MinimalFrame){};
+        const created_accounts_map = std.AutoHashMap(Address, void).init(arena_allocator);
+        const selfdestructed_accounts_map = std.AutoHashMap(Address, void).init(arena_allocator);
+        const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
+        const warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false) = .empty;
+        const warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false) = .empty;
+        var frames_list = std.ArrayList(*MinimalFrame).empty;
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
 
         const original_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
@@ -145,8 +171,10 @@ pub const MinimalEvm = struct {
             .transient_storage = transient_storage_map,
             .original_storage = original_storage_map,
             .balances = balances_map,
-            .code = code_map,
             .nonces = nonces_map,
+            .code = code_map,
+            .created_accounts = created_accounts_map,
+            .selfdestructed_accounts = selfdestructed_accounts_map,
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
             .gas_refund = 0,
@@ -179,19 +207,22 @@ pub const MinimalEvm = struct {
 
         const arena_allocator = self.arena.allocator();
 
-        self.frames = std.ArrayList(*MinimalFrame){}; // Unmanaged ArrayList, default init
+        self.frames = std.ArrayList(*MinimalFrame).empty; // Unmanaged ArrayList, default init
         self.storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.transient_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.balances = std.AutoHashMap(Address, u256).init(arena_allocator);
-        self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         self.nonces = std.AutoHashMap(Address, u64).init(arena_allocator);
-        self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
-        self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
+        self.created_accounts = std.AutoHashMap(Address, void).init(arena_allocator);
+        self.selfdestructed_accounts = std.AutoHashMap(Address, void).init(arena_allocator);
+        self.warm_addresses = .empty;
+        self.warm_storage_slots = .empty;
         self.gas_refund = 0;
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
         self.block_number = 0;
+        self.block_hashes = &.{};
         self.block_timestamp = 0;
         self.block_difficulty = 0;
         self.block_prevrandao = 0;
@@ -249,6 +280,12 @@ pub const MinimalEvm = struct {
         self.blob_base_fee = blob_base_fee;
     }
 
+    /// Set the recent ancestor hashes BLOCKHASH serves, newest first. The slice is
+    /// borrowed and must outlive execution.
+    pub fn setBlockHashes(self: *Self, block_hashes: []const [32]u8) void {
+        self.block_hashes = block_hashes;
+    }
+
     pub fn setTransactionContext(self: *Self, origin: Address, gas_price: u256) void {
         self.origin = origin;
         self.gas_price = gas_price;
@@ -270,25 +307,31 @@ pub const MinimalEvm = struct {
         try self.balances.put(address, balance);
     }
 
+    /// Set an account's nonce.
     pub fn setNonce(self: *Self, address: Address, nonce: u64) !void {
         try self.nonces.put(address, nonce);
     }
 
-    pub fn get_nonce(self: *const Self, address: Address) u64 {
+    /// Nonce of an account; 0 when none was set.
+    pub fn get_nonce(self: *Self, address: Address) u64 {
         return self.nonces.get(address) orelse 0;
     }
 
-    pub fn account_exists(self: *const Self, address: Address) bool {
-        if (self.balances.get(address)) |b| {
-            if (b > 0) return true;
-        }
-        if (self.code.get(address)) |c| {
-            if (c.len > 0) return true;
-        }
-        if (self.nonces.get(address)) |n| {
-            if (n > 0) return true;
-        }
-        return false;
+    /// Record that `address` was created in the current transaction (EIP-6780).
+    pub fn markCreated(self: *Self, address: Address) !void {
+        try self.created_accounts.put(address, {});
+    }
+
+    /// True when `address` was created in the current transaction.
+    pub fn wasCreatedInTransaction(self: *Self, address: Address) bool {
+        return self.created_accounts.contains(address);
+    }
+
+    /// Record that `address` ran SELFDESTRUCT in the current transaction. Returns true
+    /// the first time, false when it had already done so.
+    pub fn markSelfdestructed(self: *Self, address: Address) !bool {
+        const entry = try self.selfdestructed_accounts.getOrPut(address);
+        return !entry.found_existing;
     }
 
     pub fn access_address(self: *Self, address: Address) !u64 {
@@ -297,7 +340,7 @@ pub const MinimalEvm = struct {
             return GasConstants.CallCodeCost;
         }
 
-        const entry = try self.warm_addresses.getOrPut(address);
+        const entry = try self.warm_addresses.getOrPut(self.allocator, address);
         return if (entry.found_existing)
             GasConstants.WarmStorageReadCost
         else
@@ -312,7 +355,7 @@ pub const MinimalEvm = struct {
         }
 
         const key = StorageSlotKey{ .address = contract_address, .slot = slot };
-        const entry = try self.warm_storage_slots.getOrPut(key);
+        const entry = try self.warm_storage_slots.getOrPut(self.allocator, key);
         return if (entry.found_existing)
             GasConstants.WarmStorageReadCost
         else
@@ -322,7 +365,7 @@ pub const MinimalEvm = struct {
     /// Pre-warm addresses for transaction initialization
     fn pre_warm_addresses(self: *Self, addresses: []const Address) !void {
         for (addresses) |address| {
-            _ = self.warm_addresses.getOrPut(address) catch {
+            _ = self.warm_addresses.getOrPut(self.allocator, address) catch {
                 return Error.StorageError;
             };
         }
@@ -360,7 +403,7 @@ pub const MinimalEvm = struct {
         // Check each potential precompile address and pre-warm if active
         var i: u8 = 1;
         while (i <= 10) : (i += 1) {
-            var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+            var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
             addr_bytes[19] = i;
             const addr = Address{ .bytes = addr_bytes };
             if (self.is_precompile(addr)) {
@@ -383,9 +426,7 @@ pub const MinimalEvm = struct {
         address: Address,
         value: u256,
         calldata: []const u8,
-    ) Error!CallResult {
-        // Any storage populated before execute() is pre-transaction original state.
-        self.original_storage.clearRetainingCapacity();
+    ) Error!CallResult {        
         // Pre-warm transaction, including precompiles depending on hardfork
         try self.pre_warm_transaction(address);
 
@@ -468,7 +509,8 @@ pub const MinimalEvm = struct {
         self.warm_addresses.clearRetainingCapacity();
         self.warm_storage_slots.clearRetainingCapacity();
         self.transient_storage.clearRetainingCapacity();
-        self.original_storage.clearRetainingCapacity();
+        self.created_accounts.clearRetainingCapacity();
+        self.selfdestructed_accounts.clearRetainingCapacity();
 
         // No cleanup needed - arena handles it
         return result;
@@ -504,56 +546,8 @@ pub const MinimalEvm = struct {
         };
     }
 
-    pub const CallKind = enum {
-        call,
-        callcode,
-        delegatecall,
-        staticcall,
-    };
-
-    pub const CreateResult = struct {
-        success: bool,
-        gas_left: u64,
-        output: []const u8,
-        created_address: ?Address,
-    };
-
-    const StateSnapshot = struct {
-        storage: std.AutoHashMap(StorageSlotKey, u256),
-        transient_storage: std.AutoHashMap(StorageSlotKey, u256),
-        balances: std.AutoHashMap(Address, u256),
-        code: std.AutoHashMap(Address, []const u8),
-        nonces: std.AutoHashMap(Address, u64),
-        warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
-        warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
-        gas_refund: u64,
-    };
-
-    fn takeSnapshot(self: *Self) Error!StateSnapshot {
-        return StateSnapshot{
-            .storage = self.storage.clone() catch return Error.AllocationError,
-            .transient_storage = self.transient_storage.clone() catch return Error.AllocationError,
-            .balances = self.balances.clone() catch return Error.AllocationError,
-            .code = self.code.clone() catch return Error.AllocationError,
-            .nonces = self.nonces.clone() catch return Error.AllocationError,
-            .warm_addresses = self.warm_addresses.clone() catch return Error.AllocationError,
-            .warm_storage_slots = self.warm_storage_slots.clone() catch return Error.AllocationError,
-            .gas_refund = self.gas_refund,
-        };
-    }
-
-    fn revertSnapshot(self: *Self, snap: StateSnapshot) void {
-        self.storage = snap.storage;
-        self.transient_storage = snap.transient_storage;
-        self.balances = snap.balances;
-        self.code = snap.code;
-        self.nonces = snap.nonces;
-        self.warm_addresses = snap.warm_addresses;
-        self.warm_storage_slots = snap.warm_storage_slots;
-        self.gas_refund = snap.gas_refund;
-    }
-
-    /// Handle inner call from frame (like evm.inner_call)
+    /// Handle inner call from frame (like evm.inner_call). The callee runs in a static
+    /// context when the calling frame does.
     pub fn inner_call(
         self: *Self,
         address: Address,
@@ -561,77 +555,54 @@ pub const MinimalEvm = struct {
         input: []const u8,
         gas: u64,
     ) Error!CallResult {
-        const caller = if (self.getCurrentFrame()) |f| f.address else self.origin;
-        const is_static = if (self.getCurrentFrame()) |f| f.is_static else false;
-        return self.inner_call_ex(.call, address, address, caller, value, input, gas, is_static);
+        return self.innerCallInContext(address, value, input, gas, false);
     }
 
-    /// Handle CALL/CALLCODE/DELEGATECALL/STATICCALL with full context, static-mode,
-    /// value transfer, and state rollback semantics.
-    pub fn inner_call_ex(
+    /// Handle a STATICCALL from a frame: the callee, and every frame below it, runs in a
+    /// static context (EIP-214) where state-changing instructions fail.
+    pub fn inner_static_call(
         self: *Self,
-        kind: CallKind,
-        code_address: Address,
-        exec_address: Address,
-        caller: Address,
+        address: Address,
+        input: []const u8,
+        gas: u64,
+    ) Error!CallResult {
+        return self.innerCallInContext(address, 0, input, gas, true);
+    }
+
+    fn innerCallInContext(
+        self: *Self,
+        address: Address,
         value: u256,
         input: []const u8,
         gas: u64,
-        is_static: bool,
+        force_static: bool,
     ) Error!CallResult {
-        if (self.frames.items.len >= limits.max_call_depth) {
+        if (self.frames.items.len >= 1024) {
             return CallResult{
                 .success = false,
-                .gas_left = gas,
+                .gas_left = 0,
+                .output = &[_]u8{},
+            };
+        }
+        // Out of native stack: fail the call, as at the depth limit, instead of
+        // overflowing the thread's stack.
+        if (nativeStackExhausted()) {
+            @branchHint(.cold);
+            log.debug("MinimalEvm: nested call at depth {d} refused, native stack exhausted", .{self.frames.items.len});
+            return CallResult{
+                .success = false,
+                .gas_left = 0,
                 .output = &[_]u8{},
             };
         }
 
-        const snap = try self.takeSnapshot();
-
-        // Value balance check and transfer
-        if (value > 0) {
-            switch (kind) {
-                .call => {
-                    const sender_balance = self.get_balance(caller);
-                    if (sender_balance < value) {
-                        self.revertSnapshot(snap);
-                        return CallResult{
-                            .success = false,
-                            .gas_left = gas,
-                            .output = &[_]u8{},
-                        };
-                    }
-                    const target_balance = self.get_balance(exec_address);
-                    self.setBalance(caller, sender_balance - value) catch return Error.StorageError;
-                    self.setBalance(exec_address, target_balance +% value) catch return Error.StorageError;
-                },
-                .callcode => {
-                    const sender_balance = self.get_balance(caller);
-                    if (sender_balance < value) {
-                        self.revertSnapshot(snap);
-                        return CallResult{
-                            .success = false,
-                            .gas_left = gas,
-                            .output = &[_]u8{},
-                        };
-                    }
-                },
-                .delegatecall, .staticcall => {},
-            }
-        }
-
         // Check if this is a precompile call
-        if (self.is_precompile(code_address)) {
-            const precompile_res = try self.execute_precompile(code_address, input, gas);
-            if (!precompile_res.success) {
-                self.revertSnapshot(snap);
-            }
-            return precompile_res;
+        if (self.is_precompile(address)) {
+            return self.execute_precompile(address, input, gas);
         }
 
         // Get code for the target address
-        const code = self.get_code(code_address);
+        const code = self.get_code(address);
         if (code.len == 0) {
             // Empty account - just return success
             return CallResult{
@@ -641,6 +612,11 @@ pub const MinimalEvm = struct {
             };
         }
 
+        // Get caller from current frame. A static context is inherited from it.
+        const parent = self.getCurrentFrame();
+        const caller = if (parent) |frame| frame.address else self.origin;
+        const is_static = force_static or (if (parent) |frame| frame.is_static else false);
+
         // Create a new frame for the inner call
         const frame = try self.allocator.create(MinimalFrame);
         frame.* = try MinimalFrame.init(
@@ -648,12 +624,13 @@ pub const MinimalEvm = struct {
             code,
             @intCast(gas),
             caller,
-            exec_address,
+            address,
             value,
             input,
             @as(*anyopaque, @ptrCast(self)),
             self.hardfork,
         );
+
         frame.is_static = is_static;
 
         try self.frames.append(self.allocator, frame);
@@ -661,7 +638,6 @@ pub const MinimalEvm = struct {
 
         frame.execute() catch {
             _ = self.frames.pop();
-            self.revertSnapshot(snap);
             return CallResult{
                 .success = false,
                 .gas_left = 0,
@@ -679,186 +655,15 @@ pub const MinimalEvm = struct {
             break :blk output_copy;
         } else &[_]u8{};
 
-        if (frame.reverted) {
-            self.revertSnapshot(snap);
-        }
-
-        return CallResult{
+        // Return result
+        const result = CallResult{
             .success = !frame.reverted,
             .gas_left = @as(u64, @intCast(@max(frame.gas_remaining, 0))),
             .output = output,
         };
-    }
 
-    /// Execute CREATE / CREATE2 initcode with full EIP-150/170/684/3541/3860 semantics.
-    pub fn inner_create(
-        self: *Self,
-        caller: Address,
-        value: u256,
-        init_code: []const u8,
-        salt_opt: ?u256,
-        available_gas: u64,
-    ) Error!CreateResult {
-        if (self.frames.items.len >= limits.max_call_depth) {
-            return CreateResult{
-                .success = false,
-                .gas_left = available_gas,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        }
-
-        const caller_balance = self.get_balance(caller);
-        const caller_nonce = self.get_nonce(caller);
-        if (caller_balance < value or caller_nonce == std.math.maxInt(u64)) {
-            return CreateResult{
-                .success = false,
-                .gas_left = available_gas,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        }
-
-        // Compute contract address before bumping nonce
-        const contract_address = if (salt_opt) |salt| blk: {
-            var salt_bytes: [32]u8 = undefined;
-            std.mem.writeInt(u256, &salt_bytes, salt, .big);
-            var init_hash: [32]u8 = undefined;
-            std.crypto.hash.sha3.Keccak256.hash(init_code, &init_hash, .{});
-            break :blk primitives.Address.getCreate2Address(caller, salt_bytes, init_hash);
-        } else primitives.Address.getContractAddress(self.allocator, caller, caller_nonce) catch return Error.AllocationError;
-
-        // EIP-2929: warm created address before snapshot so it stays warm even on revert
-        if (self.hardfork.isAtLeast(.BERLIN)) {
-            _ = self.warm_addresses.getOrPut(contract_address) catch return Error.StorageError;
-        }
-
-        // Increment caller nonce (persists even if initcode reverts)
-        self.setNonce(caller, caller_nonce + 1) catch return Error.StorageError;
-
-        const snap = try self.takeSnapshot();
-
-        // EIP-684: collision if target already has code or non-zero nonce
-        if (self.get_code(contract_address).len > 0 or self.get_nonce(contract_address) > 0) {
-            self.revertSnapshot(snap);
-            return CreateResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        }
-
-        // Transfer endowment and initialize nonce = 1 (EIP-161 Spurious Dragon+)
-        if (value > 0) {
-            const target_balance = self.get_balance(contract_address);
-            self.setBalance(caller, caller_balance - value) catch return Error.StorageError;
-            self.setBalance(contract_address, target_balance +% value) catch return Error.StorageError;
-        }
-        if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON)) {
-            self.setNonce(contract_address, 1) catch return Error.StorageError;
-        }
-
-        // Empty init code deploys an empty contract immediately
-        if (init_code.len == 0) {
-            return CreateResult{
-                .success = true,
-                .gas_left = available_gas,
-                .output = &[_]u8{},
-                .created_address = contract_address,
-            };
-        }
-
-        // Execute init code in a new frame
-        const frame = try self.allocator.create(MinimalFrame);
-        frame.* = try MinimalFrame.init(
-            self.allocator,
-            init_code,
-            @intCast(available_gas),
-            caller,
-            contract_address,
-            value,
-            &[_]u8{},
-            @as(*anyopaque, @ptrCast(self)),
-            self.hardfork,
-        );
-        frame.is_static = false;
-
-        try self.frames.append(self.allocator, frame);
-        errdefer _ = self.frames.pop();
-
-        frame.execute() catch {
-            _ = self.frames.pop();
-            self.revertSnapshot(snap);
-            return CreateResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        };
-        _ = self.frames.pop();
-
-        const frame_gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-        if (frame.reverted) {
-            self.revertSnapshot(snap);
-            const revert_out = if (frame.output.len > 0) blk: {
-                const copy = try self.allocator.alloc(u8, frame.output.len);
-                @memcpy(copy, frame.output);
-                break :blk copy;
-            } else &[_]u8{};
-            return CreateResult{
-                .success = false,
-                .gas_left = frame_gas_left,
-                .output = revert_out,
-                .created_address = null,
-            };
-        }
-
-        const deployed_code = frame.output;
-        // EIP-3541 (London+): reject bytecode starting with 0xEF
-        if (self.hardfork.isAtLeast(.LONDON) and deployed_code.len > 0 and deployed_code[0] == 0xef) {
-            self.revertSnapshot(snap);
-            return CreateResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        }
-        // EIP-170 (Spurious Dragon+): max deployed contract code size = 24576 bytes
-        if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON) and deployed_code.len > limits.max_code_size) {
-            self.revertSnapshot(snap);
-            return CreateResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        }
-
-        // Charge code deposit gas (200 gas per byte)
-        const deposit_cost: u64 = @as(u64, deployed_code.len) * GasConstants.CreateDataGas;
-        if (frame_gas_left < deposit_cost) {
-            self.revertSnapshot(snap);
-            return CreateResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-                .created_address = null,
-            };
-        }
-
-        if (deployed_code.len > 0) {
-            self.setCode(contract_address, deployed_code) catch return Error.StorageError;
-        }
-
-        return CreateResult{
-            .success = true,
-            .gas_left = frame_gas_left - deposit_cost,
-            .output = &[_]u8{},
-            .created_address = contract_address,
-        };
+        // No cleanup needed - arena handles it
+        return result;
     }
 
     /// Get balance of an address (called by frame)
@@ -975,3 +780,37 @@ pub const MinimalEvm = struct {
         }
     }
 };
+
+test "MinimalEvm: unbounded recursion on a 2 MiB thread fails the call instead of overflowing the stack" {
+    const Job = struct {
+        success: bool = false,
+        failure: ?anyerror = null,
+
+        fn run(job: *@This()) void {
+            job.execute() catch |err| {
+                job.failure = err;
+            };
+        }
+
+        fn execute(job: *@This()) !void {
+            var evm = try MinimalEvm.init(std.testing.allocator);
+            defer evm.deinit();
+            // PUSH1 0 x5, ADDRESS, GAS, CALL, STOP: the contract calls itself until gas
+            // or the call depth runs out.
+            const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x30, 0x5a, 0xf1, 0x00 };
+            var contract = Address{ .bytes = @splat(0) };
+            contract.bytes[19] = 0xc3;
+            var caller = Address{ .bytes = @splat(0) };
+            caller.bytes[19] = 0xa1;
+            try evm.setCode(contract, &code);
+            const result = try evm.execute(&code, 16_000_000, caller, contract, 0, &.{});
+            job.success = result.success;
+        }
+    };
+    var job = Job{};
+    const thread = try std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, Job.run, .{&job});
+    thread.join();
+    if (job.failure) |err| return err;
+    // The outermost frame completes: a refused nested call only pushes 0.
+    try std.testing.expect(job.success);
+}

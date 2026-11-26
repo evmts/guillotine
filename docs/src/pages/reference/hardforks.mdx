@@ -27,7 +27,7 @@ Declared in `lib/voltaire/src/primitives/hardfork.zig` and re-exported as
 | `HOMESTEAD` | Mar 2016 | `DELEGATECALL` (EIP-7), EIP-2, EIP-8 |
 | `DAO` | Jul 2016 | State-only; no EVM changes |
 | `TANGERINE_WHISTLE` | Oct 2016 | EIP-150 gas repricing for IO-heavy ops |
-| `SPURIOUS_DRAGON` | Nov 2016 | EIP-155/160/161 — replay protection, empty-account removal |
+| `SPURIOUS_DRAGON` | Nov 2016 | EIP-155/160/161: replay protection, empty-account removal |
 | `BYZANTIUM` | Oct 2017 | `REVERT`, `RETURNDATASIZE`, `RETURNDATACOPY`, `STATICCALL`, BN254 precompiles |
 | `CONSTANTINOPLE` | Feb 2019 | `CREATE2`, `SHL`/`SHR`/`SAR`, `EXTCODEHASH`, EIP-1283 |
 | `PETERSBURG` | Feb 2019 | Reverts EIP-1283 (reentrancy risk) |
@@ -45,8 +45,9 @@ Declared in `lib/voltaire/src/primitives/hardfork.zig` and re-exported as
 | `AMSTERDAM` | — | No scheduled EIPs yet; keeps Osaka's set |
 
 **`OSAKA` is the default** (`Hardfork.DEFAULT`). Select a fork from Zig with
-`.eips = .{ .hardfork = ... }`. `build.zig` declares `-Devm-hardfork`, but
-nothing reads it.
+`.eips = .{ .hardfork = ... }`. `-Devm-hardfork` sets the fork of the
+build-configured EVM (`DefaultEvm` in `src/root.zig`) and accepts enum names
+(`CANCUN`) and EEST fork names (`Cancun`).
 
 ## EIP sets
 
@@ -129,14 +130,17 @@ crate in `lib/voltaire`; KZG comes from `c-kzg-4844` and `blst`. That is why a
 build needs Cargo and a C compiler. `EvmConfig.enable_precompiles = false`
 turns the precompile path off.
 
-:::warning[Known weak spot]
-Guillotine does not yet pass the full official EEST state-test suite. Verify
-precompile and gas results against another implementation before trusting them.
-See [Project status](/status) for the current EEST pass rate and failure breakdown.
+:::info[Conformance]
+Guillotine passes 66,652 of 66,652 official EEST state-test cases
+(`tests@v21.0.3`, Frontier through Osaka), with fusion on and off, including
+every precompile fixture. Amsterdam is not supported and its 16,907 cases are
+skipped. Guillotine is still alpha; see [Project status](/status).
 :::
 
 ### Replacing a precompile
 
-`EvmConfig.precompile_overrides` is declared, but nothing outside
-`src/evm_config.zig` reads it, so setting it has no effect. See
+`EvmConfig.precompile_overrides` adds or replaces precompiles. A call to an
+override's address runs its `execute` function before the fork's standard
+precompiles are consulted, and `call` pre-warms every override address
+(`executePrecompileOverride` in `src/evm.zig`). See
 [Configuring the EVM](/guides/configuration#overriding-an-opcode-or-a-precompile).

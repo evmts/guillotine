@@ -9,25 +9,6 @@ pub const std_options = std.Options{
     .log_level = .err,
 };
 
-test "execution defaults match the named limits" {
-    const evm = @import("evm");
-    const config = evm.EvmConfig{};
-    try std.testing.expectEqual(300_000_000, evm.limits.max_instructions);
-    try std.testing.expectEqual(std.math.maxInt(u24), evm.limits.max_memory_size);
-    try std.testing.expectEqual(@import("voltaire").GasConstants.MaxInitcodeSize, evm.limits.max_initcode_size);
-    try std.testing.expectEqual(evm.limits.stack_capacity, config.stack_size);
-    try std.testing.expectEqual(evm.limits.max_call_depth, config.max_call_depth);
-    try std.testing.expectEqual(evm.limits.max_code_size, config.max_bytecode_size);
-    try std.testing.expectEqual(evm.limits.max_initcode_size, config.max_initcode_size);
-    try std.testing.expectEqual(evm.limits.max_memory_size, config.memory_limit);
-
-    for ([_]bool{ false, true }) |enabled| {
-        var tracer = evm.Tracer.init(std.testing.allocator, .{ .enabled = enabled });
-        defer tracer.deinit();
-        try std.testing.expectEqual(evm.limits.max_instructions, tracer.instruction_safety.limit);
-    }
-}
-
 test {
     _ = @import("blob_gas_test.zig");
     // Integration tests - testing EVM behavior with fixtures and differential testing

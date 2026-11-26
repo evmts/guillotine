@@ -12,8 +12,8 @@ pub inline fn nextInstruction(
     self: *FrameType,
     cursor: [*]const FrameType.Dispatch.Item,
     comptime opcode: FrameType.Dispatch.UnifiedOpcode,
-) FrameType.Error!noreturn {
+) FrameType.Error![*]const FrameType.Dispatch.Item {
     const op_data = dispatch_opcode_data.getOpData(opcode, FrameType.Dispatch, FrameType.Dispatch.Item, cursor);
     self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+    return op_data.next_cursor.cursor;
 }

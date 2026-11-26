@@ -27,7 +27,7 @@ test "self-transfer should not change balance" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -39,13 +39,13 @@ test "self-transfer should not change balance" {
     };
     
     // Create caller account with balance  
-    const caller_address = Address{ .bytes = [_]u8{0x12, 0x34, 0x56, 0x78, 0x90} ++ [_]u8{0} ** 15 };
+    const caller_address = Address{ .bytes = [_]u8{0x12, 0x34, 0x56, 0x78, 0x90} ++ @as([15]u8, @splat(0)) };
     const initial_balance: u256 = 1_000_000_000;
     const caller_account = Account{
         .balance = initial_balance,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try database.set_account(caller_address.bytes, caller_account);
     
@@ -104,7 +104,7 @@ test "normal transfer between different accounts works correctly" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -116,8 +116,8 @@ test "normal transfer between different accounts works correctly" {
     };
     
     // Create caller and target accounts
-    const caller_address = Address{ .bytes = [_]u8{0x12, 0x34, 0x56, 0x78, 0x90} ++ [_]u8{0} ** 15 };
-    const target_address = Address{ .bytes = [_]u8{0x98, 0x76, 0x54, 0x32, 0x10} ++ [_]u8{0} ** 15 };
+    const caller_address = Address{ .bytes = [_]u8{0x12, 0x34, 0x56, 0x78, 0x90} ++ @as([15]u8, @splat(0)) };
+    const target_address = Address{ .bytes = [_]u8{0x98, 0x76, 0x54, 0x32, 0x10} ++ @as([15]u8, @splat(0)) };
     
     const initial_caller_balance: u256 = 1_000_000_000;
     const initial_target_balance: u256 = 500_000_000;
@@ -126,15 +126,15 @@ test "normal transfer between different accounts works correctly" {
     const caller_account = Account{
         .balance = initial_caller_balance,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     const target_account = Account{
         .balance = initial_target_balance,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     try database.set_account(caller_address.bytes, caller_account);

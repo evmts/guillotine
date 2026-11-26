@@ -7,85 +7,70 @@ const kzg_trusted_setup = crypto.kzg_trusted_setup;
 /// Embedded trusted setup data
 const trusted_setup_data = kzg_trusted_setup.data;
 
-/// Global initialization state
+/// Set once the trusted setup is loaded. Read without the lock only by the
+/// `init` fast path and `isInitialized`.
 var initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
-var init_mutex = std.Thread.Mutex{};
 
-/// Global mutex for KZG proof verification
-/// The C-KZG library is not thread-safe for concurrent verification operations,
-/// so we serialize all verify calls to ensure correctness
-var verify_mutex = std.Thread.Mutex{};
+/// Guards the trusted setup. Loading and freeing take it exclusively;
+/// verification takes it shared. c-kzg only reads `KZGSettings` while
+/// verifying, so concurrent verifications run in parallel, and `deinit`
+/// waits for every in-flight verification before it frees the setup.
+var setup_lock: std.Io.RwLock = .init;
 
-/// Initialize the KZG trusted setup from embedded data
-/// This should be called once during application startup
-/// Thread-safe for concurrent calls
+/// The lock only needs futex wait and wake, which the global instance
+/// provides across OS threads.
+fn lockIo() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
+/// Load `text` under the exclusive lock unless the setup is already loaded.
+fn load(text: []const u8) !void {
+    if (initialized.load(.acquire)) return;
+    setup_lock.lockUncancelable(lockIo());
+    defer setup_lock.unlock(lockIo());
+    if (initialized.load(.acquire)) return;
+
+    c_kzg.loadTrustedSetupFromText(text, 0) catch |err| switch (err) {
+        // Loaded directly through c_kzg; adopt it.
+        error.TrustedSetupAlreadyLoaded => {},
+        else => return error.TrustedSetupLoadFailed,
+    };
+    initialized.store(true, .release);
+}
+
+/// Initialize the KZG trusted setup from embedded data.
+/// Idempotent and safe to call from several threads.
 pub fn init() !void {
-    // Fast path: check if already initialized without locking
-    if (initialized.load(.acquire)) return;
-
-    // Slow path: acquire lock and initialize
-    init_mutex.lock();
-    defer init_mutex.unlock();
-
-    // Double-check after acquiring lock
-    if (initialized.load(.acquire)) return;
-
-    // Load the trusted setup using the embedded data
-    const precompute: u64 = 0;
-    c_kzg.loadTrustedSetupFromText(trusted_setup_data, precompute) catch |err| {
-        // TrustedSetupAlreadyLoaded means it's already initialized, which is fine
-        if (err != error.TrustedSetupAlreadyLoaded) {
-            return error.TrustedSetupLoadFailed;
-        }
-    };
-
-    initialized.store(true, .release);
+    try load(trusted_setup_data);
 }
 
-/// Initialize the KZG trusted setup from a file (kept for compatibility)
-/// This should be called once during application startup
-/// Thread-safe for concurrent calls
+/// Initialize the KZG trusted setup from a file.
+/// Idempotent and safe to call from several threads.
 pub fn initFromFile(_allocator: std.mem.Allocator, trusted_setup_path: []const u8) !void {
-    // Fast path: check if already initialized without locking
-    if (initialized.load(.acquire)) return;
     _ = _allocator;
-
-    // Slow path: acquire lock and initialize
-    init_mutex.lock();
-    defer init_mutex.unlock();
-
-    // Double-check after acquiring lock
+    if (initialized.load(.acquire)) return;
+    setup_lock.lockUncancelable(lockIo());
+    defer setup_lock.unlock(lockIo());
     if (initialized.load(.acquire)) return;
 
-    // Load the trusted setup using the Zig binding API
-    const precompute: u64 = 0;
-    c_kzg.loadTrustedSetupFile(trusted_setup_path, precompute) catch |err| {
-        // TrustedSetupAlreadyLoaded means it's already initialized, which is fine
-        if (err != error.TrustedSetupAlreadyLoaded) {
-            return error.TrustedSetupLoadFailed;
-        }
+    c_kzg.loadTrustedSetupFile(trusted_setup_path, 0) catch |err| switch (err) {
+        error.TrustedSetupAlreadyLoaded => {},
+        else => return error.TrustedSetupLoadFailed,
     };
-
     initialized.store(true, .release);
 }
 
-/// Deinitialize the KZG trusted setup
+/// Free the KZG trusted setup. Waits for in-flight verifications.
 pub fn deinit(allocator: std.mem.Allocator) void {
-    init_mutex.lock();
-    defer init_mutex.unlock();
-
+    _ = allocator;
+    setup_lock.lockUncancelable(lockIo());
+    defer setup_lock.unlock(lockIo());
     if (!initialized.load(.acquire)) return;
 
-    _ = allocator; // allocator unused
-    // Free via Zig binding; only ignore TrustedSetupNotLoaded error
-    c_kzg.freeTrustedSetup() catch |err| {
-        // Only acceptable error is TrustedSetupNotLoaded (already freed or never loaded)
-        // Any other error should be reported
-        if (err != error.TrustedSetupNotLoaded) {
-            @panic("Unexpected error during KZG trusted setup cleanup");
-        }
+    c_kzg.freeTrustedSetup() catch |err| switch (err) {
+        // Freed directly through c_kzg; the state below is still correct.
+        error.TrustedSetupNotLoaded => {},
     };
-
     initialized.store(false, .release);
 }
 
@@ -94,16 +79,17 @@ pub fn isInitialized() bool {
     return initialized.load(.acquire);
 }
 
-/// Thread-safe wrapper for KZG proof verification
-/// Serializes all verification calls to ensure thread safety
+/// Verify a KZG proof. Holds the shared lock, so verifications run
+/// concurrently and never overlap `deinit`. Returns
+/// `error.TrustedSetupNotLoaded` when no setup is loaded.
 pub fn verifyKZGProofThreadSafe(
     commitment: *const c_kzg.KZGCommitment,
     z: *const c_kzg.Bytes32,
     y: *const c_kzg.Bytes32,
     proof: *const c_kzg.KZGProof,
 ) !bool {
-    verify_mutex.lock();
-    defer verify_mutex.unlock();
+    setup_lock.lockSharedUncancelable(lockIo());
+    defer setup_lock.unlockShared(lockIo());
     return try c_kzg.verifyKZGProof(commitment, z, y, proof);
 }
 
@@ -172,9 +158,9 @@ test "KZG setup - deinitialization without initialization" {
     const testing = std.testing;
 
     // Force deinitialization state (this is a bit hacky but necessary for isolated testing)
-    init_mutex.lock();
+    setup_lock.lockUncancelable(lockIo());
     initialized.store(false, .release);
-    init_mutex.unlock();
+    setup_lock.unlock(lockIo());
 
     // Should not crash or error
     deinit(testing.allocator);
@@ -325,4 +311,70 @@ test "KZG setup - initialization state transitions" {
 
     deinit(testing.allocator);
     try testing.expect(!isInitialized()); // Should be uninitialized after deinit
+}
+
+test "KZG file loader rejects tampered trusted setup" {
+    var directory = std.testing.tmpDir(.{});
+    defer directory.cleanup();
+    const bytes = try std.testing.allocator.dupe(u8, trusted_setup_data);
+    defer std.testing.allocator.free(bytes);
+    bytes[100] ^= 1;
+    try directory.dir.writeFile(std.testing.io, .{ .sub_path = "trusted_setup.txt", .data = bytes });
+    const path = try directory.dir.realPathFileAlloc(std.testing.io, "trusted_setup.txt", std.testing.allocator);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectError(error.IntegrityCheckFailed, c_kzg.loadTrustedSetupFile(path, 0));
+}
+
+test "KZG setup - verification runs concurrently with deinit and init" {
+    // EIP-4844 verify_kzg_proof_case_correct_proof_0_0: commitment and proof at infinity.
+    var commitment: c_kzg.KZGCommitment = @splat(0);
+    commitment[0] = 0xc0;
+    var proof: c_kzg.KZGProof = @splat(0);
+    proof[0] = 0xc0;
+    const zero: c_kzg.Bytes32 = @splat(0);
+
+    try init();
+    try std.testing.expect(try verifyKZGProofThreadSafe(&commitment, &zero, &zero, &proof));
+
+    const Worker = struct {
+        commitment: *const c_kzg.KZGCommitment,
+        proof: *const c_kzg.KZGProof,
+        zero: *const c_kzg.Bytes32,
+        verified: usize = 0,
+        not_loaded: usize = 0,
+        failed: bool = false,
+
+        fn run(self: *@This()) void {
+            for (0..64) |_| {
+                if (verifyKZGProofThreadSafe(self.commitment, self.zero, self.zero, self.proof)) |valid| {
+                    if (!valid) self.failed = true;
+                    self.verified += 1;
+                } else |err| switch (err) {
+                    error.TrustedSetupNotLoaded => self.not_loaded += 1,
+                    else => self.failed = true,
+                }
+            }
+        }
+    };
+
+    var workers: [4]Worker = undefined;
+    var threads: [4]std.Thread = undefined;
+    for (&workers, &threads) |*worker, *thread| {
+        worker.* = .{ .commitment = &commitment, .proof = &proof, .zero = &zero };
+        thread.* = try std.Thread.spawn(.{}, Worker.run, .{worker});
+    }
+    for (0..8) |_| {
+        deinit(std.testing.allocator);
+        try init();
+    }
+    for (threads) |thread| thread.join();
+
+    // Every call either saw a loaded setup and verified, or saw none and said so.
+    for (workers) |worker| {
+        try std.testing.expect(!worker.failed);
+        try std.testing.expectEqual(@as(usize, 64), worker.verified + worker.not_loaded);
+    }
+    try std.testing.expect(isInitialized());
+    deinit(std.testing.allocator);
+    try std.testing.expectError(error.TrustedSetupNotLoaded, verifyKZGProofThreadSafe(&commitment, &zero, &zero, &proof));
 }

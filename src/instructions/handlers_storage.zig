@@ -5,6 +5,7 @@ const GasConstants = @import("voltaire").GasConstants;
 const Address = @import("voltaire").Address.Address;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
+const fork_gas = @import("../frame/fork_gas.zig");
 
 /// Storage operation handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -17,7 +18,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// SLOAD opcode (0x54) - Load from storage.
         /// Loads value from storage slot and pushes it onto the stack.
-        pub fn sload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn sload(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.SLOAD, cursor);
             self.validateOpcodeHandler(.SLOAD, cursor);
             // SLOAD loads a value from storage
@@ -37,9 +38,13 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge gas for storage access
             // Use negative gas pattern for single-branch out-of-gas detection
-            // The warm cost (100) is SLOAD's static gas, charged with the basic block;
-            // only the EIP-2929 cold surcharge (2100 - 100) is charged here.
-            const surcharge = access_cost -| OPCODE_INFO[@intFromEnum(Opcode.SLOAD)].gas_cost;
+            // SLOAD's flat price (the warm cost from Berlin on) is static gas, charged with
+            // the basic block. Only the EIP-2929 cold surcharge (2100 - 100) is charged
+            // here, and only on forks that have access lists.
+            const surcharge: u64 = if (comptime fork_gas.hasAccessLists(FrameType.config.hardfork))
+                access_cost -| OPCODE_INFO[@intFromEnum(Opcode.SLOAD)].gas_cost
+            else
+                0;
             self.gas_remaining -= @intCast(surcharge);
             if (self.gas_remaining < 0) {
                 self.afterComplete(.SLOAD);
@@ -61,10 +66,12 @@ pub fn Handlers(FrameType: type) type {
 
         /// SSTORE opcode (0x55) - Store to storage.
         /// Stores value to storage slot. Subject to gas refunds and write protection checks.
-        /// EIP-214: halts with WriteProtection in a static context.
-        pub fn sstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        /// EIP-214: Static calls use database that throws WriteProtection errors
+        pub fn sstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.SSTORE, cursor);
             // SSTORE stores a value to storage
+
+            // EIP-214: WriteProtection is handled by database interface for static calls
 
             // SSTORE expects stack: [..., key, value] where key is at top
             // The bytecode PUSH1 0x42, PUSH1 0x00, SSTORE means:
@@ -75,19 +82,18 @@ pub fn Handlers(FrameType: type) type {
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
             const value = self.stack.pop_unsafe(); // Pop value second
 
-            // EIP-2200: SSTORE must fail with OutOfGas when remaining gas <= the sentry
-            // stipend (2300). Checked after popping operands but before warming the slot or
-            // computing dynamic cost, matching execution-specs (storage.py: sstore).
-            if (self.gas_remaining <= @as(FrameType.GasType, @intCast(GasConstants.SstoreSentryGas))) {
-                self.afterComplete(.SSTORE);
-                return Error.OutOfGas;
-            }
+            const hardfork = comptime FrameType.config.hardfork;
 
-            // EIP-214: SSTORE in a static context halts exceptionally. The frame writes
-            // through the raw database, so the static check must happen here.
-            if (self.getEvm().is_static_context()) {
-                self.afterComplete(.SSTORE);
-                return Error.WriteProtection;
+            // EIP-2200 (Istanbul+): SSTORE must fail with OutOfGas when remaining gas <= the
+            // sentry stipend (2300). Checked after popping operands but before warming the
+            // slot or computing dynamic cost, matching execution-specs (storage.py: sstore).
+            // Earlier forks have no sentry. SSTORE ends its basic block and has no static
+            // gas, so `gas_remaining` here is exactly the gas left before this SSTORE.
+            if (comptime fork_gas.sstoreHasSentry(hardfork)) {
+                if (self.gas_remaining <= @as(FrameType.GasType, @intCast(fork_gas.sstore_sentry_gas))) {
+                    self.afterComplete(.SSTORE);
+                    return Error.OutOfGas;
+                }
             }
 
             // Use the currently executing contract's address
@@ -119,45 +125,26 @@ pub fn Handlers(FrameType: type) type {
             const original_opt = evm.get_original_storage(contract_addr, slot);
             const original_value: WordType = original_opt orelse current_value;
 
-            // Calculate SSTORE operation cost (EIP-2200 + EIP-2929: Berlin+ reduces
-            // SSTORE_RESET_GAS from 5000 to 2900 because cold access adds 2100 separately).
-            const base_gas_cost: u64 = if (evm.is_hardfork_at_least(.ISTANBUL)) blk: {
-                const warm_cost: u64 = if (evm.is_hardfork_at_least(.BERLIN))
-                    GasConstants.WarmStorageReadCost // 100
-                else
-                    800; // EIP-2200 Istanbul SLOAD_GAS
-                if (current_value == value) {
-                    break :blk warm_cost;
-                } else if (original_value == current_value) {
-                    if (original_value == 0) {
-                        break :blk GasConstants.SstoreSetGas; // 20000
-                    } else if (evm.is_hardfork_at_least(.BERLIN)) {
-                        break :blk GasConstants.SstoreResetGas - GasConstants.ColdSloadCost; // 2900
-                    } else {
-                        break :blk GasConstants.SstoreResetGas; // 5000
-                    }
-                } else {
-                    break :blk warm_cost;
-                }
-            } else blk: {
-                // Pre-Istanbul (Frontier..Petersburg)
-                break :blk if (current_value == 0 and value != 0)
-                    GasConstants.SstoreSetGas
-                else
-                    GasConstants.SstoreResetGas;
-            };
-            const total_gas_cost: u64 = base_gas_cost + (if (is_cold and evm.is_hardfork_at_least(.BERLIN)) GasConstants.ColdSloadCost else 0);
+            // SSTORE gas and refund for this fork (includes the EIP-2929 cold surcharge).
+            const cost = fork_gas.sstoreCost(hardfork, original_value, current_value, value, is_cold);
 
             log.debug(
-                "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, total={}",
-                .{ slot, original_value, current_value, value, is_cold, total_gas_cost },
+                "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, gas={}, refund={}",
+                .{ slot, original_value, current_value, value, is_cold, cost.gas, cost.refund },
             );
 
             // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(total_gas_cost);
+            self.gas_remaining -= @intCast(cost.gas);
             if (self.gas_remaining < 0) {
                 self.afterComplete(.SSTORE);
                 return Error.OutOfGas;
+            }
+
+            // EIP-214: a state write in a static context is an exceptional halt. The
+            // database does not know the call context, so the check lives here.
+            if (evm.is_static_context()) {
+                self.afterComplete(.SSTORE);
+                return Error.WriteProtection;
             }
 
             // Record original value for journal on first write in this transaction
@@ -182,34 +169,17 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // SSTORE gas refunds. London+ (EIP-2200 + EIP-3529) uses the full original/current/
-            // new logic; pre-London keeps the simpler clear-only refund to avoid disturbing the
-            // (differently-constanted) Istanbul/Berlin behavior.
-            if (evm.is_hardfork_at_least(.LONDON)) {
-                if (current_value != value) {
-                    if (original_value != 0 and current_value != 0 and value == 0) {
-                        // Storage cleared for the first time this tx.
-                        evm.add_gas_refund(GasConstants.SstoreRefundGas); // +4800
-                    }
-                    if (original_value != 0 and current_value == 0) {
-                        // Reverse a clear refund issued earlier this tx (counter holds it).
-                        evm.gas_refund_counter -|= GasConstants.SstoreRefundGas;
-                    }
-                    if (original_value == value) {
-                        if (original_value == 0) {
-                            // Slot was SET from empty earlier this tx, now restored to empty.
-                            evm.add_gas_refund(GasConstants.SstoreSetGas - GasConstants.WarmStorageReadCost); // +19900
-                        } else {
-                            // Slot was UPDATED earlier this tx, now restored to its original value.
-                            evm.add_gas_refund(GasConstants.SstoreResetGas - GasConstants.ColdSloadCost - GasConstants.WarmStorageReadCost); // +2800
-                        }
-                    }
+            // Refund counter update. A negative value takes back a refund granted earlier
+            // in this transaction for the same slot, so the counter already holds it.
+            if (cost.refund > 0) {
+                evm.add_gas_refund(@intCast(cost.refund));
+            } else if (cost.refund < 0) {
+                const taken_back: u64 = @intCast(-cost.refund);
+                if (taken_back > evm.gas_refund_counter) {
+                    self.afterComplete(.SSTORE);
+                    return Error.GasOverflow;
                 }
-            } else {
-                // Pre-London: clearing (non-zero -> zero) is eligible for refund.
-                if (current_value != 0 and value == 0) {
-                    evm.add_gas_refund(GasConstants.SstoreRefundGas);
-                }
+                evm.gas_refund_counter -= taken_back;
             }
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .SSTORE);
@@ -217,7 +187,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// TLOAD opcode (0x5c) - Load from transient storage (EIP-1153).
         /// Loads value from transient storage slot and pushes it onto the stack.
-        pub fn tload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn tload(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.TLOAD, cursor);
             self.validateOpcodeHandler(.TLOAD, cursor);
             const slot = self.stack.peek_unsafe();
@@ -241,8 +211,10 @@ pub fn Handlers(FrameType: type) type {
 
         /// TSTORE opcode (0x5d) - Store to transient storage (EIP-1153).
         /// Stores value to transient storage slot (cleared after transaction).
-        pub fn tstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn tstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.TSTORE, cursor);
+
+            // EIP-214: WriteProtection is handled by host interface for static calls
 
             // TSTORE expects stack: [..., key, value] where key is at top
             self.validateOpcodeHandler(.TSTORE, cursor);
@@ -254,7 +226,7 @@ pub fn Handlers(FrameType: type) type {
 
             // TSTORE's fixed 100 gas (EIP-1153) is static and charged with the basic block.
 
-            // EIP-214: TSTORE in a static context halts exceptionally (EIP-1153).
+            // EIP-1153: TSTORE in a static context is an exceptional halt.
             if (self.getEvm().is_static_context()) {
                 self.afterComplete(.TSTORE);
                 return Error.WriteProtection;
@@ -441,7 +413,7 @@ test "SLOAD opcode - load existing value" {
     defer evm.deinit();
 
     // Pre-store a value
-    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    const contract_addr = Address{ .bytes = @splat(0) };
     try evm.set_storage(contract_addr, 42, 0xDEADBEEF);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -500,7 +472,7 @@ test "TLOAD opcode - transient storage load" {
     defer evm.deinit();
 
     // Pre-store a transient value
-    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    const contract_addr = Address{ .bytes = @splat(0) };
     try evm.set_transient_storage(contract_addr, 5, 0xABCD);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -877,8 +849,8 @@ test "storage operations - different addresses" {
     defer evm.deinit();
 
     // Create two frames with different contract addresses
-    const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
-    const addr2 = Address{ .bytes = [_]u8{2} ** 20 };
+    const addr1 = Address{ .bytes = @as([20]u8, @splat(1)) };
+    const addr2 = Address{ .bytes = @as([20]u8, @splat(2)) };
 
     var frame1 = try createTestFrame(testing.allocator, &evm);
     defer frame1.deinit(testing.allocator);
@@ -1252,8 +1224,8 @@ test "EIP-1153 - different contracts have isolated transient storage" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
-    const addr2 = Address{ .bytes = [_]u8{2} ** 20 };
+    const addr1 = Address{ .bytes = @as([20]u8, @splat(1)) };
+    const addr2 = Address{ .bytes = @as([20]u8, @splat(2)) };
 
     var frame1 = try createTestFrame(testing.allocator, &evm);
     defer frame1.deinit(testing.allocator);
@@ -1313,7 +1285,7 @@ test "EIP-1153 - TLOAD works in static call" {
     defer evm.deinit();
 
     // Pre-populate transient storage (would happen before static call)
-    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    const contract_addr = Address{ .bytes = @splat(0) };
     try evm.set_transient_storage(contract_addr, 5, 123);
 
     var frame = try createTestFrame(testing.allocator, &evm);

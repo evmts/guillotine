@@ -19,28 +19,28 @@ fn benchSha256Small(allocator: std.mem.Allocator) void {
 
 // Benchmark: SHA256 - single word (32 bytes)
 fn benchSha256SingleWord(allocator: std.mem.Allocator) void {
-    const input = [_]u8{0xab} ** 32;
+    const input = @as([32]u8, @splat(0xab));
     const result = sha256.execute(allocator, &input, 1_000_000) catch unreachable;
     defer result.deinit(allocator);
 }
 
 // Benchmark: SHA256 - two words (64 bytes)
 fn benchSha256TwoWords(allocator: std.mem.Allocator) void {
-    const input = [_]u8{0xab} ** 64;
+    const input = @as([64]u8, @splat(0xab));
     const result = sha256.execute(allocator, &input, 1_000_000) catch unreachable;
     defer result.deinit(allocator);
 }
 
 // Benchmark: SHA256 - large input (1KB)
 fn benchSha256Large(allocator: std.mem.Allocator) void {
-    const input = [_]u8{0xab} ** 1024;
+    const input = @as([1024]u8, @splat(0xab));
     const result = sha256.execute(allocator, &input, 100_000_000) catch unreachable;
     defer result.deinit(allocator);
 }
 
 // Benchmark: SHA256 - very large input (64KB)
 fn benchSha256VeryLarge(allocator: std.mem.Allocator) void {
-    const input = [_]u8{0xab} ** 65536;
+    const input = @as([65536]u8, @splat(0xab));
     const result = sha256.execute(allocator, &input, 10_000_000_000) catch unreachable;
     defer result.deinit(allocator);
 }

@@ -119,9 +119,9 @@ test "JitCache compiles at the hot threshold and evicts LRU" {
     const stop = [_]u8{0x00};
     const add = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x00 };
     const sload = [_]u8{ 0x60, 0x00, 0x54, 0x00 };
-    const h1 = [_]u8{1} ** 32;
-    const h2 = [_]u8{2} ** 32;
-    const h3 = [_]u8{3} ** 32;
+    const h1 = @as([32]u8, @splat(1));
+    const h2 = @as([32]u8, @splat(2));
+    const h3 = @as([32]u8, @splat(3));
 
     try std.testing.expect((try cache.lookup(&h1, &stop)) == null);
     try std.testing.expect((try cache.lookup(&h1, &stop)) != null);
@@ -147,7 +147,7 @@ test "a hash hit cannot execute native code compiled for different bytes" {
     if (comptime !compiler.native_supported) return error.SkipZigTest;
     var cache = try JitCache.init(std.testing.allocator, .{});
     defer cache.deinit();
-    const hash = [_]u8{3} ** 32;
+    const hash = @as([32]u8, @splat(3));
     try std.testing.expectEqual(null, try cache.lookup(&hash, &.{0x00}));
     try std.testing.expect((try cache.lookup(&hash, &.{0x00})) != null);
     try std.testing.expect((try cache.lookup(&hash, &.{0xfe})) == null);

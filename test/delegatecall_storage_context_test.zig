@@ -31,7 +31,7 @@ test "DELEGATECALL should store in caller's context, not delegate's context" {
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = evm.TransactionContext{
@@ -44,8 +44,8 @@ test "DELEGATECALL should store in caller's context, not delegate's context" {
     defer vm.deinit();
     
     // Create two addresses: caller and delegate
-    const caller_addr = primitives.Address{ .bytes = [_]u8{0x01} ** 20 };
-    const delegate_addr = primitives.Address{ .bytes = [_]u8{0x02} ** 20 };
+    const caller_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x01)) };
+    const delegate_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x02)) };
     
     // Set up initial state
     // Caller has initial storage value 0xAA at slot 0
@@ -53,16 +53,16 @@ test "DELEGATECALL should store in caller's context, not delegate's context" {
     try db.set_account(caller_addr.bytes, evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Delegate has no initial storage (should remain 0)
     try db.set_account(delegate_addr.bytes, evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Delegate's code: PUSH1 0xCC PUSH1 0x00 SSTORE
@@ -75,7 +75,7 @@ test "DELEGATECALL should store in caller's context, not delegate's context" {
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Execute DELEGATECALL from caller to delegate

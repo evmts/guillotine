@@ -126,7 +126,8 @@ pub fn isOpPrecompile(address: Address, spec: OpSpecId) bool {
 /// - success: `output` is allocated by the allocator passed in; the caller frees it.
 /// - precompile failure (out of gas, input limit, invalid input/point/pairing):
 ///   `success = false`, `gas_used = gas_limit`, empty output.
-/// - `error.OutOfMemory` propagates.
+/// - any other error (OutOfMemory, an unavailable or internally failing
+///   implementation) propagates instead of being reported as a halt.
 pub fn overrides(comptime Override: type, comptime spec: OpSpecId) []const Override {
     const table = comptime blk: {
         const list = entries(spec);
@@ -149,20 +150,18 @@ fn adapt(comptime Override: type, comptime raw: RawFn) fn (std.mem.Allocator, []
     const Output = OutputOf(Override);
     return struct {
         fn run(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!Output {
+            // op-revm: an input/point/signature/gas failure is a precompile halt that
+            // consumes all gas. Anything else (allocation failure, an unavailable or
+            // internally failing implementation) is not a consensus outcome and
+            // propagates, like op-revm `PrecompileError::Fatal`.
             const result = raw(allocator, input, gas_limit) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
                 error.InvalidInput,
                 error.InvalidSignature,
                 error.InvalidPoint,
                 error.InvalidPairing,
                 error.OutOfGas,
-                error.NotImplemented,
-                error.ExecutionError,
-                error.StateError,
-                error.MemoryError,
-                error.InvalidOutputSize,
-                error.Unknown,
                 => return Output{ .output = &.{}, .gas_used = gas_limit, .success = false },
+                else => |fatal| return fatal,
             };
             return Output{ .output = result.output, .gas_used = result.gas_used, .success = true };
         }
@@ -188,7 +187,7 @@ const TestOverride = struct {
 
 fn hexToBytes(comptime hex: []const u8) [hex.len / 2]u8 {
     var out: [hex.len / 2]u8 = undefined;
-    _ = std.fmt.hexToBytes(&out, hex) catch unreachable;
+    _ = std.fmt.hexToBytes(&out, hex) catch |err| @compileError(@errorName(err));
     return out;
 }
 
@@ -242,7 +241,7 @@ test "p256Verify matches all go-ethereum / Wycheproof vectors at RIP-7212 gas" {
         try testing.expectEqual(P256_VERIFY_GAS, result.gas_used);
         if (expected[0] == '1') {
             try testing.expectEqual(@as(usize, 32), result.output.len);
-            try testing.expectEqualSlices(u8, &([_]u8{0} ** 31 ++ [_]u8{1}), result.output);
+            try testing.expectEqualSlices(u8, &(@as([31]u8, @splat(0)) ++ [_]u8{1}), result.output);
             valid += 1;
         } else {
             try testing.expectEqual(@as(usize, 0), result.output.len);
@@ -326,6 +325,21 @@ test "overrides adapter: invalid P256 signature succeeds with empty output" {
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 0), result.output.len);
     try testing.expectEqual(@as(u64, 3450), result.gas_used);
+}
+
+fn unknownFailurePrecompile(_: std.mem.Allocator, _: []const u8, _: u64) PrecompileError!PrecompileResult {
+    return error.Unknown;
+}
+
+fn failingPrecompile(_: std.mem.Allocator, _: []const u8, _: u64) PrecompileError!PrecompileResult {
+    return error.ExecutionError;
+}
+
+test "overrides adapter propagates non-consensus precompile errors instead of halting" {
+    const unknown = adapt(TestOverride, unknownFailurePrecompile);
+    try testing.expectError(error.Unknown, unknown(testing.allocator, &.{}, 1_000));
+    const failing = adapt(TestOverride, failingPrecompile);
+    try testing.expectError(error.ExecutionError, failing(testing.allocator, &.{}, 1_000));
 }
 
 test "overrides pre-Fjord is empty" {

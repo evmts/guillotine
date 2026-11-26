@@ -24,7 +24,7 @@ test "SELFDESTRUCT records should be tracked in CallResult" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -59,7 +59,7 @@ test "SELFDESTRUCT records should be tracked in CallResult" {
         .balance = 1000,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Verify the code was stored
@@ -70,8 +70,8 @@ test "SELFDESTRUCT records should be tracked in CallResult" {
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);
@@ -121,7 +121,7 @@ test "SELFDESTRUCT multiple contracts in single call" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -156,8 +156,8 @@ test "SELFDESTRUCT multiple contracts in single call" {
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);
@@ -167,14 +167,14 @@ test "SELFDESTRUCT multiple contracts in single call" {
         .balance = 500,
         .nonce = 0,
         .code_hash = code_hash1,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(contract2_addr.bytes, .{
         .balance = 750,
         .nonce = 0, 
         .code_hash = code_hash2,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Execute first SELFDESTRUCT
@@ -242,7 +242,7 @@ test "EIP-6780: SELFDESTRUCT only destroys contracts created in same transaction
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -254,7 +254,7 @@ test "EIP-6780: SELFDESTRUCT only destroys contracts created in same transaction
     };
 
     // Create EVM instance with CANCUN hardfork (EIP-6780 enabled)
-    var evm_instance = try evm.Evm(.{}).init(
+    var evm_instance = try evm.Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(
         allocator,
         &database,
         block_info,
@@ -274,15 +274,15 @@ test "EIP-6780: SELFDESTRUCT only destroys contracts created in same transaction
         .balance = 1000,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Create caller account with balance
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);

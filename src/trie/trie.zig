@@ -102,7 +102,7 @@ pub const HashValue = union(enum) {
 
 /// Branch node in the trie with up to 16 children (one per nibble)
 pub const BranchNode = struct {
-    children: [16]?HashValue = [_]?HashValue{null} ** 16,
+    children: [16]?HashValue = @as([16]?HashValue, @splat(null)),
     value: ?HashValue = null,
     children_mask: TrieMask = TrieMask.init(),
 
@@ -160,25 +160,15 @@ pub const BranchNode = struct {
         return new_branch;
     }
 
-    pub fn encode(self: *const BranchNode, allocator: Allocator) ![]u8 {
+    pub fn encode(self: BranchNode, allocator: Allocator) ![]u8 {
+        // 17 RLP strings: 16 children, then the value. Each item is encoded once,
+        // by the list encoder; absent entries are the empty string.
         var items: [17][]const u8 = undefined;
-
-        // Each child is its raw payload (or empty slice for absent child);
-        // Rlp.encode(items) RLP-encodes each slice once as a list element.
-        // Borrow from `self` directly so Hash slices stay alive until Rlp.encode returns.
-        for (&self.children, 0..) |*child, idx| {
-            items[idx] = if (child.*) |*value| switch (value.*) {
-                .Raw => |data| data,
-                .Hash => |*hash| hash[0..],
-            } else "";
+        for (&self.children, 0..) |*child, i| {
+            items[i] = if (child.* != null) hash_value_bytes(&child.*.?) else "";
         }
-
-        items[16] = if (self.value) |*value| switch (value.*) {
-            .Raw => |data| data,
-            .Hash => |*hash| hash[0..],
-        } else "";
-
-        return try primitives.Rlp.encode(allocator, &items);
+        items[16] = if (self.value != null) hash_value_bytes(&self.value.?) else "";
+        return try primitives.Rlp.encode(allocator, items[0..]);
     }
 };
 
@@ -201,27 +191,10 @@ pub const ExtensionNode = struct {
     }
 
     pub fn encode(self: ExtensionNode, allocator: Allocator) ![]u8 {
-        var items = std.array_list.AlignedManaged([]u8, null).init(allocator);
-        defer {
-            for (items.items) |item| {
-                allocator.free(item);
-            }
-            items.deinit();
-        }
-
-        // Encode the path
         const encoded_path = try encode_path(allocator, self.nibbles, false);
-        try items.append(encoded_path);
-
-        // Encode the next node
-        const encoded_next = switch (self.next) {
-            .Raw => |data| try primitives.Rlp.encode(allocator, data),
-            .Hash => |hash| try primitives.Rlp.encode(allocator, &hash),
-        };
-        try items.append(encoded_next);
-
-        // Encode as a list
-        return try primitives.Rlp.encode(allocator, items.items);
+        defer allocator.free(encoded_path);
+        const items = [_][]const u8{ encoded_path, hash_value_bytes(&self.next) };
+        return try primitives.Rlp.encode(allocator, items[0..]);
     }
 };
 
@@ -244,27 +217,10 @@ pub const LeafNode = struct {
     }
 
     pub fn encode(self: LeafNode, allocator: Allocator) ![]u8 {
-        var items = std.array_list.AlignedManaged([]u8, null).init(allocator);
-        defer {
-            for (items.items) |item| {
-                allocator.free(item);
-            }
-            items.deinit();
-        }
-
-        // Encode the path
         const encoded_path = try encode_path(allocator, self.nibbles, true);
-        try items.append(encoded_path);
-
-        // Encode the value
-        const encoded_value = switch (self.value) {
-            .Raw => |data| try primitives.Rlp.encode(allocator, data),
-            .Hash => |hash| try primitives.Rlp.encode(allocator, &hash),
-        };
-        try items.append(encoded_value);
-
-        // Encode as a list
-        return try primitives.Rlp.encode(allocator, items.items);
+        defer allocator.free(encoded_path);
+        const items = [_][]const u8{ encoded_path, hash_value_bytes(&self.value) };
+        return try primitives.Rlp.encode(allocator, items[0..]);
     }
 };
 
@@ -284,16 +240,16 @@ pub const TrieNode = union(NodeType) {
         }
     }
 
-    pub fn encode(self: *const TrieNode, allocator: Allocator) ![]u8 {
-        return switch (self.*) {
+    pub fn encode(self: TrieNode, allocator: Allocator) ![]u8 {
+        return switch (self) {
             .Empty => try primitives.Rlp.encode(allocator, ""),
-            .Branch => |*branch| try branch.encode(allocator),
+            .Branch => |branch| try branch.encode(allocator),
             .Extension => |extension| try extension.encode(allocator),
             .Leaf => |leaf| try leaf.encode(allocator),
         };
     }
 
-    pub fn hash(self: *const TrieNode, allocator: Allocator) ![32]u8 {
+    pub fn hash(self: TrieNode, allocator: Allocator) ![32]u8 {
         const encoded = try self.encode(allocator);
         defer allocator.free(encoded);
 
@@ -332,6 +288,14 @@ pub fn nibbles_to_key(allocator: Allocator, nibbles: []const u8) ![]u8 {
     }
 
     return key;
+}
+
+/// The bytes a node stores for `value`: raw data, or the 32-byte hash.
+fn hash_value_bytes(value: *const HashValue) []const u8 {
+    return switch (value.*) {
+        .Raw => |data| data,
+        .Hash => |*hash| hash,
+    };
 }
 
 /// Encodes a path for either leaf or extension nodes
@@ -1387,13 +1351,13 @@ test "BranchNode - all children populated" {
     defer branch.deinit(allocator);
 
     // Populate all 16 children
-    for (0..16) |idx| {
-        const i: u4 = @intCast(idx);
+    var i: usize = 0;
+    while (i < 16) : (i += 1) {
         var buf: [10]u8 = undefined;
-        const data = std.fmt.bufPrint(&buf, "child{d}", .{i}) catch unreachable;
+        const data = try std.fmt.bufPrint(&buf, "child{d}", .{i});
         const data_copy = try allocator.dupe(u8, data);
         branch.children[i] = HashValue{ .Raw = data_copy };
-        branch.children_mask.set(i);
+        branch.children_mask.set(@intCast(i));
     }
 
     const encoded = try branch.encode(allocator);

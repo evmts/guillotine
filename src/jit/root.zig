@@ -334,7 +334,7 @@ pub const helpers = struct {
 
     pub fn calldataload(ctx: *JitContext) callconv(.c) void {
         const offset = ctx.stack_ptr[0];
-        var buf = [_]u8{0} ** 32;
+        var buf = @as([32]u8, @splat(0));
         if (offset < ctx.calldata_len) {
             const start: usize = @intCast(offset);
             const n = @min(32, ctx.calldata_len - start);
@@ -767,7 +767,7 @@ fn expectSame(allocator: std.mem.Allocator, code: []const u8, gas: i64, calldata
 const Asm = struct {
     allocator: std.mem.Allocator,
     bytes: std.ArrayList(u8) = .empty,
-    labels: [16]?u16 = [_]?u16{null} ** 16,
+    labels: [16]?u16 = @as([16]?u16, @splat(null)),
     refs: std.ArrayList(struct { at: usize, label: u8 }) = .empty,
 
     fn deinit(self: *Asm) void {

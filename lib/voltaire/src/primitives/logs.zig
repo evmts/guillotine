@@ -24,7 +24,7 @@ test "Log creation and field access" {
     topics[1] = 0xfedcba9876543210;
 
     const data = "test log data";
-    const zero_addr = [_]u8{0} ** 20;
+    const zero_addr = @as([20]u8, @splat(0));
 
     const log = Log{
         .address = zero_addr,
@@ -40,7 +40,7 @@ test "Log creation and field access" {
 }
 
 test "Log with empty topics and data" {
-    const zero_addr = [_]u8{0} ** 20;
+    const zero_addr = @as([20]u8, @splat(0));
     const log = Log{
         .address = zero_addr,
         .topics = &[_]u256{},

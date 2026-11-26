@@ -59,7 +59,10 @@ pub const MerkleTrie = struct {
         const root = self.builder.root_hash orelse return &[_][]const u8{};
 
         // Get the root node
-        const root_node = self.builder.nodes.get(root) orelse return TrieError.NonExistentNode;
+        const root_hash_str = try bytes_to_hex_string(self.allocator, &root);
+        defer self.allocator.free(root_hash_str);
+
+        const root_node = self.builder.nodes.get(root_hash_str) orelse return TrieError.NonExistentNode;
 
         // Generate the proof by collecting nodes along the path
         _ = try self.collect_proof_nodes(&retainer, root_node, &[_]u8{});
@@ -115,12 +118,15 @@ pub const MerkleTrie = struct {
 
                 // Get the next node
                 switch (extension.next) {
-                    .Raw => |_| {
+                    .Raw => {
                         // Should not happen in a well-formed trie
                         return TrieError.InvalidNode;
                     },
                     .Hash => |hash| {
-                        const next_node = self.builder.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                        defer self.allocator.free(hash_str);
+
+                        const next_node = self.builder.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
                         return try self.collect_proof_nodes(retainer, next_node, new_prefix);
                     },
                 }
@@ -148,12 +154,15 @@ pub const MerkleTrie = struct {
                 new_prefix[path_prefix.len] = next_nibble;
 
                 switch (child) {
-                    .Raw => |_| {
+                    .Raw => {
                         // Direct value, no further recursion
                         return true;
                     },
                     .Hash => |hash| {
-                        const next_node = self.builder.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                        defer self.allocator.free(hash_str);
+
+                        const next_node = self.builder.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
                         return try self.collect_proof_nodes(retainer, next_node, new_prefix);
                     },
                 }
@@ -446,9 +455,12 @@ test "MerkleTrie - proof after updates" {
     const new_valid = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, new_proof, "new_value");
     try testing.expect(new_valid);
 
-    // Old proof should NOT verify against new root
-    const cross_invalid = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, old_proof, "old_value");
-    try testing.expect(!cross_invalid);
+    // Old proof must not verify against the new root: its root node does not hash
+    // to new_root, which ProofNodes.verify reports as InvalidRootHash.
+    try testing.expectError(
+        proof_module.ProofError.InvalidRootHash,
+        trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, old_proof, "old_value"),
+    );
 }
 
 test "MerkleTrie - deep trie proof" {

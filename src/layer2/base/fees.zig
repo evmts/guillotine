@@ -118,7 +118,7 @@ fn jovianInfo() L1BlockInfo {
     return info;
 }
 
-const EIP1559_TX = [_]u8{0x02} ++ [_]u8{0xAB} ** 120;
+const EIP1559_TX = [_]u8{0x02} ++ @as([120]u8, @splat(0xAB));
 
 test "upfront cost equals settlement total plus value for every spec" {
     for (OpSpecId.ALL) |spec| {
@@ -185,8 +185,8 @@ test "settle rejects inconsistent inputs" {
 }
 
 test "Jovian DA footprint on a Base block" {
-    const user = [_]u8{0x02} ++ [_]u8{0x11} ** 10;
-    const deposit = [_]u8{0x7E} ++ [_]u8{0x11} ** 10;
+    const user = [_]u8{0x02} ++ @as([10]u8, @splat(0x11));
+    const deposit = [_]u8{0x7E} ++ @as([10]u8, @splat(0x11));
     const txs = [_][]const u8{ &deposit, &user, &user };
     const footprint = blockDaFootprint(&txs, 400);
     try testing.expectEqual(@as(u64, 2 * 100 * 400), footprint);

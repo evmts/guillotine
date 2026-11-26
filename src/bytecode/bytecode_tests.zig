@@ -49,10 +49,7 @@ test "snailtracer bytecode JUMP to 0x2e0 validation" {
     const allocator = std.testing.allocator;
 
     // Read the snailtracer bytecode
-    const bytecode_file = try std.fs.cwd().openFile("fixtures/snailtracer/bytecode.txt", .{});
-    defer bytecode_file.close();
-
-    const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 1024 * 1024);
+    const bytecode_hex = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/_test_utils/fixtures/snailtracer/bytecode.txt", allocator, .limited(1024 * 1024));
     defer allocator.free(bytecode_hex);
 
     // Count valid hex characters
@@ -230,31 +227,33 @@ test "Bytecode validation - invalid opcode" {
     try std.testing.expectEqual(@as(usize, 3), bytecode.len());
 }
 
-test "Bytecode validation - PUSH extends past end zero-pads per Yellow Paper" {
+test "Bytecode validation - PUSH extends past end" {
     const allocator = std.testing.allocator;
-    // PUSH2 with only 1 byte of data available: pads trailing byte with 0 -> 0x4200
-    const code = [_]u8{ 0x61, 0x42 };
-    var bc = try BytecodeDefault.init(allocator, &code);
-    defer bc.deinit();
-    var iter = bc.createIterator();
-    const op = iter.next().?;
-    try std.testing.expectEqual(@as(u256, 0x4200), op.push.value);
-    try std.testing.expect(iter.next() == null);
+    // PUSH2 but only 1 byte of data available
+    const code = [_]u8{ 0x61, 0x42 }; // PUSH2 with only 1 byte
+    // Valid code: the missing byte reads as zero, so the value is 0x4200.
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try std.testing.expectEqual(@as(u256, 0x4200), bytecode.pushValuePadded(0, 2));
 }
 
-test "Bytecode validation - PUSH32 extends past end zero-pads per Yellow Paper" {
+test "Bytecode validation - PUSH32 extends past end" {
     const allocator = std.testing.allocator;
+    // PUSH32 but not enough data
     var code: [32]u8 = undefined;
     code[0] = 0x7f; // PUSH32
     for (1..32) |i| {
         code[i] = @intCast(i);
     }
-    var bc = try BytecodeDefault.init(allocator, &code); // 32 bytes, missing last immediate byte
-    defer bc.deinit();
-    var iter = bc.createIterator();
-    const op = iter.next().?;
-    try std.testing.expectEqual(@as(u8, 0), @as(u8, @truncate(op.push.value)));
-    try std.testing.expect(iter.next() == null);
+    // Only 32 bytes where 33 are needed: valid, the last byte reads as zero.
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    var expected: u256 = 0;
+    for (1..32) |i| {
+        expected = (expected << 8) | @as(u256, i);
+    }
+    expected <<= 8;
+    try std.testing.expectEqual(expected, bytecode.pushValuePadded(0, 32));
 }
 
 
@@ -1263,7 +1262,7 @@ test "Bytecode malformed metadata - boundary conditions" {
     const allocator = std.testing.allocator;
 
     // Test exactly minimum size but malformed
-    var code_min_size = [_]u8{0} ** 45;
+    var code_min_size = @as([45]u8, @splat(0));
     // Set zero metadata length; still too small to be valid
     code_min_size[43] = 0x00;
     code_min_size[44] = 0x00;
@@ -1711,13 +1710,15 @@ test "Bytecode edge cases - all PUSH opcodes at end" {
             code[i] = @intCast(i);
         }
 
-        // Yellow Paper: truncated PUSH zero-pads missing trailing byte on the right
-        var bc = try BytecodeDefault.init(allocator, code);
-        defer bc.deinit();
-        var iter = bc.createIterator();
-        const op = iter.next().?;
-        try std.testing.expectEqual(@as(u8, 0), @as(u8, @truncate(op.push.value)));
-        try std.testing.expect(iter.next() == null);
+        // One byte short is valid code: the missing byte reads as zero.
+        var bytecode = try BytecodeDefault.init(allocator, code);
+        defer bytecode.deinit();
+        var expected: u256 = 0;
+        for (1..push_num) |i| {
+            expected = (expected << 8) | @as(u256, i);
+        }
+        expected <<= 8;
+        try std.testing.expectEqual(expected, bytecode.pushValuePadded(0, push_num));
     }
 }
 
@@ -1801,7 +1802,7 @@ test "Bytecode edge cases - metadata parsing" {
 
     // Bytecode with Solidity metadata at the end
     // Format: <bytecode> 0xa2 0x64 "ipfs" <34 bytes hash> 0x64 "solc" <3 bytes version> 0x00 0x33
-    var code_with_metadata = std.ArrayList(u8){};
+    var code_with_metadata = std.ArrayList(u8).empty;
     defer code_with_metadata.deinit(allocator);
 
     // Add some regular bytecode

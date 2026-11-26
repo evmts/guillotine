@@ -14,8 +14,8 @@ test "opcode 0x55 differential test" {
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     // Set the bytecode on the contract account
     const code_hash = try database.set_code(bytecode);
@@ -24,15 +24,15 @@ test "opcode 0x55 differential test" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Set up caller as EOA with balance
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32, // Empty code hash for EOA
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)), // Empty code hash for EOA
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -43,7 +43,7 @@ test "opcode 0x55 differential test" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -79,4 +79,19 @@ test "opcode 0x55 differential test" {
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
+}
+
+test "sstore helper regression - fork pricing and signed refunds" {
+    const cases = [_]struct { fork: evm.Hardfork, current: u256, new: u256, original: u256, gas: u64, refund: i64 }{
+        .{ .fork = .PETERSBURG, .current = 0, .new = 0, .original = 0, .gas = 5000, .refund = 0 },
+        .{ .fork = .ISTANBUL, .current = 0, .new = 0, .original = 0, .gas = 800, .refund = 0 },
+        .{ .fork = .BERLIN, .current = 1, .new = 0, .original = 1, .gas = 2900, .refund = 15000 },
+        .{ .fork = .BERLIN, .current = 0, .new = 1, .original = 1, .gas = 100, .refund = -12200 },
+        .{ .fork = .LONDON, .current = 0, .new = 1, .original = 1, .gas = 100, .refund = -2000 },
+    };
+    for (cases) |case| {
+        const cost = (evm.Eips{ .hardfork = case.fork }).sstore_gas_cost(case.current, case.new, case.original, false);
+        try std.testing.expectEqual(case.gas, cost.gas);
+        try std.testing.expectEqual(case.refund, cost.refund);
+    }
 }

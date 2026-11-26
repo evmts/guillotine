@@ -8,8 +8,8 @@ const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("voltaire");
 
-const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
-const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0x00)) };
+const target = primitives.Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
 const sender_balance: u256 = 1_000_000_000;
 const gas_price: u256 = 10;
 const gas_limit: u64 = 30_000;
@@ -17,7 +17,7 @@ const gas_limit: u64 = 30_000;
 /// 100 non-zero bytes = 400 tokens.
 ///   standard calldata: 400 * 4  = 1_600
 ///   floor:             400 * 10 = 4_000
-const calldata = [_]u8{0xff} ** 100;
+const calldata = @as([100]u8, @splat(0xff));
 
 const Outcome = struct { success: bool, gas_used: u64, sender_balance: u256 };
 
@@ -42,7 +42,7 @@ fn run(comptime hardfork: evm.Hardfork, code: []const u8) !Outcome {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = evm.TransactionContext{
         .gas_limit = gas_limit,

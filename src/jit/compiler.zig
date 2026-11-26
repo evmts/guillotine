@@ -87,7 +87,7 @@ pub const Program = struct {
             return .fallback;
         }
         const rc = self.entry(ctx);
-        const exit = std.meta.intToEnum(ExitCode, rc) catch return error.InvalidExitCode;
+        const exit = std.enums.fromInt(ExitCode, rc) orelse return error.InvalidExitCode;
         if (self.replay_exceptional_halts and exit.isExceptional()) {
             ctx.exit_code = @intFromEnum(ExitCode.fallback);
             return .fallback;

@@ -25,12 +25,12 @@ test "LRU cache and HotStorage integration" {
     var hot = cache_storage.HotStorage.init(allocator);
     defer hot.deinit();
     
-    const addr = [_]u8{0x12} ** 20;
+    const addr = @as([20]u8, @splat(0x12));
     const account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0xAB} ** 32,
-        .storage_root = [_]u8{0xCD} ** 32,
+        .code_hash = @as([32]u8, @splat(0xAB)),
+        .storage_root = @as([32]u8, @splat(0xCD)),
     };
     
     try hot.putAccount(addr, account);

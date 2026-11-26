@@ -203,6 +203,8 @@ pub fn addAssign(self: *G1, other: *const G1) void {
 // unity in Fr; both constants live in curve_parameters.G1_SCALAR and are
 // checked by the "G1 GLV constants" test below.
 pub fn glsEndomorphism(self: *const G1) !G1 {
+    // The endomorphism fixes infinity. Without this guard, the affine form of infinity
+    // (x = 0, z = 0) would be rebuilt with z = 1 as the off-curve point (0, y).
     if (self.isInfinity()) return INFINITY;
     const cube_root = FpMont.init(curve_parameters.G1_SCALAR.cube_root);
     const point_aff = try self.toAffine();

@@ -73,6 +73,18 @@ pub const ExecutionDiff = struct {
 };
 
 /// Configuration for DifferentialTestor
+fn isDeploymentBytecode(bytecode: []const u8) bool {
+    const push1_form = [_]u8{ 0x60, 0x00, 0x39, 0x60, 0x00, 0xf3 };
+    const push0_form = [_]u8{ 0x5f, 0x39, 0x5f, 0xf3 };
+    return std.mem.indexOf(u8, bytecode, &push1_form) != null or
+        std.mem.indexOf(u8, bytecode, &push0_form) != null;
+}
+
+/// Balance of the transaction sender in both EVMs.
+const guillotine_caller_balance: u256 = 10_000_000;
+/// Block gas limit in both EVMs.
+const guillotine_block_gas_limit: u64 = 100_000;
+
 pub const DifferentialTestConfig = struct {
     enable_tracing: bool = true,
 };
@@ -124,35 +136,35 @@ pub const DifferentialTestor = struct {
         db_no_trace.* = guillotine_evm.Database.init(allocator);
 
         try db.set_account(caller.bytes, .{
-            .balance = 10_000_000,
+            .balance = guillotine_caller_balance,
             .nonce = 0,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
         try db_no_trace.set_account(caller.bytes, .{
-            .balance = 10_000_000,
+            .balance = guillotine_caller_balance,
             .nonce = 0,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
         const block_info = guillotine_evm.BlockInfo{
             .chain_id = 1,
             .number = 1,
             .timestamp = 0,
-            .gas_limit = 100000,
+            .gas_limit = guillotine_block_gas_limit,
             .coinbase = primitives.Address.ZERO_ADDRESS,
             .difficulty = 0,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };
 
         const tx_context = guillotine_evm.TransactionContext{
             .chain_id = 1,
-            .gas_limit = 100000,
+            .gas_limit = guillotine_block_gas_limit,
             .coinbase = primitives.Address.ZERO_ADDRESS,
             .blob_versioned_hashes = &.{},
             .blob_base_fee = 0,
@@ -240,25 +252,21 @@ pub const DifferentialTestor = struct {
             }
         };
 
-        if (!result.success) {
+        var owned = result;
+        defer owned.deinit(self.allocator);
+
+        if (!owned.success) {
             log.err("Contract deployment failed", .{});
             return error.DeploymentFailed;
         }
 
-        if (result.output.len == 0) {
+        if (owned.output.len == 0) {
             log.err("Contract deployment returned no runtime code", .{});
             return error.NoRuntimeCode;
         }
 
         // Copy the output (runtime code) to return
-        const runtime_code = try self.allocator.alloc(u8, result.output.len);
-        @memcpy(runtime_code, result.output);
-
-        // Clean up call result memory
-        var result_copy = result;
-        result_copy.deinit(self.allocator);
-
-        return runtime_code;
+        return try self.allocator.dupe(u8, owned.output);
     }
 
     pub fn deinit(self: *DifferentialTestor) void {
@@ -299,22 +307,62 @@ pub const DifferentialTestor = struct {
         // Select the appropriate database and EVM instance
         const db = if (enable_tracing) self.guillotine_db else self.guillotine_db_no_trace;
 
+        // Deployment bytecode copies its runtime code to memory 0 and returns it:
+        // `PUSH1 0 CODECOPY PUSH1 0 RETURN` (or the PUSH0 form). Matching the
+        // whole sequence keeps runtime code that merely uses CODECOPY and RETURN
+        // from being mistaken for a constructor.
+        const is_deployment_bytecode = isDeploymentBytecode(bytecode);
+
         const log = std.log.scoped(.differential_testor);
 
-        // Install runtime bytecode directly at `self.contract` for both EVMs.
-        const code_hash = try db.set_code(bytecode);
-        try db.set_account(self.contract.bytes, .{
-            .balance = 0,
-            .nonce = 1,
-            .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
-        });
+        // Deployment bytecode is deployed on Guillotine first; both EVMs then run
+        // the returned runtime code, so MinimalEvm and Guillotine execute the same call.
+        var deployed_runtime: ?[]u8 = null;
+        defer if (deployed_runtime) |code| self.allocator.free(code);
+
+        if (is_deployment_bytecode) {
+            log.debug("Detected deployment bytecode (contains CODECOPY + RETURN pattern), attempting to deploy contract", .{});
+
+            // For Guillotine: Execute deployment bytecode to get runtime code
+            const runtime_code = try self.deployContractGuillotine(bytecode, enable_tracing);
+            deployed_runtime = runtime_code;
+
+            log.debug("Deployment returned {} bytes of runtime code", .{runtime_code.len});
+
+            // Set the runtime code
+            const code_hash = try db.set_code(runtime_code);
+            try db.set_account(self.contract.bytes, .{
+                .balance = 0,
+                .nonce = 1,
+                .code_hash = code_hash,
+                .storage_root = @as([32]u8, @splat(0)),
+            });
+
+            // For MinimalEvm: Also use runtime code for fair comparison
+            // MinimalEvm doesn't need setCode - it will use the bytecode passed during execution
+        } else {
+            // Not deployment bytecode, use as-is (original behavior)
+            // MinimalEvm doesn't need setCode - it will use the bytecode passed during execution
+
+            const code_hash = try db.set_code(bytecode);
+            // log.debug("Set code with hash: {x} (tracing={})", .{code_hash, enable_tracing});
+            // log.debug("Contract address is: {x}", .{self.contract.bytes});
+
+            try db.set_account(self.contract.bytes, .{
+                .balance = 0,
+                .nonce = 1,
+                .code_hash = code_hash,
+                .storage_root = @as([32]u8, @splat(0)),
+            });
+            // log.debug("Set account for address: {x}", .{self.contract.bytes});
+        }
 
         // Verify deployment
         const deployed_code = try db.get_code_by_address(self.contract.bytes);
         // log.debug("Deployed bytecode to {any}: len={} vs deployed_len={} (tracing={})", .{ self.contract, bytecode.len, deployed_code.len, enable_tracing });
         if (deployed_code.len == 0) {
-            log.err("WARNING: Deployed code has zero length!", .{});
+            log.err("Deployed code has zero length", .{});
+            return error.NoRuntimeCode;
         }
 
         // Also check if account exists
@@ -326,7 +374,7 @@ pub const DifferentialTestor = struct {
         }
 
         // Execute on both EVMs separately to get the results for trace display
-        var minimal_result = try self.executeMinimalEvmWithTrace(self.caller, self.contract, 0, calldata, gas_limit, deployed_code);
+        var minimal_result = try self.executeMinimalEvmWithTrace(self.caller, self.contract, 0, calldata, gas_limit, deployed_runtime orelse bytecode);
         defer minimal_result.deinit();
 
         var guillotine_result = try self.executeGuillotineWithTraceMode(self.caller, self.contract, 0, calldata, gas_limit, enable_tracing);
@@ -388,6 +436,31 @@ pub const DifferentialTestor = struct {
         return error.EVMImplementationMismatch;
     }
 
+    /// Run runtime `bytecode` on Guillotine only, traced and untraced, and require
+    /// `expected_success` and `expected_output` exactly. Use it for behavior the
+    /// MinimalEvm reference does not model (`src/tracer/minimal_frame.zig`: CREATE
+    /// and CREATE2 push 0, EXTCODEHASH returns keccak256(""), a PUSH truncated by
+    /// the end of code fails, and failed calls do not revert warm storage slots).
+    /// Derive the expected values from the specification, not from Guillotine.
+    pub fn expect_guillotine(self: *DifferentialTestor, bytecode: []const u8, calldata: []const u8, expected_success: bool, expected_output: []const u8) !void {
+        const modes = [_]bool{ true, false };
+        for (modes) |enable_tracing| {
+            if (enable_tracing and self.guillotine_instance_traced == null) continue;
+            const db = if (enable_tracing) self.guillotine_db else self.guillotine_db_no_trace;
+            const code_hash = try db.set_code(bytecode);
+            try db.set_account(self.contract.bytes, .{
+                .balance = 0,
+                .nonce = 1,
+                .code_hash = code_hash,
+                .storage_root = @as([32]u8, @splat(0)),
+            });
+            var result = try self.executeGuillotineWithTraceMode(self.caller, self.contract, 0, calldata, 1_000_000, enable_tracing);
+            defer result.deinit();
+            try std.testing.expectEqual(expected_success, result.success);
+            try std.testing.expectEqualSlices(u8, expected_output, result.output);
+        }
+    }
+
     /// Execute bytecode on both EVMs and generate comprehensive diff
     pub fn executeAndDiff(
         self: *DifferentialTestor,
@@ -420,6 +493,7 @@ pub const DifferentialTestor = struct {
         gas_limit: u64,
         bytecode: []const u8,
     ) !ExecutionResultWithTrace {
+
         // Reset MinimalEvm for new execution
         // Instead of deinit + reinit which breaks arena pointers,
         // we'll reset the MinimalEvm state while keeping the arena intact
@@ -427,53 +501,41 @@ pub const DifferentialTestor = struct {
         // Clear the frames
         self.minimal_evm.frames.clearRetainingCapacity();
 
-        // Clear all state maps and transaction-scoped counters
+        // Clear other state
         self.minimal_evm.storage.clearRetainingCapacity();
-        self.minimal_evm.transient_storage.clearRetainingCapacity();
-        self.minimal_evm.original_storage.clearRetainingCapacity();
         self.minimal_evm.balances.clearRetainingCapacity();
         self.minimal_evm.code.clearRetainingCapacity();
-        self.minimal_evm.nonces.clearRetainingCapacity();
         self.minimal_evm.warm_addresses.clearRetainingCapacity();
         self.minimal_evm.warm_storage_slots.clearRetainingCapacity();
-        self.minimal_evm.gas_refund = 0;
 
-        // Match Guillotine's blockchain/tx context and initial account state identically
+        // Mirror the Guillotine block, transaction and account state set up in
+        // initWithConfig, so both EVMs execute the same call in the same context.
         self.minimal_evm.chain_id = 1;
         self.minimal_evm.block_number = 1;
         self.minimal_evm.block_timestamp = 0;
         self.minimal_evm.block_difficulty = 0;
         self.minimal_evm.block_prevrandao = 0;
         self.minimal_evm.block_coinbase = primitives.Address.ZERO_ADDRESS;
-        self.minimal_evm.block_gas_limit = 100000;
+        self.minimal_evm.block_gas_limit = guillotine_block_gas_limit;
         self.minimal_evm.block_base_fee = 0;
         self.minimal_evm.blob_base_fee = 0;
         self.minimal_evm.origin = caller;
         self.minimal_evm.gas_price = 0;
         self.minimal_evm.host = null;
-
-        try self.minimal_evm.setBalance(caller, 10_000_000);
+        try self.minimal_evm.setBalance(caller, guillotine_caller_balance);
         try self.minimal_evm.setCode(to, bytecode);
-        try self.minimal_evm.setNonce(to, 1);
 
         // Execute the bytecode with MinimalEvm
-        const result = self.minimal_evm.execute(
+        // execute() reports EVM-level failure in the result; anything it returns
+        // as an error (allocation failure) is a harness failure and propagates.
+        const result = try self.minimal_evm.execute(
             bytecode,
             @intCast(gas_limit),
             caller,
             to,
             value,
             input,
-        ) catch {
-            // On error, create a failed result
-            return ExecutionResultWithTrace{
-                .success = false,
-                .gas_used = gas_limit,
-                .output = try self.allocator.alloc(u8, 0),
-                .trace = null,
-                .allocator = self.allocator,
-            };
-        };
+        );
         const success = result.success;
 
         // Get the output
@@ -545,19 +607,20 @@ pub const DifferentialTestor = struct {
         // log.debug("Guillotine execution completed (tracing={}): success={}, gas_left={}, output_len={}, trace_steps={}", .{ enable_tracing, result.success, result.gas_left, result.output.len, trace_steps_len });
 
         if (!result.success) {
-            // Log detailed failure information
-            log.err("Guillotine execution failed (tracing={})!", .{enable_tracing});
-            log.err("  Gas limit: {}", .{gas_limit});
-            log.err("  Gas left: {}", .{result.gas_left});
-            log.err("  Gas used: {}", .{gas_used});
-            log.err("  Output: {x}", .{result.output});
+            // A revert or halt is a valid outcome; generateDiff reports any mismatch
+            // with MinimalEvm, so this detail is debug-level only.
+            log.debug("Guillotine execution failed (tracing={})!", .{enable_tracing});
+            log.debug("  Gas limit: {}", .{gas_limit});
+            log.debug("  Gas left: {}", .{result.gas_left});
+            log.debug("  Gas used: {}", .{gas_used});
+            log.debug("  Output: {x}", .{result.output});
             if (result.error_info) |error_info| {
-                log.err("  ERROR TYPE: {s}", .{error_info});
+                log.debug("  ERROR TYPE: {s}", .{error_info});
             }
 
             // Check if it failed immediately (gas_left == 0 suggests immediate failure)
             if (result.gas_left == 0) {
-                log.err("  NOTE: Gas left is 0, suggesting immediate failure or out of gas", .{});
+                log.debug("  NOTE: Gas left is 0, suggesting immediate failure or out of gas", .{});
             }
         }
 

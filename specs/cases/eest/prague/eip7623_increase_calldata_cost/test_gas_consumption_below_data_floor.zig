@@ -6,7 +6,7 @@ test "gas consumption below data floor: exact gas, type 0 protected" {
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -21,7 +21,7 @@ test "gas consumption below data floor: exact gas, type 0 unprotected" {
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -36,7 +36,7 @@ test "gas consumption below data floor: exact gas, type 1" {
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -51,7 +51,7 @@ test "gas consumption below data floor: exact gas, type 2" {
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -66,7 +66,7 @@ test "gas consumption below data floor: exact gas, type 3" {
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -81,7 +81,7 @@ test "gas consumption below data floor: exact gas, type 4" {
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});

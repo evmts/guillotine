@@ -275,7 +275,7 @@ fn decode_int(cursor: *Cursor, comptime T: type, comptime bits: u16) AbiError!T 
         // If needed, use uint256 and handle sign bit manually, or use a big integer library.
         return AbiError.UnsupportedType;
     } else {
-        const unsigned = std.mem.readInt(std.meta.Int(.unsigned, @bitSizeOf(T)), word[start_offset..32], .big);
+        const unsigned = std.mem.readInt(@Int(.unsigned, @bitSizeOf(T)), word[start_offset..32], .big);
         return @bitCast(unsigned);
     }
 }
@@ -1067,7 +1067,7 @@ test "basic ABI decoding" {
     const allocator = std.testing.allocator;
 
     // Test decoding uint256
-    const uint256_data = [_]u8{0} ** 28 ++ [_]u8{ 0x00, 0x00, 0x00, 0x2A }; // 42 in big-endian
+    const uint256_data = @as([28]u8, @splat(0)) ++ [_]u8{ 0x00, 0x00, 0x00, 0x2A }; // 42 in big-endian
     const types = [_]AbiType{.uint256};
 
     const decoded = try decodeAbiParameters(allocator, &uint256_data, &types);
@@ -1098,7 +1098,7 @@ test "function data encoding" {
 
     const selector = computeSelector("transfer(address,uint256)");
     const params = [_]AbiValue{
-        addressValue([_]u8{0x12} ** 20),
+        addressValue(@as([20]u8, @splat(0x12))),
         uint256_value(1000),
     };
 
@@ -1243,7 +1243,7 @@ test "encode uint256" {
 
     try std.testing.expectEqual(@as(usize, 32), encoded.len);
 
-    const expected = [_]u8{0} ** 28 ++ [_]u8{ 0x00, 0x00, 0x10, 0xf2, 0xc };
+    const expected = @as([28]u8, @splat(0)) ++ [_]u8{ 0x00, 0x00, 0x10, 0xf2, 0xc };
     try std.testing.expectEqualSlices(u8, &expected, encoded);
 }
 
@@ -1258,7 +1258,7 @@ test "encode uint8" {
 
     try std.testing.expectEqual(@as(usize, 32), encoded.len);
 
-    const expected = [_]u8{0} ** 31 ++ [_]u8{0x20};
+    const expected = @as([31]u8, @splat(0)) ++ [_]u8{0x20};
     try std.testing.expectEqualSlices(u8, &expected, encoded);
 }
 
@@ -1284,7 +1284,7 @@ test "encode int32 positive" {
     const encoded = try encodeAbiParameters(std.testing.allocator, &values);
     defer std.testing.allocator.free(encoded);
 
-    const expected = [_]u8{0} ** 28 ++ [_]u8{ 0x7f, 0xff, 0xff, 0xff };
+    const expected = @as([28]u8, @splat(0)) ++ [_]u8{ 0x7f, 0xff, 0xff, 0xff };
     try std.testing.expectEqualSlices(u8, &expected, encoded);
 }
 
@@ -1297,7 +1297,7 @@ test "encode int32 negative two's complement" {
     defer std.testing.allocator.free(encoded);
 
     // Two's complement representation
-    const expected = [_]u8{0xff} ** 28 ++ [_]u8{ 0x80, 0x00, 0x00, 0x00 };
+    const expected = @as([28]u8, @splat(0xff)) ++ [_]u8{ 0x80, 0x00, 0x00, 0x00 };
     try std.testing.expectEqualSlices(u8, &expected, encoded);
 }
 
@@ -1317,7 +1317,7 @@ test "encode address" {
     defer std.testing.allocator.free(encoded);
 
     // Address should be right-padded with zeros
-    const expected = [_]u8{0} ** 12 ++ addr;
+    const expected = @as([12]u8, @splat(0)) ++ addr;
     try std.testing.expectEqualSlices(u8, &expected, encoded);
 }
 
@@ -1332,7 +1332,7 @@ test "encode bool" {
         const encoded = try encodeAbiParameters(std.testing.allocator, &values);
         defer std.testing.allocator.free(encoded);
 
-        const expected = [_]u8{0} ** 31 ++ [_]u8{0x01};
+        const expected = @as([31]u8, @splat(0)) ++ [_]u8{0x01};
         try std.testing.expectEqualSlices(u8, &expected, encoded);
     }
 
@@ -1345,14 +1345,14 @@ test "encode bool" {
         const encoded = try encodeAbiParameters(std.testing.allocator, &values);
         defer std.testing.allocator.free(encoded);
 
-        const expected = [_]u8{0} ** 32;
+        const expected = @as([32]u8, @splat(0));
         try std.testing.expectEqualSlices(u8, &expected, encoded);
     }
 }
 
 // Test ABI decoding
 test "decode uint256" {
-    const data = [_]u8{0} ** 28 ++ [_]u8{ 0x00, 0x00, 0x10, 0xf2, 0xc };
+    const data = @as([28]u8, @splat(0)) ++ [_]u8{ 0x00, 0x00, 0x10, 0xf2, 0xc };
     const types = [_]AbiType{.uint256};
 
     const decoded = try decodeAbiParameters(std.testing.allocator, &data, &types);
@@ -1379,7 +1379,7 @@ test "decode uint256" {
 
 test "decode int32 negative" {
     // Two's complement representation of -2147483648
-    const data = [_]u8{0xff} ** 28 ++ [_]u8{ 0x80, 0x00, 0x00, 0x00 };
+    const data = @as([28]u8, @splat(0xff)) ++ [_]u8{ 0x80, 0x00, 0x00, 0x00 };
     const types = [_]AbiType{.int32};
 
     const decoded = try decodeAbiParameters(std.testing.allocator, &data, &types);
@@ -1396,7 +1396,7 @@ test "decode address" {
         0x19, 0x3d, 0x99, 0x55,
     };
 
-    const data = [_]u8{0} ** 12 ++ expectedAddr;
+    const data = @as([12]u8, @splat(0)) ++ expectedAddr;
     const types = [_]AbiType{.address};
 
     const decoded = try decodeAbiParameters(std.testing.allocator, &data, &types);
@@ -1409,7 +1409,7 @@ test "decode address" {
 test "decode bool" {
     // Test true
     {
-        const data = [_]u8{0} ** 31 ++ [_]u8{0x01};
+        const data = @as([31]u8, @splat(0)) ++ [_]u8{0x01};
         const types = [_]AbiType{.bool};
 
         const decoded = try decodeAbiParameters(std.testing.allocator, &data, &types);
@@ -1421,7 +1421,7 @@ test "decode bool" {
 
     // Test false
     {
-        const data = [_]u8{0} ** 32;
+        const data = @as([32]u8, @splat(0));
         const types = [_]AbiType{.bool};
 
         const decoded = try decodeAbiParameters(std.testing.allocator, &data, &types);
@@ -1446,7 +1446,7 @@ test "compute selector" {
 test "encode function data" {
     const selector = computeSelector("transfer(address,uint256)");
 
-    const recipient: address.Address = [_]u8{0x12} ** 20;
+    const recipient: address.Address = @as([20]u8, @splat(0x12));
     const params = [_]AbiValue{
         addressValue(recipient),
         uint256_value(1000),
@@ -1536,7 +1536,7 @@ test "decode with insufficient data" {
 
 // Test complex types
 test "encode and decode multiple types" {
-    const addr: address.Address = [_]u8{0xaa} ** 20;
+    const addr: address.Address = @as([20]u8, @splat(0xaa));
     const originalValues = [_]AbiValue{
         uint256_value(42),
         boolValue(true),
@@ -1760,7 +1760,7 @@ test "ABI fixed bytes types encoding" {
     const values = [_]AbiValue{
         .{ .bytes1 = [_]u8{0xaa} },
         .{ .bytes4 = [_]u8{ 0x11, 0x22, 0x33, 0x44 } },
-        .{ .bytes32 = [_]u8{0xff} ** 32 },
+        .{ .bytes32 = @as([32]u8, @splat(0xff)) },
     };
 
     const encoded = try encodeAbiParameters(allocator, &values);
@@ -1777,7 +1777,7 @@ test "ABI fixed bytes decode round-trip" {
 
     const values = [_]AbiValue{
         .{ .bytes8 = [_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 } },
-        .{ .bytes16 = [_]u8{0xab} ** 16 },
+        .{ .bytes16 = @as([16]u8, @splat(0xab)) },
     };
 
     const encoded = try encodeAbiParameters(allocator, &values);
@@ -1815,7 +1815,7 @@ test "ABI dynamic bytes encoding" {
 test "ABI large dynamic bytes" {
     const allocator = std.testing.allocator;
 
-    const large_data = [_]u8{0xaa} ** 1000;
+    const large_data = @as([1000]u8, @splat(0xaa));
     const values = [_]AbiValue{
         bytesValue(&large_data),
     };
@@ -1862,9 +1862,9 @@ test "ABI bytes32 array encoding" {
     const allocator = std.testing.allocator;
 
     const arr = [_][32]u8{
-        [_]u8{0xaa} ** 32,
-        [_]u8{0xbb} ** 32,
-        [_]u8{0xcc} ** 32,
+        @as([32]u8, @splat(0xaa)),
+        @as([32]u8, @splat(0xbb)),
+        @as([32]u8, @splat(0xcc)),
     };
     const values = [_]AbiValue{
         .{ .@"bytes32[]" = &arr },
@@ -1889,8 +1889,8 @@ test "ABI bytes32 array encoding" {
 test "ABI address array encoding" {
     const allocator = std.testing.allocator;
 
-    const addr1: address.Address = [_]u8{0x11} ** 20;
-    const addr2: address.Address = [_]u8{0x22} ** 20;
+    const addr1: address.Address = @as([20]u8, @splat(0x11));
+    const addr2: address.Address = @as([20]u8, @splat(0x22));
     const arr = [_]address.Address{ addr1, addr2 };
     const values = [_]AbiValue{
         .{ .@"address[]" = &arr },
@@ -2041,7 +2041,7 @@ test "ABI decode function data with no parameters" {
 test "ABI encode event topics with indexed values" {
     const allocator = std.testing.allocator;
 
-    const addr: address.Address = [_]u8{0xaa} ** 20;
+    const addr: address.Address = @as([20]u8, @splat(0xaa));
     const indexed = [_]AbiValue{
         addressValue(addr),
         uint256_value(1000),
@@ -2072,7 +2072,7 @@ test "ABI zero values encoding" {
     const encoded = try encodeAbiParameters(allocator, &values);
     defer allocator.free(encoded);
 
-    const expected_zeros = [_]u8{0} ** 96;
+    const expected_zeros = @as([96]u8, @splat(0));
     try std.testing.expectEqualSlices(u8, &expected_zeros, encoded);
 }
 
@@ -2199,9 +2199,9 @@ test "ABI dynamic array - single element uint256 array" {
 test "ABI dynamic array - multiple elements address array" {
     const allocator = std.testing.allocator;
 
-    const addr1: address.Address = [_]u8{0x11} ** 20;
-    const addr2: address.Address = [_]u8{0x22} ** 20;
-    const addr3: address.Address = [_]u8{0x33} ** 20;
+    const addr1: address.Address = @as([20]u8, @splat(0x11));
+    const addr2: address.Address = @as([20]u8, @splat(0x22));
+    const addr3: address.Address = @as([20]u8, @splat(0x33));
     const arr = [_]address.Address{ addr1, addr2, addr3 };
     const values = [_]AbiValue{
         .{ .@"address[]" = &arr },
@@ -2308,9 +2308,9 @@ test "ABI dynamic array - bytes32 array with all zeros" {
     const allocator = std.testing.allocator;
 
     const arr = [_][32]u8{
-        [_]u8{0} ** 32,
-        [_]u8{0} ** 32,
-        [_]u8{0} ** 32,
+        @as([32]u8, @splat(0)),
+        @as([32]u8, @splat(0)),
+        @as([32]u8, @splat(0)),
     };
     const values = [_]AbiValue{
         .{ .@"bytes32[]" = &arr },
@@ -2328,7 +2328,7 @@ test "ABI dynamic array - bytes32 array with all zeros" {
 
     try std.testing.expectEqual(@as(usize, 3), decoded[0].@"bytes32[]".len);
     for (decoded[0].@"bytes32[]") |val| {
-        try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 32), &val);
+        try std.testing.expectEqualSlices(u8, &(@as([32]u8, @splat(0))), &val);
     }
 }
 
@@ -2370,8 +2370,8 @@ test "ABI dynamic array - mixed static and dynamic array encoding" {
 test "ABI dynamic array - address array with zero addresses" {
     const allocator = std.testing.allocator;
 
-    const zero_addr: address.Address = [_]u8{0} ** 20;
-    const arr = [_]address.Address{zero_addr} ** 5;
+    const zero_addr: address.Address = @as([20]u8, @splat(0));
+    const arr = @as([5]address.Address, @splat(zero_addr));
     const values = [_]AbiValue{
         .{ .@"address[]" = &arr },
     };
@@ -2566,7 +2566,7 @@ test "ABI boundary - int128 maximum value" {
 test "ABI boundary - address zero (0x0000...0000)" {
     const allocator = std.testing.allocator;
 
-    const zero_addr: address.Address = [_]u8{0} ** 20;
+    const zero_addr: address.Address = @as([20]u8, @splat(0));
     const values = [_]AbiValue{
         addressValue(zero_addr),
     };
@@ -2584,7 +2584,7 @@ test "ABI boundary - address zero (0x0000...0000)" {
 test "ABI boundary - address maximum (0xFFFF...FFFF)" {
     const allocator = std.testing.allocator;
 
-    const max_addr: address.Address = [_]u8{0xFF} ** 20;
+    const max_addr: address.Address = @as([20]u8, @splat(0xFF));
     const values = [_]AbiValue{
         addressValue(max_addr),
     };
@@ -2604,7 +2604,7 @@ test "ABI boundary - bytes1 vs bytes32 comparison" {
 
     const values = [_]AbiValue{
         .{ .bytes1 = [_]u8{0xAA} },
-        .{ .bytes32 = [_]u8{0xBB} ** 32 },
+        .{ .bytes32 = @as([32]u8, @splat(0xBB)) },
     };
 
     const encoded = try encodeAbiParameters(allocator, &values);
@@ -2623,7 +2623,7 @@ test "ABI boundary - bytes1 vs bytes32 comparison" {
 test "ABI boundary - empty string vs long string (>1000 bytes)" {
     const allocator = std.testing.allocator;
 
-    const long_str = "a" ** 1500;
+    const long_str = &@as([1500]u8, @splat('a'));
     const values = [_]AbiValue{
         stringValue(""),
         stringValue(long_str),
@@ -2649,7 +2649,7 @@ test "ABI boundary - empty bytes vs maximum bytes" {
     const allocator = std.testing.allocator;
 
     const empty_bytes = [_]u8{};
-    const large_bytes = [_]u8{0xCD} ** 5000;
+    const large_bytes = @as([5000]u8, @splat(0xCD));
     const values = [_]AbiValue{
         bytesValue(&empty_bytes),
         bytesValue(&large_bytes),
@@ -2997,11 +2997,11 @@ test "ABI cross-validation - ethers.js multiple parameters encoding" {
 test "ABI cross-validation - real contract function encoding" {
     const allocator = std.testing.allocator;
 
-    const addr1: address.Address = [_]u8{0x11} ** 20;
-    const addr2: address.Address = [_]u8{0x22} ** 20;
+    const addr1: address.Address = @as([20]u8, @splat(0x11));
+    const addr2: address.Address = @as([20]u8, @splat(0x22));
     const path = [_]address.Address{ addr1, addr2 };
 
-    const to_addr: address.Address = [_]u8{0x33} ** 20;
+    const to_addr: address.Address = @as([20]u8, @splat(0x33));
 
     const values = [_]AbiValue{
         uint256_value(1000000000000000000),

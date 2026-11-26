@@ -1,11 +1,23 @@
-/// EIP-2935: Historical block hashes via system contract
+/// EIP-2935: Serve historical block hashes from state
 ///
-/// This module implements a system contract that stores historical block hashes
-/// in a ring buffer, providing access to block hashes older than the standard
-/// 256 block window.
+/// The history system contract stores the last HISTORY_SERVE_WINDOW (8191) block
+/// hashes in one ring of storage slots. The deployed bytecode (HISTORY_CODE, copied
+/// from the execution-specs Prague EEST `eip2935_historical_block_hashes_from_state`
+/// deployment fixture) behaves as follows:
 ///
-/// The contract is deployed at 0x0b address and uses a ring buffer with
-/// HISTORY_BUFFER_LENGTH entries to store recent block hashes.
+/// set (caller == SYSTEM_ADDRESS, run once at the start of every block):
+///     sstore((block.number - 1) % 8191, calldataload(0))   // parent hash
+///
+/// get (any other caller):
+///     revert unless calldatasize == 32
+///     n = calldataload(0)
+///     revert if n > block.number - 1
+///     revert if block.number - n > 8191
+///     return sload(n % 8191)
+///
+/// So `get` serves exactly [block.number - 8191, block.number - 1]. There is no
+/// second "block number" slot (unlike EIP-4788). Storage values are 256-bit words;
+/// a 32-byte hash is stored as the big-endian integer CALLDATALOAD produces.
 const std = @import("std");
 const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
@@ -32,629 +44,247 @@ pub const SYSTEM_ADDRESS = Address{
     },
 };
 
-/// Length of the historical block hashes ring buffer
-pub const HISTORY_BUFFER_LENGTH: u64 = 8192;
+/// EIP-2935 HISTORY_SERVE_WINDOW: ring size and maximum lookback.
+pub const HISTORY_SERVE_WINDOW: u64 = 8191;
 
-/// Gas cost for reading a block hash
-pub const BLOCK_HASH_READ_GAS: u64 = 2100;
+/// Runtime bytecode of the canonical EIP-2935 contract, byte-for-byte as in
+/// execution-specs `tests/eest/prague/eip2935_historical_block_hashes_from_state/contract_deploy_tx.json`.
+pub const HISTORY_CODE = decodeHex("3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500");
 
-/// Gas cost for writing a block hash (system call only)
-pub const BLOCK_HASH_WRITE_GAS: u64 = 20000;
+fn decodeHex(comptime hex: []const u8) [hex.len / 2]u8 {
+    var out: [hex.len / 2]u8 = undefined;
+    _ = std.fmt.hexToBytes(&out, hex) catch |err| @compileError("invalid hex literal: " ++ @errorName(err));
+    return out;
+}
 
-/// Errors that can occur during historical block hashes operations
-pub const HistoricalBlockHashesError = error{
-    InvalidInputLength,
-    InvalidSystemCallInput,
-    InvalidReadInput,
-    OutOfGas,
-    IntegerOverflow,
-    HashCollision,
+/// keccak256(HISTORY_CODE)
+pub fn historyCodeHash() [32]u8 {
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&HISTORY_CODE, &hash, .{});
+    return hash;
+}
+
+/// Errors from the block-prologue helper `processBlockHashUpdate`.
+pub const BlockHashUpdateError = error{
+    /// The account at HISTORY_CONTRACT_ADDRESS has code other than HISTORY_CODE. The
+    /// native helper cannot reproduce arbitrary code; execute it as a real system call.
+    NonCanonicalSystemContractCode,
 } || Database.Error;
 
-/// Compute storage slots for a given block number
-/// Returns: { block_slot, hash_slot }
-pub fn computeSlots(block_number: u64) struct { block_slot: u64, hash_slot: u64 } {
-    const block_slot = block_number % HISTORY_BUFFER_LENGTH;
-    const hash_slot = block_slot + HISTORY_BUFFER_LENGTH;
-    return .{ .block_slot = block_slot, .hash_slot = hash_slot };
+/// Storage slot that holds the hash of `block_number`.
+pub fn computeSlot(block_number: u64) u64 {
+    return block_number % HISTORY_SERVE_WINDOW;
+}
+
+/// True when `code_hash` denotes an account without code.
+fn isNoCodeHash(code_hash: [32]u8) bool {
+    return std.mem.eql(u8, &code_hash, &@as([32]u8, @splat(0))) or
+        std.mem.eql(u8, &code_hash, &primitives.EMPTY_CODE_HASH);
 }
 
 /// Historical block hashes contract implementation
 pub const HistoricalBlockHashesContract = struct {
-    database: *Database,
-    allocator: std.mem.Allocator,
-
-    const Self = @This();
-
-    /// Execute the historical block hashes contract
+    /// Block prologue (EIP-2935 / execution-specs Prague `apply_body`): the unchecked
+    /// system call `HISTORY_CONTRACT_ADDRESS(parent_hash)` from SYSTEM_ADDRESS, performed
+    /// natively with exactly the canonical contract's `set` storage write:
+    /// `sstore((number - 1) % 8191, parent_hash)`.
     ///
-    /// If called by the system address with 64 bytes input:
-    /// - First 32 bytes: block number
-    /// - Second 32 bytes: block hash
-    /// Stores the block hash in the ring buffer
-    ///
-    /// If called with 32 bytes input (block number):
-    /// Returns the block hash for that block if available
-    pub fn execute(
-        self: *Self,
-        caller: Address,
-        input: []const u8,
-        gas_limit: u64,
-    ) HistoricalBlockHashesError!struct { output: []const u8, gas_used: u64 } {
-        // System call to update block hash
-        if (std.mem.eql(u8, &caller.bytes, &SYSTEM_ADDRESS.bytes)) {
-            if (input.len != 64) {
-                log.debug("HistoricalBlockHashes: Invalid system call input length: {}", .{input.len});
-                return HistoricalBlockHashesError.InvalidSystemCallInput;
-            }
-
-            if (gas_limit < BLOCK_HASH_WRITE_GAS) {
-                return HistoricalBlockHashesError.OutOfGas;
-            }
-
-            // Parse block number and hash using consistent serialization
-            const block_number_u256 = std.mem.readInt(u256, input[0..32], .big);
-
-            // Check for overflow when converting to u64
-            if (block_number_u256 > std.math.maxInt(u64)) {
-                return HistoricalBlockHashesError.IntegerOverflow;
-            }
-            const block_number: u64 = @intCast(block_number_u256);
-
-            var block_hash: [32]u8 = undefined;
-            @memcpy(&block_hash, input[32..64]);
-
-            // Store in ring buffer using helper
-            const slots = computeSlots(block_number);
-
-            // Check for hash collision - prevent hash spoofing
-            const stored_block_number = try self.database.get_storage(
-                HISTORY_CONTRACT_ADDRESS.bytes,
-                slots.hash_slot,
-            );
-
-            if (stored_block_number != 0 and stored_block_number != block_number) {
-                log.debug("HistoricalBlockHashes: Hash collision detected for slot {}: {} != {}", .{ slots.block_slot, stored_block_number, block_number });
-                return HistoricalBlockHashesError.HashCollision;
-            }
-
-            // Store block_number -> hash
-            try self.database.set_storage(
-                HISTORY_CONTRACT_ADDRESS.bytes,
-                slots.block_slot,
-                @bitCast(block_hash),
-            );
-
-            // Store hash -> block_number (reverse mapping)
-            try self.database.set_storage(
-                HISTORY_CONTRACT_ADDRESS.bytes,
-                slots.hash_slot,
-                block_number,
-            );
-
-            log.debug("HistoricalBlockHashes: Stored hash for block {} at slot {}", .{ block_number, slots.block_slot });
-
-            return .{ .output = &.{}, .gas_used = BLOCK_HASH_WRITE_GAS };
-        }
-
-        // Regular call to read block hash
-        if (input.len != 32) {
-            log.debug("HistoricalBlockHashes: Invalid read input length: {}", .{input.len});
-            return HistoricalBlockHashesError.InvalidReadInput;
-        }
-
-        if (gas_limit < BLOCK_HASH_READ_GAS) {
-            return HistoricalBlockHashesError.OutOfGas;
-        }
-
-        // Parse block number using consistent serialization
-        const block_number_u256 = std.mem.readInt(u256, input[0..32], .big);
-
-        // Check for overflow when converting to u64
-        if (block_number_u256 > std.math.maxInt(u64)) {
-            return HistoricalBlockHashesError.IntegerOverflow;
-        }
-        const block_number: u64 = @intCast(block_number_u256);
-
-        // Retrieve from ring buffer using helper
-        const slots = computeSlots(block_number);
-        const stored_hash = try self.database.get_storage(
-            HISTORY_CONTRACT_ADDRESS.bytes,
-            slots.block_slot,
-        );
-
-        // Check if this is the correct block number by verifying reverse mapping
-        const stored_block_number = try self.database.get_storage(
-            HISTORY_CONTRACT_ADDRESS.bytes,
-            slots.hash_slot,
-        );
-
-        if (stored_block_number != block_number) {
-            // Block number doesn't match, hash not available - return empty slice
-            log.debug("HistoricalBlockHashes: Block number mismatch for slot {}: {} != {}", .{ slots.block_slot, stored_block_number, block_number });
-            const empty_output = try self.allocator.alloc(u8, 0);
-            return .{ .output = empty_output, .gas_used = BLOCK_HASH_READ_GAS };
-        }
-
-        // Allocate output properly to avoid use-after-free
-        const output = try self.allocator.alloc(u8, 32);
-        const hash_bytes: [32]u8 = @bitCast(stored_hash);
-        @memcpy(output, &hash_bytes);
-
-        return .{ .output = output, .gas_used = BLOCK_HASH_READ_GAS };
-    }
-
-    /// Process a block hash update at the start of a block
-    /// This should be called by the EVM before processing any transactions
+    /// The caller gates on the fork (Prague and later) and must fill
+    /// `block_info.parent_hash`. Results:
+    /// - `block_info.number == 0`: no-op (genesis has no parent and is never executed).
+    /// - no account or no code at HISTORY_CONTRACT_ADDRESS: no-op, as the spec's call to
+    ///   empty code changes nothing.
+    /// - code == HISTORY_CODE: writes one slot.
+    /// - any other code: `error.NonCanonicalSystemContractCode`, nothing written.
+    /// Database errors propagate unchanged.
     pub fn processBlockHashUpdate(
         database: *Database,
         block_info: *const BlockInfo,
-    ) Database.Error!void {
-        if (block_info.number == 0) {
-            // No parent hash for genesis block
-            return;
+    ) BlockHashUpdateError!void {
+        if (block_info.number == 0) return;
+        const account = (try database.get_account(HISTORY_CONTRACT_ADDRESS.bytes)) orelse return;
+        if (isNoCodeHash(account.code_hash)) return;
+        if (!std.mem.eql(u8, &account.code_hash, &historyCodeHash())) {
+            log.warn("HistoricalBlockHashes: non-canonical code at history contract address", .{});
+            return BlockHashUpdateError.NonCanonicalSystemContractCode;
         }
 
         const parent_number = block_info.number - 1;
-        const parent_hash = block_info.parent_hash;
+        const slot = computeSlot(parent_number);
+        try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, slot, std.mem.readInt(u256, &block_info.parent_hash, .big));
 
-        // Store in ring buffer using helper
-        const slots = computeSlots(parent_number);
-
-        // Store block_number -> hash
-        try database.set_storage(
-            HISTORY_CONTRACT_ADDRESS.bytes,
-            slots.block_slot,
-            @bitCast(parent_hash),
-        );
-
-        // Store hash -> block_number (reverse mapping)
-        try database.set_storage(
-            HISTORY_CONTRACT_ADDRESS.bytes,
-            slots.hash_slot,
-            parent_number,
-        );
-
-        log.debug("HistoricalBlockHashes: Updated block hash for block {}", .{parent_number});
+        log.debug("HistoricalBlockHashes: stored hash of block {} at slot {}", .{ parent_number, slot });
     }
 
-    /// Get a block hash from the contract or recent history
-    /// This combines EIP-2935 with standard BLOCKHASH semantics
+    /// The contract's `get` path executed in block `current_block`: the stored hash of
+    /// `requested`, or null where the real contract reverts (requested > current - 1,
+    /// or current - requested > 8191). An in-window slot that was never written reads
+    /// as 32 zero bytes, as SLOAD does.
     pub fn getBlockHash(
         database: *Database,
-        block_number: u64,
+        requested: u256,
         current_block: u64,
     ) Database.Error!?[32]u8 {
-        // Only complete blocks have a hash. Block 0 (genesis) is a complete block, so it
-        // is served like any other when stored.
-        if (block_number >= current_block) {
-            return null;
-        }
+        if (current_block == 0) return null;
+        const current: u256 = current_block;
+        if (requested > current - 1) return null;
+        if (current - requested > HISTORY_SERVE_WINDOW) return null;
 
-        // Always check the storage first using helper
-        const slots = computeSlots(block_number);
-        const stored_hash = try database.get_storage(
-            HISTORY_CONTRACT_ADDRESS.bytes,
-            slots.block_slot,
-        );
-
-        // Verify reverse mapping to ensure this is the correct block number
-        const stored_block_number = try database.get_storage(
-            HISTORY_CONTRACT_ADDRESS.bytes,
-            slots.hash_slot,
-        );
-
-        // Check if we have a valid hash with matching block number
-        if (stored_hash != 0 and stored_block_number == block_number) {
-            return @bitCast(stored_hash);
-        }
-
-        return null;
+        const stored = try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, requested % HISTORY_SERVE_WINDOW);
+        var out: [32]u8 = undefined;
+        std.mem.writeInt(u256, &out, stored, .big);
+        return out;
     }
 };
 
 // Tests
-test "historical block hashes ring buffer storage" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
 
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    // Test storing and retrieving block hashes
-    const block_numbers = [_]u64{ 100, 200, 300, 8192000 };
-    const hashes = [_][32]u8{
-        [_]u8{0x01} ** 32,
-        [_]u8{0x02} ** 32,
-        [_]u8{0x03} ** 32,
-        [_]u8{0x04} ** 32,
-    };
-
-    for (block_numbers, hashes) |block_number, hash| {
-        const slot = block_number % HISTORY_BUFFER_LENGTH;
-
-        // Store block_number -> hash
-        try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, slot, @bitCast(hash));
-    }
-
-    // Verify retrieval
-    for (block_numbers, hashes) |block_number, expected_hash| {
-        const slot = block_number % HISTORY_BUFFER_LENGTH;
-        const stored = try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, slot);
-        const stored_bytes: [32]u8 = @bitCast(stored);
-        try testing.expectEqualSlices(u8, &expected_hash, &stored_bytes);
-    }
+test "historical block hashes window is EIP-2935 HISTORY_SERVE_WINDOW" {
+    try std.testing.expectEqual(@as(u64, 8191), HISTORY_SERVE_WINDOW);
+    // The bytecode embeds the window as PUSH2 0x1fff.
+    try std.testing.expect(std.mem.indexOf(u8, &HISTORY_CODE, &[_]u8{ 0x61, 0x1f, 0xff }) != null);
+    try std.testing.expectEqualSlices(u8, &SYSTEM_ADDRESS.bytes, HISTORY_CODE[2..22]);
+    try std.testing.expectEqual(@as(usize, 83), HISTORY_CODE.len);
 }
 
-test "historical block hashes contract execution" {
+test "historical block hashes prologue writes parent hash at (number - 1) % 8191" {
     const testing = std.testing;
     const allocator = testing.allocator;
+    const Account = @import("../storage/database_interface_account.zig").Account;
 
     var database = Database.init(allocator);
     defer database.deinit();
 
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
+    const code_hash = try database.set_code(&HISTORY_CODE);
+    var account = Account.zero();
+    account.nonce = 1;
+    account.code_hash = code_hash;
+    try database.set_account(HISTORY_CONTRACT_ADDRESS.bytes, account);
 
-    // Test system call to store block hash
-    const block_number: u64 = 42;
-    const block_hash = [_]u8{0xAB} ** 32;
+    var parent_hash: [32]u8 = @as([32]u8, @splat(0));
+    parent_hash[0] = 0xAB; // most significant byte
+    parent_hash[31] = 0xCD;
 
-    var input: [64]u8 = undefined;
-    std.mem.writeInt(u256, input[0..32], block_number, .big);
-    @memcpy(input[32..64], &block_hash);
+    var block_info = BlockInfo.init();
+    block_info.number = 8192 + 5; // parent 8196 -> slot 5
+    block_info.parent_hash = parent_hash;
 
-    const result = try contract.execute(SYSTEM_ADDRESS, &input, 100000);
-    try testing.expectEqual(BLOCK_HASH_WRITE_GAS, result.gas_used);
-    try testing.expectEqual(@as(usize, 0), result.output.len);
+    try HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info);
 
-    // Test reading the block hash back
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, block_number, .big);
+    const stored = try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, 5);
+    try testing.expectEqual(std.mem.readInt(u256, &parent_hash, .big), stored);
+    try testing.expectEqual(@as(u256, 0xCD), stored & 0xff);
+    // No reverse-mapping slot exists in the real contract.
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, 5 + HISTORY_SERVE_WINDOW));
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, (8196 % 8192)));
+}
 
-    // Use a non-system address for testing
-    const test_caller = Address{ .bytes = [_]u8{0x11} ** 20 };
-    const read_result = try contract.execute(
-        test_caller,
-        &read_input,
-        10000,
+test "historical block hashes prologue no-ops at genesis and without code" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const Account = @import("../storage/database_interface_account.zig").Account;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var block_info = BlockInfo.init();
+    block_info.number = 10;
+    block_info.parent_hash = @as([32]u8, @splat(0x11));
+
+    // No account at the address.
+    try HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info);
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, 9));
+
+    // Account exists but has no code.
+    var account = Account.zero();
+    account.code_hash = primitives.EMPTY_CODE_HASH;
+    try database.set_account(HISTORY_CONTRACT_ADDRESS.bytes, account);
+    try HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info);
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, 9));
+
+    // Canonical code at genesis: no parent, nothing written.
+    account.code_hash = try database.set_code(&HISTORY_CODE);
+    try database.set_account(HISTORY_CONTRACT_ADDRESS.bytes, account);
+    block_info.number = 0;
+    try HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info);
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, 9));
+    const wrapped_slot: u256 = std.math.maxInt(u256) % @as(u256, HISTORY_SERVE_WINDOW);
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, wrapped_slot));
+}
+
+test "historical block hashes prologue rejects non-canonical contract code" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const Account = @import("../storage/database_interface_account.zig").Account;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var account = Account.zero();
+    account.code_hash = try database.set_code(&[_]u8{ 0x60, 0x00, 0x00 });
+    try database.set_account(HISTORY_CONTRACT_ADDRESS.bytes, account);
+
+    var block_info = BlockInfo.init();
+    block_info.number = 10;
+    block_info.parent_hash = @as([32]u8, @splat(0x11));
+
+    try testing.expectError(
+        BlockHashUpdateError.NonCanonicalSystemContractCode,
+        HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info),
     );
-    defer allocator.free(read_result.output);
-
-    try testing.expectEqual(BLOCK_HASH_READ_GAS, read_result.gas_used);
-    try testing.expectEqual(@as(usize, 32), read_result.output.len);
-    try testing.expectEqualSlices(u8, &block_hash, read_result.output);
+    try testing.expectEqual(@as(u256, 0), try database.get_storage(HISTORY_CONTRACT_ADDRESS.bytes, 9));
 }
 
-test "historical block hashes error cases" {
+test "historical block hashes get serves exactly [number - 8191, number - 1]" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
     var database = Database.init(allocator);
     defer database.deinit();
 
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
+    const current: u64 = 20000;
+    const oldest: u64 = current - HISTORY_SERVE_WINDOW; // 11809
+    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, computeSlot(oldest), 0xAA);
+    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, computeSlot(current - 1), 0xBB);
 
-    // Test invalid system call input length
-    const invalid_input = [_]u8{0x01} ** 63; // Should be 64 bytes
-    const result1 = contract.execute(SYSTEM_ADDRESS, &invalid_input, 100000);
-    try testing.expectError(HistoricalBlockHashesError.InvalidSystemCallInput, result1);
+    const at_oldest = (try HistoricalBlockHashesContract.getBlockHash(&database, oldest, current)).?;
+    try testing.expectEqual(@as(u256, 0xAA), std.mem.readInt(u256, &at_oldest, .big));
+    const at_parent = (try HistoricalBlockHashesContract.getBlockHash(&database, current - 1, current)).?;
+    try testing.expectEqual(@as(u256, 0xBB), std.mem.readInt(u256, &at_parent, .big));
 
-    // Test invalid read input length
-    const invalid_read_input = [_]u8{0x01} ** 31; // Should be 32 bytes
-    const result2 = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &invalid_read_input, 10000);
-    try testing.expectError(HistoricalBlockHashesError.InvalidReadInput, result2);
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, oldest - 1, current)) == null);
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, current, current)) == null);
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, current + 1, current)) == null);
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, std.math.maxInt(u256), current)) == null);
 
-    // Test insufficient gas for write
-    var valid_input: [64]u8 = undefined;
-    std.mem.writeInt(u256, valid_input[0..32], 12345, .big);
-    @memset(valid_input[32..64], 0xCC);
-
-    const result3 = contract.execute(SYSTEM_ADDRESS, &valid_input, BLOCK_HASH_WRITE_GAS - 1);
-    try testing.expectError(HistoricalBlockHashesError.OutOfGas, result3);
-
-    // Test insufficient gas for read
-    var valid_read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &valid_read_input, 12345, .big);
-
-    const result4 = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &valid_read_input, BLOCK_HASH_READ_GAS - 1);
-    try testing.expectError(HistoricalBlockHashesError.OutOfGas, result4);
+    // Early chain: block 0 is in range once block 1 is executing.
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, 0, 1)) != null);
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, 0, 0)) == null);
 }
 
-test "historical block hashes block number not found" {
+test "historical block hashes ring wrap: block n + 8191 overwrites block n" {
     const testing = std.testing;
     const allocator = testing.allocator;
+    const Account = @import("../storage/database_interface_account.zig").Account;
 
     var database = Database.init(allocator);
     defer database.deinit();
 
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Try to read a block number that was never stored
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, 999999, .big);
-
-    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
-    defer allocator.free(result.output);
-
-    try testing.expectEqual(BLOCK_HASH_READ_GAS, result.gas_used);
-    try testing.expectEqual(@as(usize, 0), result.output.len); // Empty output for not found
-}
-
-test "historical block hashes ring buffer wrap around" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Store a hash at block that will wrap around
-    const block1: u64 = 1000;
-    const block2: u64 = block1 + HISTORY_BUFFER_LENGTH; // Will map to same slot
-
-    const hash1 = [_]u8{0x11} ** 32;
-    const hash2 = [_]u8{0x22} ** 32;
-
-    // Store first hash
-    var input1: [64]u8 = undefined;
-    std.mem.writeInt(u256, input1[0..32], block1, .big);
-    @memcpy(input1[32..64], &hash1);
-
-    _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
-
-    // Store second hash (overwrites first due to ring buffer)
-    var input2: [64]u8 = undefined;
-    std.mem.writeInt(u256, input2[0..32], block2, .big);
-    @memcpy(input2[32..64], &hash2);
-
-    _ = try contract.execute(SYSTEM_ADDRESS, &input2, 100000);
-
-    // Try to read first block number - should not be found due to overwrite
-    var read_input1: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input1, block1, .big);
-
-    const result1 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input1, 10000);
-    defer allocator.free(result1.output);
-
-    try testing.expectEqual(@as(usize, 0), result1.output.len);
-
-    // Read second block number - should be found
-    var read_input2: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input2, block2, .big);
-
-    const result2 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input2, 10000);
-    defer allocator.free(result2.output);
-
-    try testing.expectEqual(@as(usize, 32), result2.output.len);
-    try testing.expectEqualSlices(u8, &hash2, result2.output);
-}
-
-test "historical block hashes integer overflow protection" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Test block number that exceeds u64 max
-    const oversized_block_number: u256 = @as(u256, std.math.maxInt(u64)) + 1;
-    const hash = [_]u8{0xCC} ** 32;
-
-    var input: [64]u8 = undefined;
-    std.mem.writeInt(u256, input[0..32], oversized_block_number, .big);
-    @memcpy(input[32..64], &hash);
-
-    const result = contract.execute(SYSTEM_ADDRESS, &input, 100000);
-    try testing.expectError(HistoricalBlockHashesError.IntegerOverflow, result);
-
-    // Test reading with overflow
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, oversized_block_number, .big);
-
-    const read_result = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
-    try testing.expectError(HistoricalBlockHashesError.IntegerOverflow, read_result);
-}
-
-test "historical block hashes use-after-free protection" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Store a block hash
-    const block_number: u64 = 12345;
-    const hash = [_]u8{0xDD} ** 32;
-
-    var input: [64]u8 = undefined;
-    std.mem.writeInt(u256, input[0..32], block_number, .big);
-    @memcpy(input[32..64], &hash);
-
-    _ = try contract.execute(SYSTEM_ADDRESS, &input, 100000);
-
-    // Read the hash back
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, block_number, .big);
-
-    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
-    defer allocator.free(result.output); // This should work without use-after-free
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    try testing.expectEqualSlices(u8, &hash, result.output);
-
-    // Verify the output remains valid until we free it
-    for (result.output, &hash) |output_byte, hash_byte| {
-        try testing.expectEqual(hash_byte, output_byte);
-    }
-}
-
-test "historical block hashes collision detection prevents spoofing" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Store first block hash
-    const block1: u64 = 100;
-    const hash1 = [_]u8{0xAA} ** 32;
-
-    var input1: [64]u8 = undefined;
-    std.mem.writeInt(u256, input1[0..32], block1, .big);
-    @memcpy(input1[32..64], &hash1);
-
-    _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
-
-    // Attempt to store a different block at the same slot (collision)
-    const block2: u64 = block1 + HISTORY_BUFFER_LENGTH; // Same slot
-    const hash2 = [_]u8{0xBB} ** 32;
-
-    var input2: [64]u8 = undefined;
-    std.mem.writeInt(u256, input2[0..32], block2, .big);
-    @memcpy(input2[32..64], &hash2);
-
-    // This should fail with HashCollision error
-    const result = contract.execute(SYSTEM_ADDRESS, &input2, 100000);
-    try testing.expectError(HistoricalBlockHashesError.HashCollision, result);
-
-    // Verify original block hash is still intact
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, block1, .big);
-
-    const read_result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
-    defer allocator.free(read_result.output);
-
-    try testing.expectEqual(@as(usize, 32), read_result.output.len);
-    try testing.expectEqualSlices(u8, &hash1, read_result.output);
-}
-
-test "historical block hashes allows same block rewrite" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Store a block hash
-    const block_number: u64 = 200;
-    const hash1 = [_]u8{0xCC} ** 32;
-
-    var input1: [64]u8 = undefined;
-    std.mem.writeInt(u256, input1[0..32], block_number, .big);
-    @memcpy(input1[32..64], &hash1);
-
-    _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
-
-    // Update the same block number with a new hash (should succeed)
-    const hash2 = [_]u8{0xDD} ** 32;
-
-    var input2: [64]u8 = undefined;
-    std.mem.writeInt(u256, input2[0..32], block_number, .big);
-    @memcpy(input2[32..64], &hash2);
-
-    const result = try contract.execute(SYSTEM_ADDRESS, &input2, 100000);
-    try testing.expectEqual(BLOCK_HASH_WRITE_GAS, result.gas_used);
-
-    // Verify the updated hash
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, block_number, .big);
-
-    const read_result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
-    defer allocator.free(read_result.output);
-
-    try testing.expectEqualSlices(u8, &hash2, read_result.output);
-}
-
-test "historical block hashes reverse mapping validation" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
-
-    // Store a block hash
-    const block1: u64 = 300;
-    const hash1 = [_]u8{0xEE} ** 32;
-
-    var input1: [64]u8 = undefined;
-    std.mem.writeInt(u256, input1[0..32], block1, .big);
-    @memcpy(input1[32..64], &hash1);
-
-    _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
-
-    // Manually corrupt the reverse mapping to simulate an attack
-    const slots = computeSlots(block1);
-    const fake_block_number: u64 = 999999;
-    try database.set_storage(
-        HISTORY_CONTRACT_ADDRESS.bytes,
-        slots.hash_slot,
-        fake_block_number,
-    );
-
-    // Try to read the block - should fail due to mismatch
-    var read_input: [32]u8 = undefined;
-    std.mem.writeInt(u256, &read_input, block1, .big);
-
-    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
-    defer allocator.free(result.output);
-
-    try testing.expectEqual(@as(usize, 0), result.output.len); // Should return empty
-}
-
-test "historical block hashes getBlockHash validation" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var database = Database.init(allocator);
-    defer database.deinit();
-
-    // Store blocks with proper reverse mapping
-    const block1: u64 = 500;
-    const block2: u64 = block1 + HISTORY_BUFFER_LENGTH; // Collides
-    const hash1 = [_]u8{0xFF} ** 32;
-
-    const slots = computeSlots(block1);
-
-    // Store block1
-    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, slots.block_slot, @bitCast(hash1));
-    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, slots.hash_slot, block1);
-
-    // Should find block1
-    const result1 = try HistoricalBlockHashesContract.getBlockHash(&database, block1, block1 + 10);
-    try testing.expect(result1 != null);
-    try testing.expectEqualSlices(u8, &hash1, &result1.?);
-
-    // Should not find block2 (same slot, wrong block number)
-    const result2 = try HistoricalBlockHashesContract.getBlockHash(&database, block2, block2 + 10);
-    try testing.expect(result2 == null);
-
-    // Should return null for current block
-    const result3 = try HistoricalBlockHashesContract.getBlockHash(&database, 600, 600);
-    try testing.expect(result3 == null);
-
-    // Should return null for future block
-    const result4 = try HistoricalBlockHashesContract.getBlockHash(&database, 700, 600);
-    try testing.expect(result4 == null);
-
-    // Genesis is unknown until stored, then served like any other complete block
-    const result5 = try HistoricalBlockHashesContract.getBlockHash(&database, 0, 100);
-    try testing.expect(result5 == null);
-    const genesis_hash = [_]u8{0x0D} ** 32;
-    const genesis_slots = computeSlots(0);
-    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, genesis_slots.block_slot, @bitCast(genesis_hash));
-    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, genesis_slots.hash_slot, 0);
-    const result6 = try HistoricalBlockHashesContract.getBlockHash(&database, 0, 100);
-    try testing.expect(result6 != null);
-    try testing.expectEqualSlices(u8, &genesis_hash, &result6.?);
+    var account = Account.zero();
+    account.code_hash = try database.set_code(&HISTORY_CODE);
+    try database.set_account(HISTORY_CONTRACT_ADDRESS.bytes, account);
+
+    var block_info = BlockInfo.init();
+    block_info.number = 1001; // writes block 1000
+    block_info.parent_hash = @as([32]u8, @splat(0x11));
+    try HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info);
+
+    block_info.number = 1001 + HISTORY_SERVE_WINDOW; // writes block 9191, same slot
+    block_info.parent_hash = @as([32]u8, @splat(0x22));
+    try HistoricalBlockHashesContract.processBlockHashUpdate(&database, &block_info);
+
+    // Block 1000 is now outside the window, so get reverts.
+    try testing.expect((try HistoricalBlockHashesContract.getBlockHash(&database, 1000, block_info.number)) == null);
+    const newest = (try HistoricalBlockHashesContract.getBlockHash(&database, 1000 + HISTORY_SERVE_WINDOW, block_info.number)).?;
+    try testing.expectEqualSlices(u8, &@as([32]u8, @splat(0x22)), &newest);
 }

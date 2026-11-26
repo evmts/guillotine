@@ -1,5 +1,4 @@
 const std = @import("std");
-const limits = @import("evm_limits");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
@@ -16,12 +15,17 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+
+        /// Memory never grows past this many bytes: the frame's configured memory limit,
+        /// capped at what the 32-bit offsets of the memory API can address.
+        const MEMORY_LIMIT: u64 = @min(FrameType.Memory.MEMORY_LIMIT, std.math.maxInt(u32));
 
         /// Generate a log handler for LOG0-LOG4
         pub fn generateLogHandler(topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
-            return &struct {
-                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            return handler_abi.wrap(FrameType, struct {
+                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
                     const dispatch = Dispatch{ .cursor = cursor };
 
                     // Add debug logging for the specific LOG opcode
@@ -52,52 +56,42 @@ pub fn Handlers(FrameType: type) type {
                     const length = self.stack.pop_unsafe();
 
                     // Pop topics in order (topic1 is deepest, topicN is shallowest)
-                    var topics: [4]WordType = [_]WordType{0} ** 4;
+                    var topics: [4]WordType = @as([4]WordType, @splat(0));
                     for (0..topic_count) |j| {
                         topics[j] = self.stack.pop_unsafe();
                     }
 
-                    // Check bounds and compute memory expansion only when length > 0.
-                    // When length == 0, EVM ignores offset completely (even if > usize).
+                    // A log without data touches no memory, so its offset is never
+                    // inspected. A log with data must fit in addressable memory: a region
+                    // past the frame's memory limit can never be paid for. Bounding both
+                    // operands first keeps their sum from wrapping.
                     var offset_usize: usize = 0;
                     var length_usize: usize = 0;
                     var memory_expansion_cost: u64 = 0;
-                    if (length > 0) {
-                        if (offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
+                    if (length != 0) {
+                        if (offset > MEMORY_LIMIT or length > MEMORY_LIMIT) {
                             self.afterComplete(unified_opcode);
-                            return Error.OutOfGas;
+                            return Error.OutOfBounds;
                         }
-                        offset_usize = @as(usize, @intCast(offset));
-                        length_usize = @as(usize, @intCast(length));
-                        const end_offset = std.math.add(usize, offset_usize, length_usize) catch {
+                        offset_usize = @intCast(offset);
+                        length_usize = @intCast(length);
+                        const end_offset = @as(u64, offset_usize) + @as(u64, length_usize);
+                        if (end_offset > MEMORY_LIMIT) {
                             self.afterComplete(unified_opcode);
-                            return Error.OutOfGas;
-                        };
-                        if (end_offset > limits.max_memory_size) {
-                            self.afterComplete(unified_opcode);
-                            return Error.OutOfGas;
+                            return Error.OutOfBounds;
                         }
                         memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
                     }
 
-                    // Calculate dynamic gas cost: data gas + memory expansion (overflow-safe)
-                    const data_gas_cost = std.math.mul(u64, @as(u64, length_usize), GasConstants.LogDataGas) catch {
-                        self.afterComplete(unified_opcode);
-                        return Error.OutOfGas;
-                    };
-                    const total_dynamic_gas = data_gas_cost +| memory_expansion_cost;
-                    const gas_charge = std.math.cast(FrameType.GasType, total_dynamic_gas) orelse {
-                        self.afterComplete(unified_opcode);
-                        return Error.OutOfGas;
-                    };
-
-                    // Check gas and consume dynamic gas
-                    // Use negative gas pattern for single-branch out-of-gas detection
-                    self.gas_remaining -= gas_charge;
-                    if (self.gas_remaining < 0) {
+                    // Dynamic gas cost: data gas + memory expansion. The comparison is made
+                    // in u64 before the subtraction, so the cost can neither wrap nor trap.
+                    const data_gas_cost = @as(u64, length_usize) * GasConstants.LogDataGas;
+                    const total_dynamic_gas = data_gas_cost + memory_expansion_cost;
+                    if (self.gas_remaining < 0 or total_dynamic_gas > @as(u64, @intCast(self.gas_remaining))) {
                         self.afterComplete(unified_opcode);
                         return Error.OutOfGas;
                     }
+                    self.gas_remaining -= @intCast(total_dynamic_gas);
 
                     // EIP-214: LOG is forbidden in a static context and must fail the call
                     // (emit_log silently drops the log, so the check must live here). Matches
@@ -129,43 +123,14 @@ pub fn Handlers(FrameType: type) type {
                     else
                         &[_]u8{};
 
-                    // Write log directly to EVM using arena allocator
-                    // The log data will be copied to main allocator only at transaction end
-                    const evm = self.getEvm();
-
-                    // Use arena allocator for log data (will be copied to main allocator at transaction end)
-                    const data_copy = if (data.len > 0)
-                        evm.getCallArenaAllocator().dupe(u8, data) catch {
-                            self.afterComplete(unified_opcode);
-                            return Error.AllocationError;
-                        }
-                    else
-                        &[_]u8{};
-
-                    const topics_array = if (topic_count > 0) blk: {
-                        const arr = evm.getCallArenaAllocator().alloc(u256, topic_count) catch {
-                            // No need to free data_copy - arena allocated
-                            self.afterComplete(unified_opcode);
-                            return Error.AllocationError;
-                        };
-                        for (0..topic_count) |j| {
-                            arr[j] = @as(u256, topics[j]);
-                        }
-                        break :blk arr;
-                    } else evm.getCallArenaAllocator().alloc(u256, 0) catch {
-                        // No need to free data_copy - arena allocated
-                        self.afterComplete(unified_opcode);
-                        return Error.AllocationError;
-                    };
-
-                    const log_entry = Log{
-                        .address = self.contract_address,
-                        .topics = topics_array,
-                        .data = data_copy,
-                    };
-                    evm.logs.append(evm.allocator, log_entry) catch {
-                        // topics_array and data_copy belong to the call arena, which frees
-                        // them at transaction end; freeing them here would be invalid.
+                    // `emit_log` copies the topics and data into the call arena and
+                    // records an allocation failure in `host_failure`: the host ran out
+                    // of memory, so the failure must not decide the transaction.
+                    var topic_words: [4]u256 = @as([4]u256, @splat(0));
+                    for (0..topic_count) |j| {
+                        topic_words[j] = @as(u256, topics[j]);
+                    }
+                    self.getEvm().emit_log(self.contract_address, topic_words[0..topic_count], data) catch {
                         self.afterComplete(unified_opcode);
                         return Error.AllocationError;
                     };
@@ -174,23 +139,23 @@ pub fn Handlers(FrameType: type) type {
                     switch (topic_count) {
                         0 => {
                             self.afterInstruction(.LOG0, dispatch.getOpData(.LOG0).next_handler, dispatch.getOpData(.LOG0).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG0).next_handler, .{ self, dispatch.getOpData(.LOG0).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG0).next_cursor.cursor;
                         },
                         1 => {
                             self.afterInstruction(.LOG1, dispatch.getOpData(.LOG1).next_handler, dispatch.getOpData(.LOG1).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG1).next_handler, .{ self, dispatch.getOpData(.LOG1).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG1).next_cursor.cursor;
                         },
                         2 => {
                             self.afterInstruction(.LOG2, dispatch.getOpData(.LOG2).next_handler, dispatch.getOpData(.LOG2).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG2).next_handler, .{ self, dispatch.getOpData(.LOG2).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG2).next_cursor.cursor;
                         },
                         3 => {
                             self.afterInstruction(.LOG3, dispatch.getOpData(.LOG3).next_handler, dispatch.getOpData(.LOG3).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG3).next_handler, .{ self, dispatch.getOpData(.LOG3).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG3).next_cursor.cursor;
                         },
                         4 => {
                             self.afterInstruction(.LOG4, dispatch.getOpData(.LOG4).next_handler, dispatch.getOpData(.LOG4).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG4).next_handler, .{ self, dispatch.getOpData(.LOG4).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG4).next_cursor.cursor;
                         },
                         else => {
                             {
@@ -200,7 +165,7 @@ pub fn Handlers(FrameType: type) type {
                         },
                     }
                 }
-            }.logHandler;
+            }.logHandler);
         }
 
         /// LOG0 opcode (0xA0) - Emit log with no topics
@@ -304,7 +269,7 @@ test "LOG0 opcode - empty data" {
     defer mock_evm.deinit();
 
     const evm = &mock_evm;
-    const test_address = Address.fromBytes(&([_]u8{0x12} ++ [_]u8{0} ** 19)) catch unreachable;
+    const test_address = Address.fromBytes(&([_]u8{0x12} ++ @as([19]u8, @splat(0)))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = test_address;
@@ -328,7 +293,7 @@ test "LOG0 opcode - with data" {
     defer mock_evm.deinit();
 
     const evm = &mock_evm;
-    const test_address = Address.fromBytes(&([_]u8{0x34} ++ [_]u8{0} ** 19)) catch unreachable;
+    const test_address = Address.fromBytes(&([_]u8{0x34} ++ @as([19]u8, @splat(0)))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = test_address;
@@ -791,8 +756,8 @@ test "LOG opcodes - contract address tracking" {
     // Test different contract addresses
     const addresses = [_]Address{
         Address.zero(),
-        Address.fromBytes(&([_]u8{0xFF} ** 20)) catch unreachable,
-        Address.fromBytes(&([_]u8{ 0x12, 0x34, 0x56 } ++ [_]u8{0} ** 17)) catch unreachable,
+        Address.fromBytes(&(@as([20]u8, @splat(0xFF)))) catch unreachable,
+        Address.fromBytes(&([_]u8{ 0x12, 0x34, 0x56 } ++ @as([17]u8, @splat(0)))) catch unreachable,
     };
 
     for (addresses) |addr| {

@@ -11,47 +11,37 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_bitwise_synthetic.zig:16 (push_and_inline)
-;;   |         pub fn push_and_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_AND_INLINE, cursor);
+;; --- src/instructions/handlers_bitwise_synthetic.zig:18 (push_and_inline)
+;;   |         pub fn push_and_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_AND_INLINE, cursor, s.sp, gas);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_AND_INLINE, Dispatch, Dispatch.Item, cursor);
 ;;   | 
 ;;   |             // For synthetic opcodes, cursor now points to metadata
 ;;   |             const push_value = op_data.metadata.value;
 ;;   | 
-;;   |             {
-;;   |                 {
-;;   |                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_AND_INLINE requires 1 stack item");
-;;   |                 }
-;;   |             }
-;;   |             const top = self.stack.peek_unsafe();
+;;   |             const top = s.peek_unsafe();
 ;;   |             const result = top & push_value;
-;;   |             self.stack.set_top_unsafe(result);
+;;   |             s.set_top_unsafe(result);
 ;;   | 
-;;   |             self.afterInstruction(.PUSH_AND_INLINE, op_data.next_handler, op_data.next_cursor.cursor);
-;;   |             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+;;   |             return N.next(self, .PUSH_AND_INLINE, cursor, s.sp, gas);
 ;;   |         }
-;; --- src/instructions/handlers_bitwise_synthetic.zig:38 (push_and_pointer)
-;;   |         pub fn push_and_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_AND_POINTER, cursor);
+;; --- src/instructions/handlers_bitwise_synthetic.zig:35 (push_and_pointer)
+;;   |         pub fn push_and_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_AND_POINTER, cursor, s.sp, gas);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_AND_POINTER, Dispatch, Dispatch.Item, cursor);
 ;;   | 
 ;;   |             // For synthetic opcodes, cursor now points to metadata
 ;;   |             const push_value = op_data.metadata.value_ptr.*;
 ;;   | 
-;;   |             {
-;;   |                 {
-;;   |                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_AND_POINTER requires 1 stack item");
-;;   |                 }
-;;   |             }
-;;   |             const top = self.stack.peek_unsafe();
+;;   |             const top = s.peek_unsafe();
 ;;   |             const result = top & push_value;
-;;   |             self.stack.set_top_unsafe(result);
+;;   |             s.set_top_unsafe(result);
 ;;   | 
-;;   |             self.afterInstruction(.PUSH_AND_POINTER, op_data.next_handler, op_data.next_cursor.cursor);
-;;   |             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+;;   |             return N.next(self, .PUSH_AND_POINTER, cursor, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

@@ -1,5 +1,19 @@
 name = "GuillotineVerify"
-defaultTargets = ["GuillotineVerify"]
+defaultTargets = ["GuillotineVerify", "GuillotineSpec", "guillotine-lean-ref"]
 
+# Machine-checked proofs about Guillotine's verified primitives. The library has no
+# root module; every `GuillotineVerify/*.lean` file is built.
 [[lean_lib]]
 name = "GuillotineVerify"
+globs = ["GuillotineVerify.+"]
+
+# Executable reference specification of Guillotine (EVM, gas, bytecode analysis,
+# OP Stack / Base, RLP). `GuillotineSpec.Main` is the oracle executable's root.
+[[lean_lib]]
+name = "GuillotineSpec"
+globs = ["GuillotineSpec.+"]
+
+# Streaming differential-fuzz oracle: `lake exe guillotine-lean-ref`.
+[[lean_exe]]
+name = "guillotine-lean-ref"
+root = "GuillotineSpec.Main"

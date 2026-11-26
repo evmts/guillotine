@@ -1,5 +1,4 @@
 const std = @import("std");
-const limits = @import("evm_limits");
 const builtin = @import("builtin");
 const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
 const Mode = @import("../internal/safety_counter.zig").Mode;
@@ -10,16 +9,16 @@ pub const FrameConfig = struct {
     /// specialized frame never reads fork rules through a default-EVM cast.
     hardfork: @import("../eips_and_hardforks/eips.zig").Hardfork = .CANCUN,
     /// The maximum stack size for the evm. Defaults to 1024
-    stack_size: u12 = limits.stack_capacity,
+    stack_size: u12 = 1024,
 
     /// The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
 
     /// The maximum amount of bytes allowed in contract code
-    max_bytecode_size: u32 = limits.max_code_size,
+    max_bytecode_size: u32 = 24576,
 
     /// The maximum amount of bytes allowed in contract deployment
-    max_initcode_size: u32 = limits.max_initcode_size,
+    max_initcode_size: u32 = 49152,
 
     /// The maximum gas limit for a block
     block_gas_limit: u64 = 30_000_000,
@@ -28,7 +27,7 @@ pub const FrameConfig = struct {
     memory_initial_capacity: usize = 4096,
 
     /// The limit on how much the EVM should be allowed to allocate. Default is 0xffffff. This should be plenty for most bytecode and gas limits
-    memory_limit: u64 = limits.max_memory_size,
+    memory_limit: u64 = 0xFFFFFF,
 
     /// Database implementation type for storage operations (always required).
     DatabaseType: type,
@@ -48,9 +47,6 @@ pub const FrameConfig = struct {
     /// When enabled, bytecode fusion handlers are not registered
     disable_fusion: bool = false,
 
-    /// Enable tracer callbacks in all build modes (including ReleaseFast) when EvmConfig.tracer_config.enabled is true.
-    enable_tracer: bool = false,
-
     /// SIMD vector length for optimized operations
     /// Value of 1 means scalar operations (no SIMD)
     vector_length: comptime_int = 1,
@@ -58,7 +54,7 @@ pub const FrameConfig = struct {
     /// Loop quota for safety counters to prevent infinite loops
     /// null = disabled (default for optimized builds)
     /// value = maximum iterations before panic (default for debug/safe builds)
-    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
+    loop_quota: ?u32 = if (builtin.mode == .debug or builtin.mode == .safe) 1_000_000 else null,
 
     /// Custom opcode handler overrides
     /// These will override the default handlers in frame_handlers.zig
@@ -132,9 +128,12 @@ pub const FrameConfig = struct {
         else
             @compileError("FrameConfig stack_size is too large! It must fit in a u12 bytes");
     }
-    /// GasType: minimal signed integer type to track gas remaining
+    /// GasType: signed integer type to track gas remaining.
+    /// 64-bit targets always use i64: it is the native word, and a transaction gas
+    /// limit is a u64 that can exceed i32 even when the configured block limit fits.
+    /// 32-bit targets keep i32 when `block_gas_limit` fits in it.
     pub fn GasType(self: Self) type {
-        return if (self.block_gas_limit <= std.math.maxInt(i32))
+        return if (@sizeOf(usize) < 8 and self.block_gas_limit <= std.math.maxInt(i32))
             i32
         else
             i64;
@@ -166,3 +165,15 @@ pub const FrameConfig = struct {
         return Counter;
     }
 };
+
+test "GasType is i64 on 64-bit targets and i32 only for small limits on 32-bit targets" {
+    const Db = struct {};
+    const small = FrameConfig{ .DatabaseType = Db, .block_gas_limit = 30_000_000 };
+    const large = FrameConfig{ .DatabaseType = Db, .block_gas_limit = @as(u64, std.math.maxInt(i32)) + 1 };
+    try std.testing.expectEqual(i64, large.GasType());
+    if (@sizeOf(usize) >= 8) {
+        try std.testing.expectEqual(i64, small.GasType());
+    } else {
+        try std.testing.expectEqual(i32, small.GasType());
+    }
+}

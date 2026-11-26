@@ -180,8 +180,8 @@ describe('TypeScript SDK Primitives Fuzz Suite', () => {
 				// Concatenation associativity & length
 				const cat = Bytes.concat([ba, bb])
 				expect(cat.length()).toBe(a.length + b.length)
-				expect(cat.toBytes().slice(0, a.length)).toEqual(a)
-				expect(cat.toBytes().slice(a.length)).toEqual(b)
+				expect(cat.toBytes().slice(0, a.length)).toEqual(new Uint8Array(a))
+				expect(cat.toBytes().slice(a.length)).toEqual(new Uint8Array(b))
 
 				// Slice matches Uint8Array.prototype.slice
 				const lo = Math.min(start, end)

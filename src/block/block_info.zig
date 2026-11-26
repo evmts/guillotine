@@ -28,7 +28,7 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         /// Block number
         number: u64,
         /// Parent block hash (for EIP-2935 historical block hashes)
-        parent_hash: [32]u8 = [_]u8{0} ** 32,
+        parent_hash: [32]u8 = @as([32]u8, @splat(0)),
         /// Block timestamp
         timestamp: u64,
         /// Block difficulty (pre-merge) or prevrandao (post-merge)
@@ -54,6 +54,10 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         excess_blob_gas: u64 = 0,
         /// Blob gas consumed by all transactions in this block.
         blob_gas_used: u64 = 0,
+        /// Hashes of the most recent ancestor blocks, newest first:
+        /// `block_hashes[i]` is the hash of block `number - 1 - i`. BLOCKHASH reads
+        /// at most the first 256 entries; numbers without an entry read as zero.
+        block_hashes: []const [32]u8 = &.{},
         /// Beacon block root for EIP-4788 (Dencun)
         /// Contains the parent beacon block root for trust-minimized access to consensus layer
         beacon_root: ?[32]u8 = null,
@@ -63,13 +67,13 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
             return Self{
                 .chain_id = 1, // Default to mainnet
                 .number = 0,
-                .parent_hash = [_]u8{0} ** 32,
+                .parent_hash = @as([32]u8, @splat(0)),
                 .timestamp = 0,
                 .difficulty = 0,
                 .gas_limit = 30_000_000,
                 .coinbase = primitives.ZERO_ADDRESS,
                 .base_fee = 0,
-                .prev_randao = [_]u8{0} ** 32,
+                .prev_randao = @as([32]u8, @splat(0)),
                 .blob_base_fee = 0,
                 .blob_versioned_hashes = &.{},
             };
@@ -91,6 +95,18 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
     };
 }
 
+/// BLOCKHASH lookup (Yellow Paper section 9.4.4, execution-specs `block_hash`): the
+/// hash of `requested` if it is one of the 256 blocks before `current`, else null.
+/// `hashes[i]` is the hash of block `current - 1 - i`.
+pub fn recentBlockHash(hashes: []const [32]u8, current: u64, requested: u256) ?[32]u8 {
+    if (requested >= current) return null;
+    const age = current - @as(u64, @intCast(requested));
+    if (age > 256) return null;
+    const index: usize = @intCast(age - 1);
+    if (index >= hashes.len) return null;
+    return hashes[index];
+}
+
 /// Compact BlockInfo type using u64 for efficiency (practical values)
 pub const CompactBlockInfo = BlockInfo(.{ .use_compact_types = true });
 
@@ -102,7 +118,7 @@ test "block info initialization" {
     try std.testing.expectEqual(@as(u64, 30_000_000), block.gas_limit);
     try std.testing.expectEqual(primitives.ZERO_ADDRESS, block.coinbase);
     try std.testing.expectEqual(@as(u256, 0), block.base_fee);
-    try std.testing.expectEqual([_]u8{0} ** 32, block.prev_randao);
+    try std.testing.expectEqual(@as([32]u8, @splat(0)), block.prev_randao);
     try std.testing.expectEqual(@as(u256, 0), block.blob_base_fee);
     try std.testing.expectEqual(@as(usize, 0), block.blob_versioned_hashes.len);
     try std.testing.expectEqual(@as(u64, 0), block.excess_blob_gas);
@@ -110,8 +126,8 @@ test "block info initialization" {
 }
 
 test "block info custom values" {
-    const custom_address: Address = Address{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
-    const custom_randao = [_]u8{0xff} ** 32;
+    const custom_address: Address = Address{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
+    const custom_randao = @as([32]u8, @splat(0xff));
 
     const block = BlockInfo(.{}){
         .chain_id = 1,
@@ -190,7 +206,7 @@ test "block info edge cases" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = std.math.maxInt(u256),
-        .prev_randao = [_]u8{0xff} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xff)),
         .blob_base_fee = std.math.maxInt(u256),
         .blob_versioned_hashes = &.{},
     };
@@ -206,7 +222,7 @@ test "block info edge cases" {
         .gas_limit = 1,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -223,7 +239,7 @@ test "compact block info" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 100_000_000_000, // 100 Gwei - fits in u64
-        .prev_randao = [_]u8{0xAB} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xAB)),
         .blob_base_fee = 50_000_000_000, // 50 Gwei - fits in u64
         .blob_versioned_hashes = &.{},
     };
@@ -237,8 +253,8 @@ test "compact block info" {
 }
 
 test "block info with blob data (EIP-4844)" {
-    const blob_hash1 = [_]u8{0x01} ** 32;
-    const blob_hash2 = [_]u8{0x02} ** 32;
+    const blob_hash1 = @as([32]u8, @splat(0x01));
+    const blob_hash2 = @as([32]u8, @splat(0x02));
     const blob_hashes = [_][32]u8{ blob_hash1, blob_hash2 };
 
     const block = BlockInfo(.{}){
@@ -249,7 +265,7 @@ test "block info with blob data (EIP-4844)" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 20_000_000_000, // 20 gwei
-        .prev_randao = [_]u8{0xAB} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xAB)),
         .blob_base_fee = 1_000_000_000, // 1 gwei
         .blob_versioned_hashes = &blob_hashes,
     };
@@ -278,7 +294,7 @@ test "mixed block info types" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1 << 80, // Requires u96
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1 << 70, // Requires u96
         .blob_versioned_hashes = &.{},
     };
@@ -349,9 +365,9 @@ test "block info address variations" {
     // Test with different coinbase addresses
     const addresses = [_]Address{
         primitives.ZERO_ADDRESS,
-        Address{ .bytes = [_]u8{0xFF} ** 20 }, // All ones
-        Address{ .bytes = [_]u8{ 0x12, 0x34, 0x56 } ++ [_]u8{0} ** 17 }, // Mixed pattern
-        Address{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 }, // Single bit set
+        Address{ .bytes = @as([20]u8, @splat(0xFF)) }, // All ones
+        Address{ .bytes = [_]u8{ 0x12, 0x34, 0x56 } ++ @as([17]u8, @splat(0)) }, // Mixed pattern
+        Address{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) }, // Single bit set
     };
 
     for (addresses) |addr| {
@@ -363,7 +379,7 @@ test "block info address variations" {
             .gas_limit = 30_000_000,
             .coinbase = addr,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };
@@ -375,9 +391,14 @@ test "block info address variations" {
 
 test "block info prev_randao variations" {
     const randao_values = [_][32]u8{
-        [_]u8{0} ** 32,
-        [_]u8{0xFF} ** 32,
-        [_]u8{ 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF } ** 4,
+        @as([32]u8, @splat(0)),
+        @as([32]u8, @splat(0xFF)),
+        comptime repeat: {
+        const pattern = [_]u8{ 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF };
+        var out: [8 * 4]u8 = undefined;
+        for (&out, 0..) |*byte, i| byte.* = pattern[i % pattern.len];
+        break :repeat out;
+    },
     };
 
     for (randao_values) |randao| {
@@ -405,7 +426,7 @@ test "block info maximum blob hashes" {
     // Test with maximum practical number of blob hashes
     var blob_hashes: [16][32]u8 = undefined;
     for (0..16) |i| {
-        blob_hashes[i] = [_]u8{@intCast(i)} ++ [_]u8{0xFF} ** 31;
+        blob_hashes[i] = [_]u8{@intCast(i)} ++ @as([31]u8, @splat(0xFF));
     }
 
     const block = BlockInfo(.{}){
@@ -416,14 +437,14 @@ test "block info maximum blob hashes" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 20_000_000_000,
-        .prev_randao = [_]u8{0xAB} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xAB)),
         .blob_base_fee = 1_000_000_000,
         .blob_versioned_hashes = &blob_hashes,
     };
 
     try testing.expectEqual(@as(usize, 16), block.blob_versioned_hashes.len);
     for (0..16) |i| {
-        try testing.expectEqual([_]u8{@intCast(i)} ++ [_]u8{0xFF} ** 31, block.blob_versioned_hashes[i]);
+        try testing.expectEqual([_]u8{@intCast(i)} ++ @as([31]u8, @splat(0xFF)), block.blob_versioned_hashes[i]);
     }
     try testing.expect(block.validate());
 }
@@ -438,7 +459,7 @@ test "block info zero blob base fee pre-cancun" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 20_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0, // Should be 0 pre-Cancun
         .blob_versioned_hashes = &.{}, // Empty pre-Cancun
     };
@@ -467,7 +488,7 @@ test "block info difficulty boundary values" {
             .gas_limit = 30_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };
@@ -517,7 +538,7 @@ test "block info large base fee values" {
             .gas_limit = 30_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = base_fee,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = base_fee / 10, // Related blob fee
             .blob_versioned_hashes = &.{},
         };

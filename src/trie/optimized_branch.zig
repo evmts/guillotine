@@ -263,7 +263,7 @@ test "CompactBranchNode - basic operations" {
     }
 
     // Add another child
-    const hash2 = [_]u8{0} ** 32;
+    const hash2 = @as([32]u8, @splat(0));
     var hash2_copy: [32]u8 = undefined;
     @memcpy(&hash2_copy, &hash2);
     try branch.add_child(7, HashValue{ .Hash = hash2_copy }, true, true);

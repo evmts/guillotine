@@ -47,7 +47,6 @@ Verified against `src/evm_config.zig`.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `enable_fusion` | `true` | Opcode fusion. See [Synthetic opcodes](/concepts/synthetic-opcodes). |
-| `enable_native_jit` | `false` | Run hot, eligible pure-compute contracts through the ARM64 JIT tier in `src/jit/`. Other targets, traced runs, and initcode use the interpreter. See [Benchmarks and native JIT](/guides/benchmarks-and-jit#native-arm64-jit). |
 | `enable_precompiles` | `true` | When `false`, calls to precompile addresses skip the precompile path. |
 | `vector_length` | `0` | SIMD width; `0` auto-detects for the target. |
 | `stack_size` | `1024` | Stack slots. Smaller stacks shrink the frame. |
@@ -77,7 +76,7 @@ bug. Never ship them.
 | --- | --- | --- |
 | `DatabaseType` | `Database` (`src/storage/database.zig`) | State backend type. |
 | `opcode_overrides` | `&.{}` | Declared but not applied: `frame_config()` passes `&.{}` and `Frame` builds its handler table with `getOpcodeHandlers(Self, &.{})` (`src/frame/frame.zig`). |
-| `precompile_overrides` | `&.{}` | Declared but not read outside `src/evm_config.zig`. |
+| `precompile_overrides` | `&.{}` | Extra or replacement precompiles: `{ address, execute }` pairs, checked before the fork's standard set (`executePrecompileOverride` in `src/evm.zig`). Ignored when `enable_precompiles` is `false`. |
 | `block_info_config` | `.{ .DifficultyType = u64, .BaseFeeType = u64, .use_compact_types = false }` | Compact vs full block-info field widths. |
 | `tracer_config` | `TracerConfig.disabled` | See [Tracing](/guides/tracing). |
 
@@ -130,18 +129,38 @@ const Fuzz = @import("evm").Evm(.{
 
 ### Overriding an opcode or a precompile
 
-`EvmConfig` declares `opcode_overrides` and `precompile_overrides`, but nothing
-applies them yet. `frame_config()` passes `&.{}` for opcode overrides,
-`Frame` builds its handler table with `getOpcodeHandlers(Self, &.{})`, and
-nothing outside `src/evm_config.zig` reads `precompile_overrides`. Setting
-either field compiles and changes nothing.
+`precompile_overrides` works. Each entry names an address and an `execute`
+function that returns `PrecompileOutput{ .output, .gas_used, .success }`
+(`src/evm_config.zig`). A failed override, or one that reports more gas than it
+was given, consumes all of the call's gas.
 
-## Build flags do not configure the engine
+`PrecompileOverride` and `PrecompileOutput` are declared in `src/evm_config.zig`
+but not re-exported from the `evm` module, so code outside `src/` names them
+through the field type, for example
+`@typeInfo(@FieldType(EvmConfig, "precompile_overrides")).pointer.child`. The
+`EvmConfig - precompile overrides` test in `src/evm_config.zig` shows a complete
+override.
+
+`opcode_overrides` is declared but not applied: `Frame` builds its handler table
+with `getOpcodeHandlers(Self, &.{})` (`src/frame/frame.zig`), so setting it
+compiles and changes nothing.
+
+## Build flags configure `DefaultEvm` only
 
 `build.zig` declares `-Devm-hardfork`, `-Devm-enable-fusion`,
-`-Devm-disable-gas`, `-Devm-optimize`, `-Dmax-call-depth`, and related flags
-(`zig build -h`). The `src/` engine reads only `enable_tracing` from the
-generated `build_options` module (`src/instructions/handlers_jump.zig`).
-`BuildConfiguredEvm` and `DefaultEvm` are `Evm(EvmConfig{})` (`src/root.zig`),
-so they use the defaults above whatever flags you pass. Set `EvmConfig` fields
-in Zig instead.
+`-Devm-disable-gas`, `-Ddisable-balance-checks`, `-Denable-tracing`,
+`-Dmax-call-depth`, `-Dstack-size`, `-Dmemory-limit` and related flags
+(`zig build -h`). `getBuildConfig()` in `src/root.zig` reads them from the
+generated `build_options` module and builds the `EvmConfig` of
+`BuildConfiguredEvm`, which is also exported as `DefaultEvm`. An
+`Evm(.{ ... })` you instantiate yourself ignores them.
+
+- `-Devm-hardfork` accepts enum names (`CANCUN`) and EEST names (`Cancun`); an
+  unknown name is a compile error.
+- `-Denable-tracing=true` selects `TracerConfig.debug`.
+- `-Devm-disable-gas=true` and `-Ddisable-balance-checks=true` are a compile
+  error unless `-Doptimize=Debug`, so a release artifact cannot ship them.
+- `-Devm-optimize` is validated and exported as `optimize_strategy`, but no
+  `EvmConfig` field consumes it.
+- `-Devm-enable-fusion=false` also switches `zig build state-tests` to an EVM
+  with fusion off (`specs/evm_fusion_off.zig`).

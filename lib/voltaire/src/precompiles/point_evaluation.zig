@@ -36,7 +36,7 @@ pub fn execute(
 
     // Verify versioned hash matches commitment
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(commitment, &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(commitment, &computed_hash, .{});
     computed_hash[0] = 0x01; // Version byte for EIP-4844
 
     // Check if versioned hash matches
@@ -57,9 +57,13 @@ pub fn execute(
         z_ptr,
         y_ptr,
         proof_ptr,
-    ) catch {
-        return error.InvalidInput;
+    ) catch |err| switch (err) {
+        error.TrustedSetupNotLoaded => return error.TrustedSetupNotLoaded,
+        // c-kzg rejects malformed commitments, proofs and field elements.
+        else => return error.InvalidInput,
     };
+
+    if (!valid) return error.InvalidInput;
 
     const output = try allocator.alloc(u8, 64);
     @memset(output, 0);
@@ -101,7 +105,7 @@ test "point_evaluation - out of gas" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Create valid 192-byte input
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
 
     // Try to execute with insufficient gas
     const result = execute(testing.allocator, &input, GAS - 1);
@@ -116,7 +120,7 @@ test "point_evaluation - invalid input length too short" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Input too short (191 bytes instead of 192)
-    const input = [_]u8{0} ** 191;
+    const input = @as([191]u8, @splat(0));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -130,7 +134,7 @@ test "point_evaluation - invalid input length too long" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Input too long (193 bytes instead of 192)
-    const input = [_]u8{0} ** 193;
+    const input = @as([193]u8, @splat(0));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -157,7 +161,7 @@ test "point_evaluation - versioned hash mismatch" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Create input with valid commitment but wrong versioned hash
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Set versioned hash to something that won't match
     input[0] = 0xFF;
@@ -182,7 +186,7 @@ test "point_evaluation - correct proof case 0 (point at infinity)" {
     // y: 0x0000000000000000000000000000000000000000000000000000000000000000
     // proof: 0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Commitment (48 bytes) - point at infinity
     input[96] = 0xc0;
@@ -192,7 +196,7 @@ test "point_evaluation - correct proof case 0 (point at infinity)" {
 
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
     computed_hash[0] = 0x01;
 
     // Set versioned hash
@@ -231,7 +235,7 @@ test "point_evaluation - correct proof case 1" {
     const y_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     const proof_hex = "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Parse commitment
     var i: usize = 0;
@@ -267,7 +271,7 @@ test "point_evaluation - correct proof case 1" {
 
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
     computed_hash[0] = 0x01;
 
     // Set versioned hash
@@ -284,7 +288,7 @@ test "point_evaluation - correct proof case 1" {
     try testing.expectEqual(0x00, result.output[31]);
 }
 
-test "point_evaluation - incorrect proof returns zero output" {
+test "point_evaluation - incorrect proof returns error" {
     const testing = std.testing;
 
     // Initialize KZG trusted setup
@@ -297,7 +301,7 @@ test "point_evaluation - incorrect proof returns zero output" {
     const y_hex = "0000000000000000000000000000000000000000000000000000000000000000";
     const proof_hex = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Parse commitment
     var i: usize = 0;
@@ -333,22 +337,13 @@ test "point_evaluation - incorrect proof returns zero output" {
 
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
     computed_hash[0] = 0x01;
 
     // Set versioned hash
     @memcpy(input[0..32], &computed_hash);
 
-    const result = try execute(testing.allocator, &input, GAS);
-    defer result.deinit(testing.allocator);
-
-    try testing.expectEqual(GAS, result.gas_used);
-    try testing.expectEqual(64, result.output.len);
-
-    // Verify all zeros output (invalid proof)
-    for (result.output) |byte| {
-        try testing.expectEqual(0, byte);
-    }
+    try testing.expectError(error.InvalidInput, execute(testing.allocator, &input, GAS));
 }
 
 test "point_evaluation - invalid commitment malformed" {
@@ -366,7 +361,7 @@ test "point_evaluation - invalid commitment malformed" {
     const y_hex = "1824b159acc5056f998c4fefecbc4ff55884b7fa0003480200000001fffffffe";
     const proof_hex = "b0c829a8d2d3405304fecbea193e6c67f7c3912a6adc7c3737ad3f8a3b750425c1531a7426f03033a3994bc82a10609f";
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Parse commitment
     var i: usize = 0;
@@ -402,7 +397,7 @@ test "point_evaluation - invalid commitment malformed" {
 
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
     computed_hash[0] = 0x01;
 
     // Set versioned hash
@@ -419,7 +414,7 @@ test "point_evaluation - all zero input" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -432,7 +427,7 @@ test "point_evaluation - all ones input" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0xFF} ** 192;
+    var input = @as([192]u8, @splat(0xFF));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -445,7 +440,7 @@ test "point_evaluation - versioned hash wrong version byte" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Set commitment to point at infinity
     input[96] = 0xc0;
@@ -455,7 +450,7 @@ test "point_evaluation - versioned hash wrong version byte" {
 
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
     computed_hash[0] = 0x01;
 
     // Set versioned hash but with wrong version byte
@@ -474,7 +469,7 @@ test "point_evaluation - output format validation" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Use valid test vector
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Commitment (48 bytes) - point at infinity
     input[96] = 0xc0;
@@ -484,7 +479,7 @@ test "point_evaluation - output format validation" {
 
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &computed_hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
     computed_hash[0] = 0x01;
 
     // Set versioned hash
@@ -523,11 +518,11 @@ test "point_evaluation - gas usage always constant" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Test with valid proof
-    var input1 = [_]u8{0} ** 192;
+    var input1 = @as([192]u8, @splat(0));
     input1[96] = 0xc0;
     input1[144] = 0xc0;
     var hash1: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input1[96..144], &hash1);
+    std.crypto.hash.sha2.Sha256.hash(input1[96..144], &hash1, .{});
     hash1[0] = 0x01;
     @memcpy(input1[0..32], &hash1);
 
@@ -540,7 +535,7 @@ test "point_evaluation - gas usage always constant" {
     const commitment_hex = "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     const proof_hex = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
-    var input2 = [_]u8{0} ** 192;
+    var input2 = @as([192]u8, @splat(0));
 
     var i: usize = 0;
     while (i < 48) : (i += 1) {
@@ -557,16 +552,11 @@ test "point_evaluation - gas usage always constant" {
     }
 
     var hash2: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input2[96..144], &hash2);
+    std.crypto.hash.sha2.Sha256.hash(input2[96..144], &hash2, .{});
     hash2[0] = 0x01;
     @memcpy(input2[0..32], &hash2);
 
-    const result2 = try execute(testing.allocator, &input2, GAS);
-    defer result2.deinit(testing.allocator);
-
-    // Gas usage should be the same for both valid and invalid proofs
-    try testing.expectEqual(GAS, result2.gas_used);
-    try testing.expectEqual(result1.gas_used, result2.gas_used);
+    try testing.expectError(error.InvalidInput, execute(testing.allocator, &input2, GAS));
 }
 
 test "point_evaluation - exact gas limit allowed" {
@@ -576,11 +566,11 @@ test "point_evaluation - exact gas limit allowed" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     input[96] = 0xc0;
     input[144] = 0xc0;
     var hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &hash, .{});
     hash[0] = 0x01;
     @memcpy(input[0..32], &hash);
 
@@ -598,11 +588,11 @@ test "point_evaluation - high gas limit accepted" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     input[96] = 0xc0;
     input[144] = 0xc0;
     var hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &hash, .{});
     hash[0] = 0x01;
     @memcpy(input[0..32], &hash);
 
@@ -621,11 +611,11 @@ test "point_evaluation - memory allocation success" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     input[96] = 0xc0;
     input[144] = 0xc0;
     var hash: [32]u8 = undefined;
-    try crypto.keccak_asm.keccak256(input[96..144], &hash);
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &hash, .{});
     hash[0] = 0x01;
     @memcpy(input[0..32], &hash);
 
@@ -646,7 +636,7 @@ test "point_evaluation - input components boundaries" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Set each component to distinct values to verify boundaries
     @memset(input[0..32], 0x01); // versioned_hash
@@ -658,4 +648,28 @@ test "point_evaluation - input components boundaries" {
     // This should fail due to invalid hash, but shouldn't crash
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
+}
+
+test "point_evaluation - missing trusted setup is reported distinctly" {
+    const testing = std.testing;
+
+    kzg_setup.deinit(testing.allocator);
+    try testing.expect(!kzg_setup.isInitialized());
+
+    // A well-formed input whose versioned hash matches the commitment.
+    var input = @as([192]u8, @splat(0));
+    input[96] = 0xc0;
+    input[144] = 0xc0;
+    var computed_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
+    computed_hash[0] = 0x01;
+    @memcpy(input[0..32], &computed_hash);
+
+    try testing.expectError(error.TrustedSetupNotLoaded, execute(testing.allocator, &input, GAS));
+
+    try kzg_setup.init();
+    defer kzg_setup.deinit(testing.allocator);
+    const result = try execute(testing.allocator, &input, GAS);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(GAS, result.gas_used);
 }

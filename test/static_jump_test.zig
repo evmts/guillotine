@@ -1,68 +1,171 @@
 const std = @import("std");
 const testing = std.testing;
-const evm = @import("evm");
-const Frame = evm.DefaultEvm.Frame;
-const Dispatch = Frame.Dispatch;
-const Bytecode = evm.Bytecode(.{});
-const OpcodeSynthetic = evm.OpcodeSynthetic.OpcodeSynthetic;
+const Frame = @import("../src/frame/frame.zig").Frame;
+const FrameConfig = @import("../src/frame/frame_config.zig").FrameConfig;
+const dispatch_mod = @import("../src/preprocessor/dispatch.zig");
+const bytecode_mod = @import("../src/bytecode/bytecode.zig");
+const bytecode_builder = @import("../src/bytecode/bytecode_builder.zig");
+const opcode_data = @import("../src/opcodes/opcode_data.zig");
+const DefaultTracer = @import("../src/tracer/tracer.zig").DefaultTracer;
+const MemoryDatabase = @import("../src/storage/memory_database.zig").MemoryDatabase;
+const Address = @import("voltaire").Address;
+const frame_handlers = @import("../src/frame/frame_handlers.zig");
+
+// Test configuration
+const test_config = FrameConfig{
+    .stack_size = 1024,
+    .WordType = u256,
+    .max_bytecode_size = 1024,
+    .block_gas_limit = 30_000_000,
+    .DatabaseType = MemoryDatabase,
+    .TracerType = DefaultTracer,
+    .memory_initial_capacity = 4096,
+    .memory_limit = 0xFFFFFF,
+};
+
+const TestFrame = Frame(test_config);
+const Dispatch = dispatch_mod.Dispatch(TestFrame);
 
 test "static jump optimization - valid jump to JUMPDEST" {
     const allocator = testing.allocator;
-    const code = [_]u8{ 0x60, 5, 0x56, 0xfe, 0xfe, 0x5b, 0x00 };
-    var bytecode = try Bytecode.init(allocator, &code);
-    defer bytecode.deinit();
 
-    var built = try Dispatch.DispatchSchedule.initWithJumpTable(allocator, bytecode, &Frame.opcode_handlers, @as(?*evm.Tracer, null));
-    defer built.schedule.deinit();
-    defer built.jump_table.deinit(allocator);
+    // Build bytecode with PUSH+JUMP fusion to a valid JUMPDEST
+    var builder = bytecode_builder.BytecodeBuilder.init(allocator);
+    defer builder.deinit();
 
-    const schedule = &built.schedule;
-    const index: usize = @intFromBool(schedule.has_first_block_gas);
-    try testing.expect(schedule.validate());
-    if (schedule.item_kinds.len != 0) {
-        try testing.expectEqualSlices(Dispatch.ItemKind, &.{ .opcode_handler, .jump_static }, schedule.item_kinds[index..][0..2]);
+    // Add a PUSH 5 + JUMP fusion (should jump to PC 5)
+    try builder.appendPush(5);
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.JUMP));
+    // Add some padding
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.INVALID));
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.INVALID));
+    // Add JUMPDEST at PC 5
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.JUMPDEST));
+    // Add STOP after JUMPDEST
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.STOP));
+
+    const raw_bytes = try builder.toOwnedSlice();
+    defer allocator.free(raw_bytes);
+
+    // Create analyzed bytecode
+    const analyzed = try bytecode_mod.AnalyzedBytecode.init(allocator, raw_bytes);
+    defer analyzed.deinit(allocator);
+
+    // Create dispatch schedule
+    const opcode_handlers = frame_handlers.getOpcodeHandlers(TestFrame, &.{});
+    const schedule = try Dispatch.init(allocator, analyzed, &opcode_handlers);
+    defer allocator.free(schedule);
+
+    // Verify the schedule contains a static jump handler
+    var found_static_jump = false;
+    const JumpSyntheticHandlers = @import("../src/instructions/handlers_jump_synthetic.zig").Handlers(TestFrame);
+
+    for (schedule) |item| {
+        switch (item) {
+            .opcode_handler => |handler| {
+                if (handler == &JumpSyntheticHandlers.jump_to_static_location) {
+                    found_static_jump = true;
+                    break;
+                }
+            },
+            else => {},
+        }
     }
-    try testing.expectEqual(evm.frame_handlers.getSyntheticHandler(Frame, @intFromEnum(OpcodeSynthetic.JUMP_TO_STATIC_LOCATION)), schedule.items[index].opcode_handler);
-    const target = built.jump_table.find_jump_target(5) orelse return error.MissingJumpTarget;
-    try testing.expectEqual(@as(*const anyopaque, @ptrCast(target)), schedule.items[index + 1].jump_static.dispatch);
+
+    try testing.expect(found_static_jump);
 }
 
-test "static jump optimization - invalid jump resolves to invalid-target handler" {
+test "static jump optimization - invalid jump falls back to inline" {
     const allocator = testing.allocator;
-    const code = [_]u8{ 0x60, 3, 0x56, 0xfe, 0x00 };
-    var bytecode = try Bytecode.init(allocator, &code);
-    defer bytecode.deinit();
 
-    var schedule = try Dispatch.DispatchSchedule.init(allocator, bytecode, &Frame.opcode_handlers, @as(?*evm.Tracer, null));
-    defer schedule.deinit();
+    // Build bytecode with PUSH+JUMP fusion to an invalid destination (not a JUMPDEST)
+    var builder = bytecode_builder.BytecodeBuilder.init(allocator);
+    defer builder.deinit();
 
-    const index: usize = @intFromBool(schedule.has_first_block_gas);
-    try testing.expect(schedule.validate());
-    if (schedule.item_kinds.len != 0) {
-        try testing.expectEqualSlices(Dispatch.ItemKind, &.{ .opcode_handler, .jump_static }, schedule.item_kinds[index..][0..2]);
+    // Add a PUSH 3 + JUMP fusion (jumps to PC 3, which is not a JUMPDEST)
+    try builder.appendPush(3);
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.JUMP));
+    // Add INVALID at PC 3 (not a JUMPDEST)
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.INVALID));
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.STOP));
+
+    const raw_bytes = try builder.toOwnedSlice();
+    defer allocator.free(raw_bytes);
+
+    // Create analyzed bytecode
+    const analyzed = try bytecode_mod.AnalyzedBytecode.init(allocator, raw_bytes);
+    defer analyzed.deinit(allocator);
+
+    // Create dispatch schedule
+    const opcode_handlers = frame_handlers.getOpcodeHandlers(TestFrame, &.{});
+    const schedule = try Dispatch.init(allocator, analyzed, &opcode_handlers);
+    defer allocator.free(schedule);
+
+    // Verify the schedule contains an inline jump handler (not static)
+    var found_inline_jump = false;
+    const JumpSyntheticHandlers = @import("../src/instructions/handlers_jump_synthetic.zig").Handlers(TestFrame);
+
+    for (schedule) |item| {
+        switch (item) {
+            .opcode_handler => |handler| {
+                if (handler == &JumpSyntheticHandlers.push_jump_inline) {
+                    found_inline_jump = true;
+                    break;
+                }
+            },
+            else => {},
+        }
     }
-    try testing.expectEqual(evm.frame_handlers.getSyntheticHandler(Frame, @intFromEnum(OpcodeSynthetic.JUMP_TO_STATIC_LOCATION)), schedule.items[index].opcode_handler);
-    const target: [*]const Dispatch.Item = @ptrCast(@alignCast(schedule.items[index + 1].jump_static.dispatch));
-    try testing.expectEqual(evm.frame_handlers.getSyntheticHandler(Frame, @intFromEnum(OpcodeSynthetic.INVALID_JUMP_TARGET)), target[0].opcode_handler);
+
+    try testing.expect(found_inline_jump);
 }
 
 test "static jumpi optimization - conditional jump to valid JUMPDEST" {
     const allocator = testing.allocator;
-    const code = [_]u8{ 0x60, 1, 0x60, 6, 0x57, 0xfe, 0x5b, 0x00 };
-    var bytecode = try Bytecode.init(allocator, &code);
-    defer bytecode.deinit();
 
-    var built = try Dispatch.DispatchSchedule.initWithJumpTable(allocator, bytecode, &Frame.opcode_handlers, @as(?*evm.Tracer, null));
-    defer built.schedule.deinit();
-    defer built.jump_table.deinit(allocator);
+    // Build bytecode with PUSH+JUMPI fusion to a valid JUMPDEST
+    var builder = bytecode_builder.BytecodeBuilder.init(allocator);
+    defer builder.deinit();
 
-    const schedule = &built.schedule;
-    const index = @as(usize, @intFromBool(schedule.has_first_block_gas)) + 2;
-    try testing.expect(schedule.validate());
-    if (schedule.item_kinds.len != 0) {
-        try testing.expectEqualSlices(Dispatch.ItemKind, &.{ .opcode_handler, .jump_static }, schedule.item_kinds[index..][0..2]);
+    // Push condition value (1 = true)
+    try builder.appendPush(1);
+    // Add a PUSH 6 + JUMPI fusion (should jump to PC 6)
+    try builder.appendPush(6);
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.JUMPI));
+    // Add some padding
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.INVALID));
+    // Add JUMPDEST at PC 6
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.JUMPDEST));
+    // Add STOP after JUMPDEST
+    try builder.appendOpcode(@intFromEnum(opcode_data.Opcode.STOP));
+
+    const raw_bytes = try builder.toOwnedSlice();
+    defer allocator.free(raw_bytes);
+
+    // Create analyzed bytecode
+    const analyzed = try bytecode_mod.AnalyzedBytecode.init(allocator, raw_bytes);
+    defer analyzed.deinit(allocator);
+
+    // Create dispatch schedule
+    const opcode_handlers = frame_handlers.getOpcodeHandlers(TestFrame, &.{});
+    const schedule = try Dispatch.init(allocator, analyzed, &opcode_handlers);
+    defer allocator.free(schedule);
+
+    // Verify the schedule contains a static jumpi handler
+    var found_static_jumpi = false;
+    const JumpSyntheticHandlers = @import("../src/instructions/handlers_jump_synthetic.zig").Handlers(TestFrame);
+
+    for (schedule) |item| {
+        switch (item) {
+            .opcode_handler => |handler| {
+                if (handler == &JumpSyntheticHandlers.jumpi_to_static_location) {
+                    found_static_jumpi = true;
+                    break;
+                }
+            },
+            else => {},
+        }
     }
-    try testing.expectEqual(evm.frame_handlers.getSyntheticHandler(Frame, @intFromEnum(OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION)), schedule.items[index].opcode_handler);
-    const target = built.jump_table.find_jump_target(6) orelse return error.MissingJumpTarget;
-    try testing.expectEqual(@as(*const anyopaque, @ptrCast(target)), schedule.items[index + 1].jump_static.dispatch);
+
+    try testing.expect(found_static_jumpi);
 }

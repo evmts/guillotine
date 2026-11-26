@@ -9,7 +9,7 @@ test "is_precompile returns true for ECRECOVER (0x01)" {
     defer evm.deinit();
 
     // ECRECOVER is at address 0x01
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[19] = 1;
     const ecrecover_addr = primitives.Address.Address{ .bytes = addr_bytes };
 
@@ -22,7 +22,7 @@ test "is_precompile returns true for SHA256 (0x02)" {
     defer evm.deinit();
 
     // SHA256 is at address 0x02
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[19] = 2;
     const sha256_addr = primitives.Address.Address{ .bytes = addr_bytes };
 
@@ -35,7 +35,7 @@ test "is_precompile returns true for RIPEMD160 (0x03)" {
     defer evm.deinit();
 
     // RIPEMD160 is at address 0x03
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[19] = 3;
     const ripemd_addr = primitives.Address.Address{ .bytes = addr_bytes };
 
@@ -48,7 +48,7 @@ test "is_precompile returns true for IDENTITY (0x04)" {
     defer evm.deinit();
 
     // IDENTITY is at address 0x04
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[19] = 4;
     const identity_addr = primitives.Address.Address{ .bytes = addr_bytes };
 
@@ -61,7 +61,7 @@ test "is_precompile returns false for non-precompile address" {
     defer evm.deinit();
 
     // Random contract address
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[0] = 0xDE;
     addr_bytes[1] = 0xAD;
     addr_bytes[2] = 0xBE;
@@ -87,7 +87,7 @@ test "is_precompile depends on hardfork" {
 
     // Set different hardforks and check precompile availability
     // MODEXP (0x05) should be available from Byzantium onwards
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[19] = 5;
     const modexp_addr = primitives.Address.Address{ .bytes = addr_bytes };
 
@@ -106,7 +106,7 @@ test "inner_call handles precompile IDENTITY (0x04)" {
     defer evm.deinit();
 
     // IDENTITY precompile just returns the input
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[19] = 4;
     const identity_addr = primitives.Address.Address{ .bytes = addr_bytes };
 
@@ -125,7 +125,7 @@ test "inner_call handles empty account (non-precompile, no code)" {
     defer evm.deinit();
 
     // Random address with no code
-    var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
     addr_bytes[0] = 0xCA;
     addr_bytes[1] = 0xFE;
     const empty_addr = primitives.Address.Address{ .bytes = addr_bytes };

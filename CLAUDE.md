@@ -17,7 +17,7 @@ Every line of code must be correct. Zero error tolerance.
 - Sensitive data detected (API keys/passwords/tokens): abort, explain, request sanitized prompt
 - Memory safety: plan ownership/deallocation for every allocation
 - Every change must be tested and verified
-- Use SafetyCounter (`src/internal/safety_counter.zig`) for infinite loop prevention: the tracer caps execution at 300M instructions, and `EvmConfig.loop_quota` caps loops at 1M in Debug and ReleaseSafe
+- Use SafetyCounter (`src/internal/safety_counter.zig`) for infinite loop prevention: `EvmConfig.loop_quota` caps analysis loops at 1M iterations in Debug and ReleaseSafe. Gas bounds execution; the tracer's instruction counter only logs, it never stops a run
 - **CRITICAL: Crashes are SEVERE SECURITY BUGS** - Any crash (e.g., from `std.debug.assert`) indicates memory unsafety or missing validation. The EVM must ALWAYS return errors gracefully, never crash. Before fixing the bug that triggered the crash, FIRST fix the validation/error handling that allowed the crash to occur.
 
 ### Build Verification
@@ -30,7 +30,7 @@ Follow TDD
 ### Debugging
 
 - Bug not obvious = improve visibility first
-- Use the MinimalEvm differential tests in `test/differential` (`DifferentialTestor` in `differential_testor.zig`; `zig build test-integration` runs them). `zig build test-opcodes` is not a differential check: 127 of its 138 per-opcode files assert nothing beyond a successful run, and the tracer's MinimalEvm validation is off by default (`TracerConfig.enabled = false`)
+- Use the MinimalEvm differential tests in `test/differential` (`zig build test-integration` runs them)
 
 ### Zero Tolerance
 
@@ -86,29 +86,29 @@ thing.* = try Thing.init(allocator);
 return thing;
 ```
 
-### ArrayList API (Zig 0.15)
+### ArrayList API (Zig 0.17.1)
 
-**CRITICAL**: In Zig 0.15, `std.ArrayList(T)` returns an UNMANAGED type that requires allocator for all operations!
+**CRITICAL**: In Zig 0.17.1, `std.ArrayList(T)` returns an UNMANAGED type that requires allocator for all operations!
 
 ```zig
 // CORRECT: std.ArrayList is UNMANAGED (no internal allocator)
 var list = std.ArrayList(T){};  // Default initialization
 // OR
-var list: std.ArrayList(T) = .empty;  // Empty constant
+const list = std.ArrayList(T).empty;  // Empty constant
 // OR with capacity
 var list = try std.ArrayList(T).initCapacity(allocator, 100);
 
 // All operations REQUIRE allocator:
 defer list.deinit(allocator);  // ✅ allocator REQUIRED
 try list.append(allocator, item);  // ✅ allocator REQUIRED
-try list.ensureTotalCapacity(allocator, 100);  // ✅ allocator REQUIRED
+try list.ensureCapacity(allocator, 100);  // ✅ allocator REQUIRED
 _ = list.pop();  // No allocator needed for pop
 
 // Direct access (no allocator needed):
 list.items[0] = value;
 list.items.len = 0;
 
-// WRONG - This does NOT work in Zig 0.15:
+// WRONG - This does NOT work in Zig 0.17.1:
 var list = std.ArrayList(T).init(allocator);  // ❌ No init() method!
 list.deinit();  // ❌ Missing required allocator
 try list.append(item);  // ❌ Missing required allocator
@@ -159,7 +159,7 @@ Use `zig build test` not `zig test`. Common error: "primitives" package requires
 **External**: call_params.zig, call_result.zig (`src/frame/`); precompiles live in the vendored `lib/voltaire/src/precompiles/` and are imported as the `precompiles` module
 **Bytecode**: bytecode.zig, bytecode_analyze.zig, bytecode_stats.zig
 **Infrastructure**: tracer.zig, hardfork.zig, eips.zig
-**Tracer**: minimal_evm.zig (MinimalEvm, the reference interpreter), pc_tracker.zig, minimal_evm_c.zig (C/WASM FFI), minimal_evm_sync.zig (Frame/MinimalEvm sync)
+**Tracer**: minimal_evm.zig (MinimalEvm, the reference interpreter), pc_tracker.zig, minimal_evm_sync.zig (Frame/MinimalEvm sync)
 
 ### Import Rules
 
@@ -176,12 +176,12 @@ const Contract = @import("../frame/contract.zig");
 
 ### Basic Commands
 - `zig build` - Build the project
-- `zig build test` - Run all tests (specs → integration → unit)
+- `zig build test` - Run the self-contained suites: unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz and jit (`specs` and `state-tests` need fetched fixtures and run separately)
 - `zig build specs` - Run Ethereum execution spec tests
 - `zig build test-integration` - Run integration tests from test/**/*.zig
 - `zig build test-unit` - Run unit tests from src/**/*.zig
 - `zig build test-lib` - Run library tests from lib/**/*.zig
-- `zig build test-opcodes` - Run the per-opcode tests plus the ModExp, ECRECOVER and spec-runner unit tests (the CI gate)
+- `zig build test-opcodes` - Run opcode differential tests
 
 ### Test Organization
 
@@ -193,10 +193,9 @@ const Contract = @import("../frame/contract.zig");
 
 **Test Aggregator Files:**
 - `src/root.zig` - Aggregates all unit tests from src/**/*.zig
-- `test/root.zig` - Aggregates all integration tests from test/**/*.zig
+- `test/root.zig` - Aggregates all integration tests from test/**/*.zig  
 - `lib/root.zig` - Aggregates all library tests from lib/**/*.zig
-- `specs/cases/root.zig` - Ethereum spec test runner (`zig build specs`)
-- `specs/eest_runner.zig` - Official EEST state test runner (`zig build state-tests`; see `specs/README.md`)
+- `test/specs/ethereum_specs_test.zig` - Ethereum spec test runner
 
 ### Test Filtering
 Use `-Dtest-filter='<pattern>'` to run specific tests:
@@ -212,11 +211,20 @@ zig build test-unit -Dtest-filter='stack'
 ```
 
 ### Other Test Commands
-- `zig build test-opcodes-0x01` - One opcode's test file, `test/evm/opcodes/01_test.zig` (every opcode has a `test-opcodes-0xNN` step)
-- `zig build test-synthetic` - Synthetic opcode tests
-- `zig build test-fusions` - Fusion optimization tests
-- `zig build test-fixtures-differential` - Run the erc20-transfer fixture (checks only that deploy and call succeed)
-- `zig build state-tests` - Official EEST state tests
+- `zig build test-fusions` - Fusion optimization tests (unit + dispatch + differential)
+- `zig build test-modexp` - Vendored ModExp arithmetic and precompile tests
+- `zig build test-precompiles` - Precompile integration vectors, including KZG point evaluation
+- `zig build test-layer2` - Layer 2 (Base & OP Stack) unit tests
+- `zig build test-bench` - Benchmark statistics, CLI and workload construction
+- `zig build test-fuzz` - Zig fuzz targets (corpus replay; add `--fuzz` on Linux)
+- `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=N --threads=M` - Multi-threaded havoc fuzz campaign; failing inputs land in `.fuzz-crashes/`
+- `zig build test-jit` - Native JIT tests (`src/jit`)
+- `zig build state-tests` - Official EEST state fixtures (`scripts/fetch-eest-fixtures.sh` first)
+- `zig build verify-smt` - Bitwuzla/Z3 SMT proofs (`model_pins.json` must exist; refresh with `--update-pins` after review)
+
+Tests use the Zig standard test runner. `zig build test-unit` only runs the
+inline tests that `src/root.zig` imports; Evm-level behavior tests belong in
+`test/evm/opcodes/` (run by `zig build test-opcodes`).
 
 ## EVM Architecture
 
@@ -241,7 +249,7 @@ Execution: while (pc < bytecode.len) {
 Bytecode: [0x60, 0x01, 0x60, 0x02, 0x01, 0x56, 0x5b, 0x00]
 
 Dispatch Schedule (preprocessed):
-[0] = first_block_gas { gas: 17 }     // PUSH1 + PUSH1 + ADD + JUMP (3+3+3+8)
+[0] = first_block_gas { gas: 15 }     // Metadata for basic block
 [1] = &push_handler                   // Function pointer
 [2] = push_inline { value: 1 }        // Inline metadata
 [3] = &push_handler                   // Function pointer
@@ -249,14 +257,11 @@ Dispatch Schedule (preprocessed):
 [5] = &add_handler                    // Function pointer
 [6] = &jump_handler                   // Function pointer
 [7] = &jumpdest_handler               // Function pointer
-[8] = jump_dest { gas: 1, min: 0 }    // JUMPDEST + STOP (1+0)
+[8] = jump_dest { gas: 3, min: 0 }    // Gas for next block
 [9] = &stop_handler                   // Function pointer
 
 Execution: cursor[0].opcode_handler(frame, cursor) → tail calls
 ```
-
-The schedule is illustrative: it assumes `EvmConfig.enable_fusion = false`, and the
-builder in `src/preprocessor/dispatch.zig` also appends terminal handlers.
 
 **Key Differences:**
 1. **No PC in Frame**: Frame uses cursor (pointer into dispatch schedule)
@@ -309,23 +314,24 @@ The `tracer.assert()` calls in unsafe operations are **development aids for debu
 
 ### Opcode Pattern
 
-From `src/instructions/handlers_arithmetic.zig`:
+Handlers use the register-passing tail-call ABI in
+`src/preprocessor/handler_abi.zig`: `fn (frame, cursor, sp, gas)
+callconv(handler_cc) ExitCode`. On LLVM x86_64/aarch64 `handler_cc` is
+`preserve_none`, which cannot return an error union or take `u256` by value, so
+handlers return an `ExitCode` and the caller maps it back with `errorFromExit`.
 
 ```zig
-pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.ADD, cursor);
-
-    self.stack.binary_op_unsafe(struct {
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView{ .sp = sp };
+    N.before(self, .ADD, cursor, s.sp, gas);
+    s.binary_op_unsafe(struct {
         fn op(top: WordType, second: WordType) WordType {
             return top +% second;
         }
     }.op);
-
-    return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+    return N.next(self, .ADD, cursor, s.sp, gas);
 }
 ```
-
-Handlers assert through the EVM's tracer: `(&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_AND_INLINE requires 1 stack item");`.
 
 ## Opcode Navigation
 
@@ -343,16 +349,10 @@ Handlers organized by type:
 - Cursor-aware dispatch sync
 - Fixed MinimalEvm stack semantics (LIFO)
 
-### WASM Integration
-- C FFI wrapper (`src/tracer/minimal_evm_c.zig`)
-- Opaque handle pattern
-- Complete EVM lifecycle in WASM
-
 ### Dispatch Optimization
 - Static jump resolution
 - Dispatch cache
 - Fusion detection
-- 300M instruction safety limit
 
 ### Memory Management
 - Checkpoint system
@@ -381,21 +381,19 @@ The tracer system in `@src/tracer/tracer.zig` provides sophisticated execution s
 
 ### Instruction Handler Pattern
 ```zig
-pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.SOME_OPCODE, cursor);  // ← REQUIRED!
+pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    N.before(self, .SOME_OPCODE, cursor, sp, gas);  // ← REQUIRED! (calls beforeInstruction)
     // ... opcode implementation ...
-    return dispatch_next.nextInstruction(FrameType, self, cursor, .SOME_OPCODE);
+    return N.next(self, .SOME_OPCODE, cursor, sp, gas);
 }
 ```
 
-**CRITICAL**: Missing `beforeInstruction()` calls cause test failures because MinimalEvm gets out of sync.
-
 ### Synthetic Opcode Handling
 
-The tracer automatically handles synthetic opcodes in `executeMinimalEvmForOpcode()` (`src/tracer/minimal_evm_sync.zig`):
+The tracer automatically handles synthetic opcodes in `executeMinimalEvmForOpcode()`:
 - **Regular opcodes**: Execute exactly 1 MinimalEvm step
 - **PUSH_MSTORE_INLINE**: Execute 2 steps (PUSH1 + MSTORE)
-- **FUNCTION_DISPATCH**: Execute 4 steps (PUSH4 + EQ + PUSH + JUMPI)
+- **ISZERO_JUMPI**: Execute 3 steps (ISZERO + PUSH + JUMPI)
 - **etc.**
 
 This is NOT a divergence issue - it's the designed synchronization mechanism.
@@ -427,19 +425,19 @@ Detailed documentation is available in `docs/`:
   - [HARDFORKS.md](docs/dev/HARDFORKS.md) - EIP support matrix
   - [CONTRIBUTING.md](docs/dev/CONTRIBUTING.md) - Development workflow
 - **[docs/performance/](docs/performance/)** - Performance EVM specifics
+- **[docs/mini/](docs/mini/)** - Mini EVM specifics
 
 ## References
 
-- Zig docs: https://ziglang.org/documentation/0.15.2/ (CI uses Zig 0.15.2; `build.zig.zon` requires at least 0.15.1)
-- `evmts/guillotine-mini`: standalone readable reference EVM (separate repository, https://github.com/evmts/guillotine-mini)
-- `specs/execution-specs` (git submodule): Python execution specs and test fillers
+- Zig docs: https://ziglang.org/documentation/0.17.1/ (CI uses Zig 0.17.1; `build.zig.zon` requires at least 0.17.1)
+- `mini/`: guillotine-mini, the reference interpreter used for differential tests
 - Yellow Paper: Ethereum spec
 - EIPs: Ethereum Improvement Proposals
 
-## Collaboration & Ownership
+## Collaboration
 
-- Act as the maintainer and owner of the codebase: finish tasks end-to-end, push verified changes to `main`, merge PRs, close resolved issues, and run CI/release workflows without asking for permission on routine maintainer actions.
-- Only stop to ask when there is a genuine blocker (missing credentials/secrets, ambiguous product direction, or a hard security boundary).
+- Present proposals, wait for approval
+- Plan fails: STOP, explain, wait for guidance
 
 ## GitHub Issue Management
 
@@ -458,39 +456,42 @@ Required for: creating, commenting, closing, updating issues and all GitHub API 
 
 ## Build Commands
 
-Usage: `zig build [steps] [options]`
+Toolchain: Zig 0.17.1 (`zig version`), Rust/Cargo for `lib/voltaire` and
+`lib/ark`. `zig build` compiles Voltaire's Rust crypto archive itself
+(`cargo build --release --locked` into the Zig cache); no separate step.
 
-Run `zig build -l` for the full list (it includes one `test-opcodes-0xNN` step per opcode).
+Usage: `zig build [steps] [options]` (`zig build -l` lists every step)
 
 Key Steps:
-  test                         Run all tests (specs -> integration -> unit)
+  test                         Run unit, opcode, integration, layer 2, precompile, fusion, ModExp, fuzz and JIT tests
   specs                        Run Ethereum execution spec tests
   state-tests                  Run official pre-filled EEST state tests (Frontier through Osaka)
-  test-integration             Run integration tests from test/**/*.zig
-  test-unit                    Run unit tests from src/**/*.zig
-  test-lib                     Run library tests from lib/**/*.zig
-  test-opcodes                 Run per-opcode tests (most assert only a successful run)
-  test-synthetic               Test synthetic opcodes
-  test-fixtures-differential   Run the erc20-transfer fixture (checks success only)
-  test-fusions                 Run focused fusion tests (unit + dispatch + differential)
+  test-integration             Run integration tests from test/root.zig
+  test-unit                    Run unit tests imported by src/root.zig
+  test-lib                     Run library tests from lib/root.zig
+  test-opcodes                 Run all per-opcode differential tests (+ test-modexp)
   test-modexp                  Run vendored ModExp arithmetic and precompile tests
+  test-precompiles             Run precompile integration tests (SHA256..KZG point evaluation)
+  test-fusions                 Run focused fusion tests (unit + dispatch + differential)
   test-layer2                  Run Layer 2 (Base & OP Stack) unit tests
-  test-fuzz                    Run all Zig fuzz targets
-  shared / static              Build the shared or static library for FFI
-  bench                        Run self-contained EVM benchmarks (ReleaseFast)
-  verify                       Run the formal verification suite (LLVM IR + SMT + Lean 4)
+  test-fuzz                    Run all Zig fuzz targets (--fuzz on Linux for coverage-guided fuzzing)
+  fuzz-campaign                Run the multi-threaded fuzz campaign (-- --seconds=N --threads=M)
+  test-lean-diff               Differential fuzz against the Lean 4 reference specification
+  test-fixtures-differential   Run differential tests for benchmark fixtures (ERC20, etc.)
+  bench / bench-build          Run / build the self-contained ReleaseFast benchmark runner
+  test-bench                   Check benchmark statistics, CLI, and workload construction
+  shared / static              Build the C FFI shared / static library
+  verify / verify-smt / verify-ir / verify-lean   Formal verification suite
 
 Options:
+  --release[=mode]             Release mode: fast, safe, small
   -Doptimize=[enum]            Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
-  -Dtest-filter=[string]       Filter tests by pattern (e.g., -Dtest-filter='ADD opcode'); pass it once
-  -Denable-tracing=[bool]      Enable EVM instruction tracing
-  -Dspec-max-files=[string]    Limit spec files (specs, specs-bun)
-  -Dspec-fork=[string]         EEST fork(s) to run, comma-separated (state-tests)
-  -Dspec-report=[string]       Write an EEST JSON summary report (state-tests)
-
-`build.zig` also declares `-Devm-hardfork`, `-Devm-disable-gas`,
-`-Devm-enable-fusion`, `-Devm-optimize`, `-Ddisable-tailcall-dispatch` and the
-size and limit options (`-Dmax-call-depth`, `-Dstack-size`, ...), but no code
-under `src/` reads them. Select the hardfork and limits through the comptime
-`EvmConfig` in `src/evm_config.zig`, for example
-`Evm(.{ .eips = .{ .hardfork = .OSAKA } })`. The default hardfork is OSAKA.
+  -Dtest-filter=[string]       Filter tests by pattern (e.g., -Dtest-filter='ADD opcode')
+  -Devm-hardfork=[string]      Enum tag (FRONTIER .. OSAKA, AMSTERDAM) or EEST name (Cancun); default OSAKA.
+                               Invalid names are a compile error. Selects `DefaultEvm` via `getBuildConfig()`.
+  -Devm-disable-gas=[bool]     Disable gas checks (Debug only; any other -Doptimize is a compile error)
+  -Ddisable-balance-checks=[bool]  Disable balance checks (Debug only, same guard)
+  -Devm-enable-fusion=[bool]   Enable bytecode fusion (default: true); `false` also runs state-tests with fusion off
+  -Devm-optimize=[string]      fast, small or safe (default: safe); validated, exported as `optimize_strategy`
+  -Denable-tracing=[bool]      Build DefaultEvm with the debug tracer
+  -Dstrip=[bool]               Strip debug info from the FFI shared/static libraries (release.yml sets it)

@@ -9,13 +9,12 @@
 /// Configuration is validated at compile time to ensure EVM compliance
 /// and optimal performance characteristics.
 const std = @import("std");
-const limits = @import("evm_limits");
 
 pub const StackConfig = struct {
     const Self = @This();
 
     /// The maximum stack size for the evm. Defaults to 1024. Maximum supported is 4095
-    stack_size: u12 = limits.stack_capacity,
+    stack_size: u12 = 1024,
     /// The size of a single word in the EVM - Defaults to u256. Supports any word size up to u512
     WordType: type = u256,
     /// Whether to enable opcode fusions fuzing more than one opcode into a single operation

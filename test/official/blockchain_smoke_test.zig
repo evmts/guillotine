@@ -36,7 +36,7 @@ fn parseBytesHex(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
 fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
-    if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
+    if (t.len == 0 or std.mem.eql(u8, t, "0x")) return @as([32]u8, @splat(0));
     return try hex.hexToBytesFixed(32, t);
 }
 
@@ -75,7 +75,7 @@ fn setPreState(allocator: std.mem.Allocator, db: *Database, pre_obj: std.json.Va
             .balance = balance,
             .nonce = nonce,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         };
 
         if (acc.get("storage")) |storage_val| {
@@ -149,15 +149,17 @@ fn expectPostState(db: *Database, post_state_obj: std.json.Value) !void {
     }
 }
 
-fn isStrict() bool {
-    const env = std.process.getEnvVarOwned(std.testing.allocator, "OFFICIAL_STRICT") catch return false;
+fn isStrict() !bool {
+    const env = std.testing.environ.getAlloc(std.testing.allocator, "OFFICIAL_STRICT") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => return false,
+        else => return err,
+    };
     defer std.testing.allocator.free(env);
     return std.mem.eql(u8, env, "1") or std.mem.eql(u8, env, "true") or std.mem.eql(u8, env, "TRUE");
 }
 
 fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void {
-    var cwd = std.fs.cwd();
-    const data = try cwd.readFileAlloc(allocator, json_path, 64 * 1024 * 1024);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, json_path, allocator, .limited(64 * 1024 * 1024));
     defer allocator.free(data);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, data, .{ .ignore_unknown_fields = true });
@@ -214,7 +216,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
             .gas_limit = b_gas_limit,
             .coinbase = b_coinbase,
             .base_fee = b_base_fee,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };
@@ -254,7 +256,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
         }
     }
 
-    if (isStrict()) {
+    if (try isStrict()) {
         try expectPostState(&db, tc.get("postState").?);
     }
 }
@@ -262,10 +264,10 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
 test "official: blockchain test smoke (self_destructing_initcode single)" {
     const alloc = std.testing.allocator;
     const default_path = "test/official/fixtures/blockchain_tests/cancun/eip6780_selfdestruct/selfdestruct/self_destructing_initcode.json";
-    if (std.process.getEnvVarOwned(alloc, "OFFICIAL_JSON")) |p| {
-        defer alloc.free(p);
-        try runBlockchainCase(alloc, p);
-    } else |_| {
-        try runBlockchainCase(alloc, default_path);
-    }
+    const override = std.testing.environ.getAlloc(alloc, "OFFICIAL_JSON") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => null,
+        else => return err,
+    };
+    defer if (override) |path| alloc.free(path);
+    try runBlockchainCase(alloc, override orelse default_path);
 }

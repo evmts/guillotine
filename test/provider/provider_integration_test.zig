@@ -321,10 +321,10 @@ test "provider handles delayed responses" {
     const delayed = MockResponse.success("\"0x123\"").withDelay(100);
     try provider.setResponse("eth_blockNumber", delayed);
 
-    const start = std.time.milliTimestamp();
+    const start = milliTimestamp();
     const response = try provider.request("eth_blockNumber", "[]", 1);
     defer response.deinit(allocator);
-    const elapsed = std.time.milliTimestamp() - start;
+    const elapsed = milliTimestamp() - start;
 
     try std.testing.expect(elapsed >= 95);
     try std.testing.expect(response.result != null);
@@ -504,7 +504,7 @@ test "rate limiter refills over time" {
         try std.testing.expect(limiter.tryAcquire());
     }
 
-    std.Thread.sleep(std.time.ns_per_s);
+    try std.Io.sleep(std.testing.io, .fromNanoseconds(std.time.ns_per_s), .awake);
 
     i = 0;
     while (i < 10) : (i += 1) {
@@ -522,7 +522,7 @@ test "provider handles high request volume" {
 
     try provider.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
 
-    const start = std.time.milliTimestamp();
+    const start = milliTimestamp();
 
     var i: u32 = 0;
     while (i < 1000) : (i += 1) {
@@ -530,7 +530,7 @@ test "provider handles high request volume" {
         response.deinit(allocator);
     }
 
-    const elapsed = std.time.milliTimestamp() - start;
+    const elapsed = milliTimestamp() - start;
 
     try std.testing.expectEqual(@as(u32, 1000), provider.getCallCount("eth_blockNumber"));
     try std.testing.expect(elapsed < 5000);
@@ -542,7 +542,7 @@ test "provider memory usage under load" {
     var provider = MockProvider.init(allocator);
     defer provider.deinit();
 
-    const large_response = "\"0x" ++ "00" ** 1000 ++ "\"";
+    const large_response = "\"0x" ++ &@as([2000]u8, @splat('0')) ++ "\"";
     try provider.setResponse("eth_blockNumber", MockResponse.success(large_response));
 
     var i: u32 = 0;
@@ -568,7 +568,7 @@ test "provider handles burst then sustained load" {
         response.deinit(allocator);
     }
 
-    std.Thread.sleep(100 * std.time.ns_per_ms);
+    try std.Io.sleep(std.testing.io, .fromNanoseconds(100 * std.time.ns_per_ms), .awake);
 
     i = 0;
     while (i < 100) : (i += 1) {
@@ -577,4 +577,8 @@ test "provider handles burst then sustained load" {
     }
 
     try std.testing.expectEqual(@as(u32, 200), provider.getCallCount("eth_blockNumber"));
+}
+
+fn milliTimestamp() i64 {
+    return @intCast(@divFloor(std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds, std.time.ns_per_ms));
 }

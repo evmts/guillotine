@@ -1,9 +1,13 @@
 const primitives = @import("voltaire");
 const Address = primitives.Address;
+const Hardfork = primitives.Hardfork;
 
 pub fn CallParams(config: anytype) type {
-    // We can add config-specific customizations here in the future
-    _ = config; // Currently unused but reserved for future enhancements
+    // The union must not capture anything derived from `config`: a type that captures
+    // nothing is the same type for every config, and frames build `CallParams(.{})`
+    // values that they pass to `Evm(config).inner_call`. Fork rules are therefore
+    // parameters of `validateFor`, not captured constants.
+    _ = config;
 
     return union(enum) {
         /// Regular CALL operation
@@ -29,6 +33,10 @@ pub fn CallParams(config: anytype) type {
             to: Address,
             input: []const u8,
             gas: u64,
+            /// The delegating contract: the address and storage the delegated code runs
+            /// with. Null means `caller`, for a top-level delegatecall that has no
+            /// delegating frame.
+            context_address: ?Address = null,
         },
         /// STATICCALL operation (read-only)
         staticcall: struct {
@@ -55,49 +63,37 @@ pub fn CallParams(config: anytype) type {
 
         pub const ValidationError = error{
             GasZeroError,
-            InvalidInputSize,
             InvalidInitCodeSize,
             InvalidCreateValue,
             InvalidStaticCallValue,
         };
 
-        /// Validate call parameters to ensure they meet EVM requirements.
-        /// Checks gas limits and other critical constraints.
+        /// Validate call parameters under the default (post-Shanghai) fork rules: the EIP-3860 init code
+        /// limit applies with the protocol default size. Prefer `validateFor`, which
+        /// takes the configured fork.
         pub fn validate(self: @This()) ValidationError!void {
-            // BUG: we should be checking if gas checks are disabled or not
+            return self.validateFor(Hardfork.DEFAULT, primitives.GasConstants.MaxInitcodeSize);
+        }
+
+        /// Validate call parameters to ensure they meet EVM requirements under
+        /// `hardfork`. The EIP-3860 init code limit (`max_initcode_size`, normally
+        /// `config.max_initcode_size`) applies only from Shanghai on; earlier forks
+        /// accept init code of any size here.
+        pub fn validateFor(self: @This(), hardfork: Hardfork, max_initcode_size: usize) ValidationError!void {
             // Gas must be non-zero to execute any operation
             if (self.getGas() == 0) return ValidationError.GasZeroError;
 
-            const MAX_INPUT_SIZE = 1024 * 1024 * 4; // 4MB practical limit for input data
-
+            // Input data has no size limit of its own: the gas the caller pays per
+            // calldata byte bounds it.
             switch (self) {
-                .call => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                },
-                .callcode => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                },
-                .delegatecall => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                    // DELEGATECALL doesn't transfer value, validation happens at protocol level
-                },
-                .staticcall => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                    // STATICCALL cannot have value (enforced by not having value field)
-                },
+                .call, .callcode, .delegatecall, .staticcall => {},
                 .create => |params| {
-                    // Validate init code size (EIP-3860)
-                    if (params.init_code.len > limits.max_initcode_size) return ValidationError.InvalidInitCodeSize;
-                    // CREATE can have any value, no special validation needed
+                    // Validate init code size (EIP-3860, Shanghai and later)
+                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
                 },
                 .create2 => |params| {
-                    // Validate init code size (EIP-3860)
-                    if (params.init_code.len > limits.max_initcode_size) return ValidationError.InvalidInitCodeSize;
-                    // CREATE2 can have any value, no special validation needed
+                    // Validate init code size (EIP-3860, Shanghai and later)
+                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
                 },
             }
         }
@@ -214,6 +210,7 @@ pub fn CallParams(config: anytype) type {
                         .to = params.to,
                         .input = cloned_input,
                         .gas = params.gas,
+                        .context_address = params.context_address,
                     } };
                 },
                 .staticcall => |params| blk: {
@@ -274,7 +271,6 @@ pub fn CallParams(config: anytype) type {
 }
 
 const std = @import("std");
-const limits = @import("evm_limits");
 
 // Default configuration for backward compatibility and tests
 const default_config = struct {};
@@ -282,7 +278,7 @@ const DefaultCallParams = CallParams(default_config);
 
 test "call params gas access" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const input = &[_]u8{0x42};
 
     const call_op = DefaultCallParams{ .call = .{
@@ -304,8 +300,8 @@ test "call params gas access" {
 }
 
 test "call params caller access" {
-    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ [_]u8{0} ** 19 };
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ @as([19]u8, @splat(0)) };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     const call_op = DefaultCallParams{ .call = .{
         .caller = caller,
@@ -327,7 +323,7 @@ test "call params caller access" {
 
 test "call params input access" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const input_data = &[_]u8{ 0xa9, 0x05, 0x9c, 0xbb }; // transfer(address,uint256) selector
 
     const call_op = DefaultCallParams{ .call = .{
@@ -351,7 +347,7 @@ test "call params input access" {
 
 test "call params has value checks" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const input = &[_]u8{};
 
     // CALL with value
@@ -404,7 +400,7 @@ test "call params has value checks" {
 
 test "call params read only checks" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const input = &[_]u8{};
 
     // Only STATICCALL is read-only
@@ -438,7 +434,7 @@ test "call params read only checks" {
 
 test "call params create checks" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const init_code = &[_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf3 };
 
     // CREATE operations
@@ -471,8 +467,8 @@ test "call params create checks" {
 }
 
 test "call params edge cases" {
-    const caller: Address = .{ .bytes = [_]u8{0xff} ** 20 }; // Maximum address
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const caller: Address = .{ .bytes = @as([20]u8, @splat(0xff)) }; // Maximum address
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // Maximum gas
     const max_gas_call = DefaultCallParams{ .call = .{
@@ -511,7 +507,7 @@ test "call params edge cases" {
 
 test "call params validation - zero gas error" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // CALL with zero gas should fail validation
     const call_zero_gas = DefaultCallParams{ .call = .{
@@ -554,7 +550,7 @@ test "call params validation - zero gas error" {
 
 test "call params validation - non-zero gas success" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // All operations with non-zero gas should pass validation
     const operations = [_]DefaultCallParams{
@@ -605,8 +601,8 @@ test "call params validation - non-zero gas success" {
 }
 
 test "call params callcode operation" {
-    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ [_]u8{0} ** 19 };
-    const to: Address = .{ .bytes = [_]u8{0xbb} ++ [_]u8{0} ** 19 };
+    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ @as([19]u8, @splat(0)) };
+    const to: Address = .{ .bytes = [_]u8{0xbb} ++ @as([19]u8, @splat(0)) };
     const input_data = &[_]u8{ 0x12, 0x34, 0x56, 0x78 };
 
     const callcode_op = DefaultCallParams{ .callcode = .{
@@ -660,7 +656,7 @@ test "call params create2 salt handling" {
 
 test "call params large input data" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // Test with large input data
     var large_input: [1024]u8 = undefined;
@@ -682,7 +678,7 @@ test "call params large input data" {
 
 test "call params address boundary values" {
     const zero_address = primitives.ZERO_ADDRESS;
-    const max_address: Address = .{ .bytes = [_]u8{0xFF} ** 20 };
+    const max_address: Address = .{ .bytes = @as([20]u8, @splat(0xFF)) };
 
     // Test with zero address as caller and target
     const zero_call = DefaultCallParams{ .call = .{
@@ -707,7 +703,7 @@ test "call params address boundary values" {
 
 test "call params value edge cases" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const init_code = &[_]u8{0x00};
 
     // Test minimum positive value
@@ -754,7 +750,7 @@ test "call params value edge cases" {
 
 test "call params gas limit edge cases" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const init_code = &[_]u8{0x00};
 
     // Test minimum gas (1)
@@ -805,73 +801,28 @@ test "call params gas limit edge cases" {
     }
 }
 
-test "call params validation - input size limits" {
+test "call params validation - input data has no size limit" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
-    const MAX_INPUT_SIZE = 1024 * 1024 * 4; // 4MB
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
-    // Test with maximum allowed input size
-    const max_input = try std.testing.allocator.alloc(u8, MAX_INPUT_SIZE);
-    defer std.testing.allocator.free(max_input);
-    @memset(max_input, 0xAA);
+    // Larger than the 4 MiB cap this validation once applied. Calldata is bounded
+    // by the gas it costs, not by a fixed size.
+    const input = try std.testing.allocator.alloc(u8, 4 * 1024 * 1024 + 1);
+    defer std.testing.allocator.free(input);
+    @memset(input, 0xBB);
 
-    const call_max = DefaultCallParams{ .call = .{
-        .caller = caller,
-        .to = to,
-        .value = 0,
-        .input = max_input,
-        .gas = 1000000,
-    } };
-    try call_max.validate(); // Should pass
-
-    // Test with oversized input
-    const oversized_input = try std.testing.allocator.alloc(u8, MAX_INPUT_SIZE + 1);
-    defer std.testing.allocator.free(oversized_input);
-    @memset(oversized_input, 0xBB);
-
-    const call_oversized = DefaultCallParams{ .call = .{
-        .caller = caller,
-        .to = to,
-        .value = 0,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, call_oversized.validate());
-
-    // Test DELEGATECALL with oversized input
-    const delegatecall_oversized = DefaultCallParams{ .delegatecall = .{
-        .caller = caller,
-        .to = to,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, delegatecall_oversized.validate());
-
-    // Test STATICCALL with oversized input
-    const staticcall_oversized = DefaultCallParams{ .staticcall = .{
-        .caller = caller,
-        .to = to,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, staticcall_oversized.validate());
-
-    // Test CALLCODE with oversized input
-    const callcode_oversized = DefaultCallParams{ .callcode = .{
-        .caller = caller,
-        .to = to,
-        .value = 0,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, callcode_oversized.validate());
+    try (DefaultCallParams{ .call = .{ .caller = caller, .to = to, .value = 0, .input = input, .gas = 1000000 } }).validate();
+    try (DefaultCallParams{ .callcode = .{ .caller = caller, .to = to, .value = 0, .input = input, .gas = 1000000 } }).validate();
+    try (DefaultCallParams{ .delegatecall = .{ .caller = caller, .to = to, .input = input, .gas = 1000000 } }).validate();
+    try (DefaultCallParams{ .staticcall = .{ .caller = caller, .to = to, .input = input, .gas = 1000000 } }).validate();
 }
 
 test "call params validation - init code size limits" {
     const caller = primitives.ZERO_ADDRESS;
+    const MAX_INITCODE_SIZE = primitives.GasConstants.MaxInitcodeSize; // EIP-3860 limit
 
     // Test with maximum allowed init code size
-    const max_init_code = try std.testing.allocator.alloc(u8, limits.max_initcode_size);
+    const max_init_code = try std.testing.allocator.alloc(u8, MAX_INITCODE_SIZE);
     defer std.testing.allocator.free(max_init_code);
     @memset(max_init_code, 0x60); // PUSH1
 
@@ -893,7 +844,7 @@ test "call params validation - init code size limits" {
     try create2_max.validate(); // Should pass
 
     // Test with oversized init code
-    const oversized_init_code = try std.testing.allocator.alloc(u8, limits.max_initcode_size + 1);
+    const oversized_init_code = try std.testing.allocator.alloc(u8, MAX_INITCODE_SIZE + 1);
     defer std.testing.allocator.free(oversized_init_code);
     @memset(oversized_init_code, 0x60);
 
@@ -916,8 +867,8 @@ test "call params validation - init code size limits" {
 }
 
 test "call params all operation types coverage" {
-    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ [_]u8{0} ** 19 };
-    const to: Address = .{ .bytes = [_]u8{0xbb} ++ [_]u8{0} ** 19 };
+    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ @as([19]u8, @splat(0)) };
+    const to: Address = .{ .bytes = [_]u8{0xbb} ++ @as([19]u8, @splat(0)) };
     const input_data = &[_]u8{ 0x42, 0x24 };
     const init_code = &[_]u8{ 0x60, 0x00, 0xf3 };
 
@@ -983,8 +934,8 @@ test "call params all operation types coverage" {
 }
 
 test "call params method consistency" {
-    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ [_]u8{0} ** 19 };
-    const to: Address = .{ .bytes = [_]u8{0xbb} ++ [_]u8{0} ** 19 };
+    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ @as([19]u8, @splat(0)) };
+    const to: Address = .{ .bytes = [_]u8{0xbb} ++ @as([19]u8, @splat(0)) };
     const input_data = &[_]u8{0x12};
 
     // Test that delegatecall correctly reports no value transfer
@@ -1014,7 +965,7 @@ test "call params method consistency" {
 
 test "call params input vs init code consistency" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const call_input = &[_]u8{ 0xa9, 0x05, 0x9c, 0xbb };
     const init_code = &[_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 };
 
@@ -1040,8 +991,8 @@ test "call params input vs init code consistency" {
 
 test "call params clone and deinit" {
     const testing_allocator = std.testing.allocator;
-    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ [_]u8{0} ** 19 };
-    const to: Address = .{ .bytes = [_]u8{0xbb} ++ [_]u8{0} ** 19 };
+    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ @as([19]u8, @splat(0)) };
+    const to: Address = .{ .bytes = [_]u8{0xbb} ++ @as([19]u8, @splat(0)) };
     const input_data = &[_]u8{ 0x12, 0x34, 0x56, 0x78 };
     const init_code = &[_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf3 };
 
@@ -1163,7 +1114,7 @@ test "call params clone and deinit" {
 test "call params clone empty input" {
     const testing_allocator = std.testing.allocator;
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // Test with empty input slice
     const original = DefaultCallParams{ .call = .{
@@ -1185,7 +1136,7 @@ test "call params clone empty input" {
 test "call params clone large input" {
     const testing_allocator = std.testing.allocator;
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // Create large input data
     var large_input: [1024]u8 = undefined;
@@ -1210,7 +1161,7 @@ test "call params clone large input" {
 
 test "call params setGas" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const input = &[_]u8{0x42};
     const init_code = &[_]u8{ 0x60, 0x00, 0xf3 };
 
@@ -1304,7 +1255,7 @@ test "call params setGas" {
 
 test "call params validation - comprehensive" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // Small valid input - should pass
     const small_input = &[_]u8{ 0x12, 0x34, 0x56, 0x78 };
@@ -1377,7 +1328,7 @@ test "call params validation - comprehensive" {
 
 test "call params setGas edge cases" {
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
 
     // Test setting gas to 0 (should fail validation after)
     {
@@ -1428,4 +1379,45 @@ test "call params setGas edge cases" {
         call_op.setGas(1500);
         try std.testing.expectEqual(@as(u64, 1500), call_op.getGas());
     }
+}
+
+test "call params validation - EIP-3860 init code limit applies only from Shanghai" {
+    const caller = primitives.ZERO_ADDRESS;
+    const limit = primitives.GasConstants.MaxInitcodeSize;
+
+    const oversized = try std.testing.allocator.alloc(u8, limit + 1);
+    defer std.testing.allocator.free(oversized);
+    @memset(oversized, 0x60);
+    const at_limit = oversized[0..limit];
+
+    const create_oversized = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = oversized, .gas = 1000000 } };
+    const create2_oversized = DefaultCallParams{ .create2 = .{ .caller = caller, .value = 0, .init_code = oversized, .salt = 1, .gas = 1000000 } };
+    const create_at_limit = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = at_limit, .gas = 1000000 } };
+
+    // Before Shanghai there is no init code limit.
+    try create_oversized.validateFor(.LONDON, limit);
+    try create2_oversized.validateFor(.LONDON, limit);
+    try create_oversized.validateFor(.FRONTIER, limit);
+
+    // From Shanghai on, init code above the limit is rejected.
+    try create_at_limit.validateFor(.SHANGHAI, limit);
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create_oversized.validateFor(.SHANGHAI, limit));
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create2_oversized.validateFor(.SHANGHAI, limit));
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create_oversized.validateFor(.CANCUN, limit));
+
+    // A configured limit replaces the protocol default.
+    const small_ok = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = oversized[0..16], .gas = 1000000 } };
+    const small_over = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = oversized[0..17], .gas = 1000000 } };
+    try small_ok.validateFor(.CANCUN, 16);
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, small_over.validateFor(.CANCUN, 16));
+    try small_over.validateFor(.BERLIN, 16);
+
+    // `validate` keeps the default (post-Shanghai) rule.
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create_oversized.validate());
+}
+
+test "call params type is shared across configs" {
+    const Eips = @import("../eips_and_hardforks/eips.zig").Eips;
+    // Frames build CallParams(.{}) values and pass them to Evm(config).inner_call.
+    try std.testing.expect(CallParams(.{}) == CallParams(.{ .eips = Eips{ .hardfork = .LONDON }, .max_initcode_size = @as(u32, 1) }));
 }

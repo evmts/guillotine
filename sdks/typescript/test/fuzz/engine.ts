@@ -47,7 +47,7 @@ export class FuzzTape {
 		return min + (this.nextU32(fallbackRng) % span)
 	}
 
-	bytes(minLen: number, maxLen: number, fallbackRng: () => number): Uint8Array<ArrayBuffer> {
+	bytes(minLen: number, maxLen: number, fallbackRng: () => number): Uint8Array {
 		const len = this.int(minLen, maxLen, fallbackRng)
 		const out = new Uint8Array(len)
 		let i = 0

@@ -45,7 +45,7 @@ These are rejections, not suggestions:
 
 ## Crashes are security bugs
 
-A crash — from an assert, an out-of-bounds access, an integer overflow — means
+A crash (from an assert, an out-of-bounds access, an integer overflow) means
 either memory unsafety or missing validation. When you find one:
 
 1. **First** fix the missing validation or error handling that let execution reach
@@ -63,7 +63,7 @@ Concise, direct Zig that matches the surrounding code:
 // Minimal else. Early return instead.
 if (condition) return error.Something;
 
-// Short but descriptive names. `top`, `value1`, `operand` — not `a`, `b`.
+// Short but descriptive names. `top`, `value1`, `operand`, not `a`, `b`.
 const top = self.stack.peek_unsafe();
 
 // Direct imports, no alias indirection.
@@ -80,9 +80,9 @@ const thing = try allocator.create(Thing);
 defer allocator.destroy(thing);
 ```
 
-### ArrayList in Zig 0.15
+### ArrayList in Zig 0.17.1
 
-`std.ArrayList(T)` is **unmanaged** in 0.15. Every mutating operation takes the
+`std.ArrayList(T)` is **unmanaged** (since Zig 0.15, and still in 0.17.1). Every mutating operation takes the
 allocator. This trips up almost everyone:
 
 ```zig
@@ -91,7 +91,7 @@ var list = std.ArrayList(T){};
 defer list.deinit(allocator);
 try list.append(allocator, item);
 
-// Wrong — these do not exist in 0.15
+// Wrong: these do not exist in 0.17.1
 var list = std.ArrayList(T).init(allocator);
 list.deinit();
 try list.append(item);
@@ -104,33 +104,42 @@ try list.append(item);
   a clever one that shares a fixture.
 - Tests for `src/**` live in the source files; `src/root.zig` aggregates them.
 - Integration tests live in `test/**` and are aggregated by explicit `_ = @import(...)`
-  lines in `test/root.zig` — adding a file is not enough, you must register it.
+  lines in `test/root.zig`. Adding a file is not enough; you must register it.
 - Evidence-based debugging only. If the bug is not obvious, improve visibility
   first (tracer, logging, `pretty_print`) instead of guessing.
 
 ## Writing a handler
 
-Two things are mandatory and easy to forget:
+Handlers use the register ABI in `src/preprocessor/handler_abi.zig`. Two calls
+are mandatory and easy to forget:
 
 ```zig
 // src/instructions/handlers_arithmetic.zig
-pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.ADD, cursor); // 1. sync the reference EVM
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView{ .sp = sp };
+    N.before(self, .ADD, cursor, s.sp, gas); // 1. sync the reference EVM
 
-    self.stack.binary_op_unsafe(struct {
+    s.binary_op_unsafe(struct {
         fn op(top: WordType, second: WordType) WordType {
             return top +% second;
         }
     }.op);
 
-    return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD); // 2. tail call
+    return N.next(self, .ADD, cursor, s.sp, gas); // 2. tail call
 }
 ```
 
-1. `beforeInstruction()` — without it the differential tracer desynchronises and
-   unrelated tests fail confusingly.
-2. The tail call — a handler returns `Error!noreturn` and must never fall off the
-   end.
+1. `N.before()` calls `beforeInstruction()` in Debug, ReleaseSafe and traced
+   builds. Without it the differential tracer desynchronises and unrelated tests
+   fail confusingly.
+2. `N.next()` tail-calls the next handler. A handler returns
+   `handler_abi.ExitCode`, not an error union, because the `preserve_none`
+   calling convention cannot return one.
+
+`sp` and `gas` are live in registers; `frame.stack.stack_ptr` and
+`frame.gas_remaining` are stale until a handler writes them back. A handler that
+does host work (storage, calls, logs) is written as a step function
+`fn (frame, cursor) Error![*]const Item` and adapted with `handler_abi.wrap`.
 
 Stack semantics are LIFO: the first `pop` is the top of the stack.
 
@@ -149,7 +158,7 @@ Two things look like bugs and are not:
 
 - Rebase rather than merge; keep history linear.
 - One logical change per commit.
-- Paste real command output in the description — the build you ran, the tests you
+- Paste real command output in the description: the build you ran, the tests you
   ran, what passed and what did not. Claiming a green suite you did not run is the
   one unforgivable thing in a codebase this sensitive.
 - Note anything you could not verify.
@@ -162,10 +171,10 @@ These docs are a [vocs](https://vocs.dev) site under `docs/`:
 cd docs
 npm install
 npm run dev      # local dev server
-npm run build    # production build — must pass
+npm run build    # production build; must pass
 ```
 
-Pages are MDX under `docs/src/pages/` — note the `src/`, which vocs 2 requires
+Pages are MDX under `docs/src/pages/`. Note the `src/`, which vocs 2 requires
 (vocs 1 used `docs/pages/`). Add new pages to the `sidebar` in
 `docs/vocs.config.ts`, and import `defineConfig` from `vocs/config`, not from
 `vocs`: the package root re-exports React components that import vite-virtual
@@ -175,11 +184,10 @@ Deployment is Vercel, serving [guillotine.tevm.sh](https://guillotine.tevm.sh),
 with `docs/` as the project root directory. `vocs build` detects the `VERCEL`
 environment variable and switches to the Vercel adapter automatically, emitting
 Build Output API artifacts. `docs/vercel.json` therefore sets the install and
-build commands and leaves `outputDirectory` unset. For cutting releases and
-publishing packages, see [Publishing and releases](/guides/publishing). The deep
-developer notes in `docs/dev/` and `docs/performance/` remain as
-plain markdown and are the source of record for internals — improve them in
-place rather than duplicating them into MDX.
+build commands and leaves `outputDirectory` unset. The deep developer notes in `docs/dev/`
+and `docs/performance/` remain as plain markdown and are the source
+of record for internals. Improve them in place rather than duplicating them into
+MDX.
 
 If you document an API, verify it against the source or by compiling it. A wrong
 example costs a reader more than a missing one.

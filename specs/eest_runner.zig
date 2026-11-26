@@ -28,6 +28,10 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+
+/// Process-wide I/O and environment, set once at the start of `main`.
+var io: std.Io = undefined;
+var environ_map: *const std.process.Environ.Map = undefined;
 const evm = @import("evm");
 const crypto = @import("crypto");
 
@@ -73,8 +77,8 @@ pub const Fork = enum {
     };
 
     pub fn parse(name: []const u8) ?Fork {
-        inline for (@typeInfo(Fork).@"enum".fields) |f| {
-            if (std.ascii.eqlIgnoreCase(name, f.name)) return @enumFromInt(f.value);
+        for (std.meta.tags(Fork)) |fork| {
+            if (std.ascii.eqlIgnoreCase(name, @tagName(fork))) return fork;
         }
         for (aliases) |alias| {
             if (std.ascii.eqlIgnoreCase(name, alias.name)) return alias.fork;
@@ -135,7 +139,7 @@ fn hexDigits(text: []const u8) ![]const u8 {
 }
 
 fn parseU256(text: []const u8) !u256 {
-    const digits = std.mem.trimLeft(u8, try hexDigits(text), "0");
+    const digits = std.mem.trimStart(u8, try hexDigits(text), "0");
     if (digits.len == 0) return 0;
     if (digits.len > 64) return error.HexValueTooLarge;
     return std.fmt.parseInt(u256, digits, 16);
@@ -222,7 +226,7 @@ fn rlpAppendHeader(a: Allocator, out: *std.ArrayList(u8), short_base: u8, len: u
     }
     var be: [8]u8 = undefined;
     std.mem.writeInt(u64, &be, len, .big);
-    const digits = std.mem.trimLeft(u8, &be, &[_]u8{0});
+    const digits = std.mem.trimStart(u8, &be, &[_]u8{0});
     try out.append(a, short_base + 55 + @as(u8, @intCast(digits.len)));
     try out.appendSlice(a, digits);
 }
@@ -239,7 +243,7 @@ fn rlpAppendBytes(a: Allocator, out: *std.ArrayList(u8), bytes: []const u8) !voi
 fn rlpAppendUint(a: Allocator, out: *std.ArrayList(u8), value: u256) !void {
     var be: [32]u8 = undefined;
     std.mem.writeInt(u256, &be, value, .big);
-    try rlpAppendBytes(a, out, std.mem.trimLeft(u8, &be, &[_]u8{0}));
+    try rlpAppendBytes(a, out, std.mem.trimStart(u8, &be, &[_]u8{0}));
 }
 
 fn rlpWrapList(a: Allocator, payload: []const u8) ![]u8 {
@@ -276,6 +280,21 @@ fn rlpDecode(data: []const u8) !RlpItem {
     return .{ .is_list = is_list, .payload = data[header .. header + len], .size = header + len };
 }
 
+/// State tests carry no ancestor headers. The reference consumers (geth `evm
+/// statetest`, `vmTestBlockHash`) define the hash of block `n` as keccak256 of its
+/// decimal string, so BLOCKHASH(0) from block 1 is keccak256("0").
+/// Returns the 256 hashes before `number`, newest first.
+fn stateTestBlockHashes(a: std.mem.Allocator, number: u64) ![]const [32]u8 {
+    const count: usize = @intCast(@min(number, 256));
+    const hashes = try a.alloc([32]u8, count);
+    var buf: [20]u8 = undefined;
+    for (hashes, 0..) |*hash, i| {
+        const ancestor = number - 1 - @as(u64, @intCast(i));
+        hash.* = keccak(try std.fmt.bufPrint(&buf, "{d}", .{ancestor}));
+    }
+    return hashes;
+}
+
 fn keccak(bytes: []const u8) [32]u8 {
     var out: [32]u8 = undefined;
     Keccak256.hash(bytes, &out, .{});
@@ -283,105 +302,18 @@ fn keccak(bytes: []const u8) [32]u8 {
 }
 
 // ---------------------------------------------------------------------------
-// Merkle Patricia Trie root over fixed 32-byte keys
+// State root: Database.get_state_root (src/storage/state_root.zig)
 // ---------------------------------------------------------------------------
 
-const TrieEntry = struct {
-    key: [32]u8,
-    value: []const u8,
-
-    fn lessThan(_: void, lhs: TrieEntry, rhs: TrieEntry) bool {
-        return std.mem.order(u8, &lhs.key, &rhs.key) == .lt;
-    }
-};
-
-const empty_trie_root = [32]u8{
-    0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0, 0xf8, 0x6e,
-    0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21,
-};
-
-fn nibbleAt(key: *const [32]u8, index: usize) u8 {
-    const byte = key[index / 2];
-    return if (index % 2 == 0) byte >> 4 else byte & 0x0f;
-}
-
-/// Hex-prefix encoding of the nibbles `key[from..to]`.
-fn hexPrefix(a: Allocator, key: *const [32]u8, from: usize, to: usize, leaf: bool) ![]u8 {
-    const count = to - from;
-    const out = try a.alloc(u8, count / 2 + 1);
-    const flag: u8 = if (leaf) 2 else 0;
-    var index = from;
-    if (count % 2 == 1) {
-        out[0] = ((flag | 1) << 4) | nibbleAt(key, index);
-        index += 1;
-    } else {
-        out[0] = flag << 4;
-    }
-    var position: usize = 1;
-    while (index < to) : (index += 2) {
-        out[position] = (nibbleAt(key, index) << 4) | nibbleAt(key, index + 1);
-        position += 1;
-    }
-    return out;
-}
-
-/// RLP encoding of the node that holds `entries`, which share the first
-/// `depth` nibbles and are sorted by key.
-fn trieNode(a: Allocator, entries: []const TrieEntry, depth: usize) Allocator.Error![]u8 {
-    var payload: std.ArrayList(u8) = .empty;
-    const first = &entries[0].key;
-    if (entries.len == 1) {
-        try rlpAppendBytes(a, &payload, try hexPrefix(a, first, depth, 64, true));
-        try rlpAppendBytes(a, &payload, entries[0].value);
-        return rlpWrapList(a, payload.items);
-    }
-    const last = &entries[entries.len - 1].key;
-    var shared: usize = 0;
-    while (depth + shared < 64 and nibbleAt(first, depth + shared) == nibbleAt(last, depth + shared)) shared += 1;
-    if (shared > 0) {
-        try rlpAppendBytes(a, &payload, try hexPrefix(a, first, depth, depth + shared, false));
-        try trieAppendRef(a, &payload, entries, depth + shared);
-        return rlpWrapList(a, payload.items);
-    }
-    var start: usize = 0;
-    var nibble: u8 = 0;
-    while (nibble < 16) : (nibble += 1) {
-        var end = start;
-        while (end < entries.len and nibbleAt(&entries[end].key, depth) == nibble) end += 1;
-        if (end == start) {
-            try payload.append(a, 0x80);
-        } else {
-            try trieAppendRef(a, &payload, entries[start..end], depth + 1);
-        }
-        start = end;
-    }
-    // Keys have equal length, so a branch never carries a value.
-    try payload.append(a, 0x80);
-    return rlpWrapList(a, payload.items);
-}
-
-fn trieAppendRef(a: Allocator, out: *std.ArrayList(u8), entries: []const TrieEntry, depth: usize) Allocator.Error!void {
-    const encoded = try trieNode(a, entries, depth);
-    if (encoded.len < 32) {
-        try out.appendSlice(a, encoded);
-        return;
-    }
-    const digest = keccak(encoded);
-    try rlpAppendBytes(a, out, &digest);
-}
-
-/// Root of the trie holding `entries`. Sorts `entries` in place.
-fn trieRoot(a: Allocator, entries: []TrieEntry) Allocator.Error![32]u8 {
-    if (entries.len == 0) return empty_trie_root;
-    std.mem.sort(TrieEntry, entries, {}, TrieEntry.lessThan);
-    return keccak(try trieNode(a, entries, 0));
-}
+const TrieEntry = evm.state_root.TrieEntry;
+const empty_trie_root = evm.state_root.empty_trie_root;
+const trieRoot = evm.state_root.trieRoot;
 
 // ---------------------------------------------------------------------------
 // Account helpers on top of the Guillotine Database
 // ---------------------------------------------------------------------------
 
-const zero_hash = [_]u8{0} ** 32;
+const zero_hash = @as([32]u8, @splat(0));
 const delegation_prefix = [_]u8{ 0xef, 0x01, 0x00 };
 
 fn emptyCodeHash() [32]u8 {
@@ -412,86 +344,8 @@ fn accountCode(a: Allocator, db: *Database, account: Account) ![]const u8 {
     return db.get_code(account.code_hash);
 }
 
-fn accountCodeHash(account: Account) [32]u8 {
-    if (hasNoCode(account)) {
-        if (account.delegated_address) |target| return keccak(&delegationCode(target.bytes));
-        return emptyCodeHash();
-    }
-    return account.code_hash;
-}
-
 fn accountOrZero(db: *Database, address: [20]u8) !Account {
     return (try db.get_account(address)) orelse Account.zero();
-}
-
-/// Removes an account and every storage slot it owns.
-fn destroyAccount(a: Allocator, db: *Database, address: [20]u8) !void {
-    var keys: std.ArrayList(u256) = .empty;
-    var it = db.storage.iterator();
-    while (it.next()) |entry| {
-        if (std.mem.eql(u8, &entry.key_ptr.address, &address)) try keys.append(a, entry.key_ptr.key);
-    }
-    // Writing zero through the Database keeps its own bookkeeping consistent;
-    // zero slots are excluded from the storage trie.
-    for (keys.items) |key| try db.set_storage(address, key, 0);
-    try db.delete_account(address);
-}
-
-/// Exact post-state root: storage tries first, then the account trie.
-fn stateRoot(a: Allocator, db: *Database) ![32]u8 {
-    const OwnedSlot = struct {
-        address: [20]u8,
-        entry: TrieEntry,
-
-        fn lessThan(_: void, lhs: @This(), rhs: @This()) bool {
-            return std.mem.order(u8, &lhs.address, &rhs.address) == .lt;
-        }
-    };
-    var slots: std.ArrayList(OwnedSlot) = .empty;
-    var storage_it = db.storage.iterator();
-    while (storage_it.next()) |entry| {
-        const value = entry.value_ptr.*;
-        if (value == 0) continue;
-        var key_be: [32]u8 = undefined;
-        std.mem.writeInt(u256, &key_be, entry.key_ptr.key, .big);
-        var encoded: std.ArrayList(u8) = .empty;
-        try rlpAppendUint(a, &encoded, value);
-        try slots.append(a, .{
-            .address = entry.key_ptr.address,
-            .entry = .{ .key = keccak(&key_be), .value = encoded.items },
-        });
-    }
-    std.mem.sort(OwnedSlot, slots.items, {}, OwnedSlot.lessThan);
-
-    const Range = struct { start: usize, end: usize };
-    var ranges: std.AutoHashMapUnmanaged([20]u8, Range) = .empty;
-    var start: usize = 0;
-    while (start < slots.items.len) {
-        var end = start + 1;
-        while (end < slots.items.len and std.mem.eql(u8, &slots.items[end].address, &slots.items[start].address)) end += 1;
-        try ranges.put(a, slots.items[start].address, .{ .start = start, .end = end });
-        start = end;
-    }
-
-    var accounts: std.ArrayList(TrieEntry) = .empty;
-    var account_it = db.accounts.iterator();
-    while (account_it.next()) |entry| {
-        const address = entry.key_ptr.*;
-        const account = entry.value_ptr.*;
-        var storage_root = empty_trie_root;
-        if (ranges.get(address)) |range| {
-            const owned = try a.alloc(TrieEntry, range.end - range.start);
-            for (slots.items[range.start..range.end], owned) |slot, *target| target.* = slot.entry;
-            storage_root = try trieRoot(a, owned);
-        }
-        var payload: std.ArrayList(u8) = .empty;
-        try rlpAppendUint(a, &payload, account.nonce);
-        try rlpAppendUint(a, &payload, account.balance);
-        try rlpAppendBytes(a, &payload, &storage_root);
-        try rlpAppendBytes(a, &payload, &accountCodeHash(account));
-        try accounts.append(a, .{ .key = keccak(&address), .value = try rlpWrapList(a, payload.items) });
-    }
-    return trieRoot(a, accounts.items);
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,9 +973,11 @@ fn validateTx(
     };
     if (sender.balance < total) return Validated.reject(.INSUFFICIENT_ACCOUNT_FUNDS);
 
-    // EIP-3607. A Prague delegation designator is stored as a delegation, not
-    // as code, so a delegated sender passes.
+    // EIP-3607. The database stores a delegation designator as a delegation, not
+    // as code. From Prague a delegated sender passes; before Prague the same 23
+    // bytes are ordinary code.
     if (!hasNoCode(sender)) return Validated.reject(.SENDER_NOT_EOA);
+    if (!fork.atLeast(.Prague) and sender.delegated_address != null) return Validated.reject(.SENDER_NOT_EOA);
 
     return .{
         .gas_limit = gas_limit,
@@ -1150,17 +1006,13 @@ const Outcome = union(enum) {
     }
 };
 
-fn loadPre(fork: Fork, db: *Database, pre: []const PreAccount) !void {
+fn loadPre(db: *Database, pre: []const PreAccount) !void {
     for (pre) |entry| {
         var account = Account.zero();
         account.nonce = entry.nonce;
         account.balance = entry.balance;
-        const is_delegation = fork.atLeast(.Prague) and entry.code.len == 23 and std.mem.startsWith(u8, entry.code, &delegation_prefix);
-        if (is_delegation) {
-            account.delegated_address = .{ .bytes = entry.code[3..23].* };
-        } else if (entry.code.len > 0) {
-            account.code_hash = try db.set_code(entry.code);
-        }
+        // `Database.set_account` stores an EIP-7702 designator as a delegation.
+        if (entry.code.len > 0) account.code_hash = try db.set_code(entry.code);
         try db.set_account(entry.address, account);
         for (entry.storage) |slot| {
             if (slot.value != 0) try db.set_storage(entry.address, slot.key, slot.value);
@@ -1178,16 +1030,9 @@ fn precompileAddresses(fork: Fork) []const u16 {
 }
 
 fn precompileAddress(number: u16) [20]u8 {
-    var bytes = [_]u8{0} ** 20;
+    var bytes = @as([20]u8, @splat(0));
     std.mem.writeInt(u16, bytes[18..20], number, .big);
     return bytes;
-}
-
-fn isPrecompile(fork: Fork, address: [20]u8) bool {
-    for (precompileAddresses(fork)) |number| {
-        if (std.mem.eql(u8, &precompileAddress(number), &address)) return true;
-    }
-    return false;
 }
 
 fn createAddress(a: Allocator, sender: [20]u8, nonce: u64) ![20]u8 {
@@ -1231,7 +1076,7 @@ fn applyAuthorizations(
         if (account.nonce != authorization.nonce) continue;
 
         if (existing != null) refund += 25000 - 12500;
-        if (std.mem.eql(u8, &authorization.address, &([_]u8{0} ** 20))) {
+        if (std.mem.eql(u8, &authorization.address, &(@as([20]u8, @splat(0))))) {
             account.delegated_address = null;
         } else {
             account.delegated_address = .{ .bytes = authorization.address };
@@ -1289,14 +1134,16 @@ fn applyTx(
     try touched.put(a, env.coinbase, {});
     if (template.to) |to| try touched.put(a, to, {});
 
-    // Buy gas. CREATE increments the creator nonce inside the EVM, so only a
-    // message call increments it here.
+    // Buy gas and increment the sender nonce. A creation transaction derives its
+    // address from the pre-increment nonce (`tx_nonce`).
     var sender = try accountOrZero(db, template.sender);
     sender.balance -= @as(u256, validated.gas_limit) * gas_price + validated.blob_fee;
-    if (template.to != null) sender.nonce = tx_nonce + 1;
+    sender.nonce = tx_nonce + 1;
     try db.set_account(template.sender, sender);
 
     const blob_hashes: []const [32]u8 = template.blob_hashes orelse &.{};
+    const prevrandao: [32]u8 = env.random orelse zero_hash;
+    const ancestor_hashes = try stateTestBlockHashes(a, env.number);
     var vm = try Vm.init(
         gpa,
         db,
@@ -1304,13 +1151,14 @@ fn applyTx(
             .chain_id = test_case.chain_id,
             .number = env.number,
             .timestamp = env.timestamp,
-            .difficulty = if (fork.atLeast(.Paris)) 0 else env.difficulty,
+            .difficulty = env.difficulty,
             .gas_limit = env.gas_limit,
             .coinbase = coinbase_address,
             .base_fee = env.base_fee orelse 0,
-            .prev_randao = env.random orelse zero_hash,
+            .prev_randao = if (fork.atLeast(.Paris)) prevrandao else zero_hash,
             .blob_base_fee = validated.blob_base_fee,
             .blob_versioned_hashes = blob_hashes,
+            .block_hashes = ancestor_hashes,
         },
         .{
             .gas_limit = validated.gas_limit,
@@ -1350,54 +1198,42 @@ fn applyTx(
         if (template.authorizations) |authorizations| {
             authorization_refund = try applyAuthorizations(a, db, &vm.access_list, test_case.chain_id, authorizations, &touched);
         }
-        if (template.to) |to| {
-            if (try db.get_account(to)) |target| {
-                if (target.delegated_address) |delegate| try vm.access_list.pre_warm_addresses(&.{delegate});
-            }
-        }
+        // The authorization list can change the target's delegation, so the
+        // delegate is warmed after it is applied.
+        if (template.to) |to| try vm.warmDelegatedTarget(.{ .bytes = to });
     }
 
     const execution_gas = validated.gas_limit - validated.intrinsic.gas;
     var success = false;
     var gas_left: u64 = 0;
     if (template.to) |to| {
-        const target = try db.get_account(to);
-        const has_code = if (target) |account| !hasNoCode(account) or account.delegated_address != null else false;
-        if (execution_gas == 0 and !has_code and !isPrecompile(fork, to)) {
-            // `Evm.inner_call` rejects a call that carries no gas. A plain
-            // transfer that spends exactly its intrinsic gas executes no code,
-            // so the runner applies it.
-            success = true;
-            if (tx.value > 0 and !std.mem.eql(u8, &to, &template.sender)) {
-                var from = try accountOrZero(db, template.sender);
-                var recipient = try accountOrZero(db, to);
-                from.balance -= tx.value;
-                recipient.balance += tx.value;
-                try db.set_account(template.sender, from);
-                try db.set_account(to, recipient);
-            }
-        } else {
-            const result = vm.inner_call(.{ .call = .{
-                .caller = sender_address,
-                .to = .{ .bytes = to },
-                .value = tx.value,
-                .input = tx.data,
-                .gas = execution_gas,
-            } });
-            success = result.success;
-            gas_left = result.gas_left;
-        }
+        const result = vm.inner_call(.{ .call = .{
+            .caller = sender_address,
+            .to = .{ .bytes = to },
+            .value = tx.value,
+            .input = tx.data,
+            .gas = execution_gas,
+        } });
+        success = result.success;
+        gas_left = result.gas_left;
     } else {
-        // `Evm.inner_call` charges the 32000 CREATE gas itself.
+        // Intrinsic gas already paid CreateGas and the EIP-3860 initcode words, and the
+        // sender nonce is already incremented. The flag makes the EVM run this as the
+        // transaction's own creation: no opcode CREATE charge, no 1/64 retention, and
+        // the address derived from the pre-increment nonce.
+        vm.tx_sender_nonce_incremented = true;
         const result = vm.inner_call(.{ .create = .{
             .caller = sender_address,
             .value = tx.value,
             .init_code = tx.data,
-            .gas = execution_gas + 32000,
+            .gas = execution_gas,
         } });
         success = result.success;
         gas_left = result.gas_left;
     }
+    // A host failure (allocation, database, missing KZG setup) is not a
+    // transaction outcome: the test errors instead of comparing a state root.
+    if (vm.host_failure) |err| return err;
     if (gas_left > execution_gas) return error.EvmReturnedMoreGasThanSupplied;
 
     // Refunds (EIP-3529 cap from London) and the EIP-7623 floor.
@@ -1408,9 +1244,10 @@ fn applyTx(
     gas_used -= @min(refund_counter, gas_used / refund_quotient);
     if (fork.atLeast(.Prague)) gas_used = @max(gas_used, validated.intrinsic.floor);
 
+    // The nonce was incremented when gas was bought; a self-sponsored EIP-7702
+    // authorization may have incremented it again, so it is not rewritten here.
     sender = try accountOrZero(db, template.sender);
     sender.balance += @as(u256, validated.gas_limit - gas_used) * gas_price;
-    sender.nonce = tx_nonce + 1;
     try db.set_account(template.sender, sender);
 
     // EIP-1559 burns the base fee; the coinbase receives the tip.
@@ -1422,8 +1259,10 @@ fn applyTx(
     const logs_hash = if (success) try logsHash(a, vm.logs.items) else try logsHash(a, vm.logs.items[0..0]);
 
     if (success) {
-        // The EVM records SELFDESTRUCT; the transaction applies it. From
-        // Cancun the record holds only contracts created in this transaction.
+        // The EVM records SELFDESTRUCT and moved the balance when the opcode ran; the
+        // transaction deletes the accounts. Ether an account received after its
+        // SELFDESTRUCT is burned with it. From Cancun the record holds only contracts
+        // created in this transaction.
         const Destruction = struct { contract: [20]u8, recipient: [20]u8 };
         var destructions: std.ArrayList(Destruction) = .empty;
         var destruct_it = vm.self_destruct.iterator();
@@ -1431,14 +1270,8 @@ fn applyTx(
             try destructions.append(a, .{ .contract = entry.key_ptr.bytes, .recipient = entry.value_ptr.bytes });
         }
         for (destructions.items) |destruction| {
-            const contract = (try db.get_account(destruction.contract)) orelse continue;
-            if (contract.balance > 0 and !std.mem.eql(u8, &destruction.contract, &destruction.recipient)) {
-                var recipient = try accountOrZero(db, destruction.recipient);
-                recipient.balance += contract.balance;
-                try db.set_account(destruction.recipient, recipient);
-            }
             try touched.put(a, destruction.recipient, {});
-            try destroyAccount(a, db, destruction.contract);
+            try db.delete_account(destruction.contract);
         }
         // Before EIP-161 a successful call creates its target account.
         if (!fork.atLeast(.SpuriousDragon)) {
@@ -1461,7 +1294,7 @@ fn applyTx(
             // touched, by this transaction.
             if (touched.contains(address) or !existed.contains(address)) try doomed.append(a, address);
         }
-        for (doomed.items) |address| try destroyAccount(a, db, address);
+        for (doomed.items) |address| try db.delete_account(address);
     }
 
     return .{ .success = success, .gas_used = gas_used, .logs_hash = logs_hash };
@@ -1537,7 +1370,7 @@ fn runPostFor(
 ) !Outcome {
     var db = Database.init(gpa);
     defer db.deinit();
-    try loadPre(fork, &db, test_case.pre);
+    try loadPre(&db, test_case.pre);
 
     const tx = try selectTx(&test_case.tx, post);
     const sender = try accountOrZero(&db, test_case.tx.sender);
@@ -1557,29 +1390,34 @@ fn runPostFor(
     var executed: ?Executed = null;
     if (validated.exception == null) executed = try applyTx(fork, a, gpa, &db, test_case, tx, validated);
 
-    const root = try stateRoot(a, &db);
+    const root = try db.get_state_root();
     const logs_hash = if (executed) |result| result.logs_hash else try logsHash(a, &[_]evm.Log{});
     const root_matches = std.mem.eql(u8, &root, &post.hash);
     const logs_match = std.mem.eql(u8, &logs_hash, &post.logs);
     if (root_matches and logs_match) return .pass;
 
+    // The first account difference, appended to receipt mismatches so one line shows
+    // both the symptom and where the state went wrong.
+    const state_failure: ?Outcome.Failure = if (root_matches) null else if (post.state) |state| try diagnoseState(a, &db, state) else null;
+    const state_note: []const u8 = if (state_failure) |failure| try std.fmt.allocPrint(a, "; first state difference: {s}", .{failure.detail}) else "";
+
     if (executed) |result| {
         if (post.receipt) |receipt| {
             if (receipt.status) |status| {
                 if (status != result.success) {
-                    return Outcome.failure("status_mismatch", try std.fmt.allocPrint(a, "expected success={any}, got success={any}, gas used {d}", .{ status, result.success, result.gas_used }));
+                    return Outcome.failure("status_mismatch", try std.fmt.allocPrint(a, "expected success={any}, got success={any}, gas used {d}{s}", .{ status, result.success, result.gas_used, state_note }));
                 }
             }
             if (receipt.gas_used) |gas_used| {
                 if (gas_used != result.gas_used) {
-                    return Outcome.failure("gas_used_mismatch", try std.fmt.allocPrint(a, "expected gas used {d}, got {d}", .{ gas_used, result.gas_used }));
+                    return Outcome.failure("gas_used_mismatch", try std.fmt.allocPrint(a, "expected gas used {d}, got {d}{s}", .{ gas_used, result.gas_used, state_note }));
                 }
             }
         }
     }
     if (!root_matches) {
-        if (post.state) |state| {
-            if (try diagnoseState(a, &db, state)) |failure| return .{ .fail = failure };
+        if (post.state) |_| {
+            if (state_failure) |failure| return .{ .fail = failure };
             return Outcome.failure("state_root_mismatch_unexplained", try std.fmt.allocPrint(a, "accounts match the expected state, root expected {s} got {s}", .{ try hexAlloc(a, &post.hash), try hexAlloc(a, &root) }));
         }
         return Outcome.failure("state_root_mismatch", try std.fmt.allocPrint(a, "expected {s} got {s}", .{ try hexAlloc(a, &post.hash), try hexAlloc(a, &root) }));
@@ -1699,7 +1537,7 @@ const Aggregator = struct {
         }
         if (self.verbose) {
             const line = try std.fmt.allocPrint(self.a, "FAIL [{s}] {s} {s}::{s} #{d}: {s}\n", .{ info.fork, category, info.file, info.name, info.post_index, detail });
-            try std.fs.File.stdout().writeAll(line);
+            try std.Io.File.stdout().writeStreamingAll(io, line);
         }
     }
 
@@ -1719,7 +1557,7 @@ const Aggregator = struct {
 const Sink = struct {
     target: union(enum) {
         direct: *Aggregator,
-        pipe: std.fs.File,
+        pipe: std.Io.File,
     },
     a: Allocator,
     line: std.ArrayList(u8) = .empty,
@@ -1736,9 +1574,9 @@ const Sink = struct {
         try self.appendField(try std.fmt.allocPrint(self.a, "{d}", .{value}));
     }
 
-    fn send(self: *Sink, file: std.fs.File) !void {
+    fn send(self: *Sink, file: std.Io.File) !void {
         try self.line.append(self.a, '\n');
-        try file.writeAll(self.line.items);
+        try file.writeStreamingAll(io, self.line.items);
         self.line.clearRetainingCapacity();
     }
 
@@ -1842,7 +1680,7 @@ const WorkerArgs = struct {
 const Config = struct {
     fixtures_dir: []const u8 = default_fixtures_dir,
     fork_text: ?[]const u8 = null,
-    forks: ForkSet = ForkSet.initFull(),
+    forks: ForkSet = ForkSet.full,
     filter: ?[]const u8 = null,
     report: ?[]const u8 = null,
     jobs: usize = 1,
@@ -1855,17 +1693,14 @@ const Config = struct {
 /// error when stderr itself fails.
 fn usage(a: Allocator, comptime format: []const u8, args: anytype) anyerror {
     const message = std.fmt.allocPrint(a, "eest-runner: " ++ format ++ "\n", args) catch |err| return err;
-    std.fs.File.stderr().writeAll(message) catch |err| return err;
+    std.Io.File.stderr().writeStreamingAll(io, message) catch |err| return err;
     return error.Usage;
 }
 
 fn envValue(a: Allocator, name: []const u8) !?[]const u8 {
-    const value = std.process.getEnvVarOwned(a, name) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return null,
-        else => return err,
-    };
+    const value = environ_map.get(name) orelse return null;
     if (value.len == 0) return null;
-    return value;
+    return try a.dupe(u8, value);
 }
 
 fn flagValue(arg: []const u8, comptime name: []const u8) ?[]const u8 {
@@ -1881,7 +1716,7 @@ fn parseNumber(a: Allocator, comptime T: type, name: []const u8, text: []const u
 }
 
 fn parseForks(a: Allocator, text: []const u8) !ForkSet {
-    var set = ForkSet.initEmpty();
+    var set = ForkSet.empty;
     var it = std.mem.splitScalar(u8, text, ',');
     while (it.next()) |raw| {
         const name = std.mem.trim(u8, raw, " ");
@@ -1955,12 +1790,12 @@ fn stringLessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
 
 /// Sorted paths, relative to `root`, of every `*.json` fixture below it.
 fn collectFiles(a: Allocator, root: []const u8) ![]const []const u8 {
-    var dir = try std.fs.cwd().openDir(root, .{ .iterate = true });
-    defer dir.close();
+    var dir = try std.Io.Dir.cwd().openDir(io, root, .{ .iterate = true });
+    defer dir.close(io);
     var walker = try dir.walk(a);
     defer walker.deinit();
     var files: std.ArrayList([]const u8) = .empty;
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".json")) continue;
         // `.meta/index.json` describes the release; it is not a fixture.
@@ -1985,9 +1820,9 @@ fn suiteOf(path: []const u8) []const u8 {
 
 /// True when the raw fixture text names one of the selected forks as a key.
 fn mentionsSelectedFork(data: []const u8, forks: ForkSet) bool {
-    inline for (@typeInfo(Fork).@"enum".fields) |f| {
-        if (forks.contains(@enumFromInt(f.value))) {
-            if (std.mem.indexOf(u8, data, "\"" ++ f.name ++ "\"") != null) return true;
+    inline for (comptime std.meta.tags(Fork)) |fork| {
+        if (forks.contains(fork)) {
+            if (std.mem.indexOf(u8, data, "\"" ++ @tagName(fork) ++ "\"") != null) return true;
         }
     }
     inline for (Fork.aliases) |alias| {
@@ -2002,7 +1837,7 @@ const Worker = struct {
     gpa: Allocator,
     config: *const Config,
     sink: *Sink,
-    root: std.fs.Dir,
+    root: std.Io.Dir,
 
     fn run(self: *Worker, files: []const []const u8, args: WorkerArgs) !void {
         for (files, 0..) |path, index| {
@@ -2025,7 +1860,7 @@ const Worker = struct {
                 if (!std.mem.endsWith(u8, path, filter[0..separator]) and std.mem.indexOf(u8, path, filter[0..separator]) == null) return;
             }
         }
-        const data = try self.root.readFileAlloc(arena, path, max_fixture_bytes);
+        const data = try self.root.readFileAlloc(io, path, arena, .limited(max_fixture_bytes + 1));
         if (self.config.fork_text != null and !mentionsSelectedFork(data, self.config.forks)) return;
         // Skip the JSON parse when neither the path nor the text can match.
         if (self.config.filter) |filter| {
@@ -2148,20 +1983,18 @@ const WorkerThread = struct {
 
     fn body(self: *WorkerThread) !void {
         var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-        const use_debug_allocator = builtin.mode == .Debug;
+        const use_debug_allocator = builtin.mode == .debug;
         const gpa = if (use_debug_allocator) debug_allocator.allocator() else std.heap.smp_allocator;
 
-        var root = try std.fs.cwd().openDir(self.config.fixtures_dir, .{});
-        defer root.close();
-
-        // The KZG point-evaluation precompile needs the trusted setup.
-        try evm.kzg_setup.init();
+        var root = try std.Io.Dir.cwd().openDir(io, self.config.fixtures_dir, .{});
+        defer root.close(io);
 
         var worker = Worker{ .gpa = gpa, .config = self.config, .sink = self.sink, .root = root };
         try worker.run(self.files, self.args);
 
         var leak_check = LeakCheck.not_run;
         if (use_debug_allocator) {
+            // `Evm.init` loaded the KZG trusted setup for the Cancun+ forks.
             evm.kzg_setup.deinit(gpa);
             leak_check = if (debug_allocator.deinit() == .leak) .leaked else .clean;
         }
@@ -2224,12 +2057,12 @@ const Supervisor = struct {
         try argv.append(self.a, try std.fmt.allocPrint(self.a, "--fork={s}", .{self.config.fork_text orelse ""}));
         try argv.append(self.a, try std.fmt.allocPrint(self.a, "--filter={s}", .{self.config.filter orelse ""}));
 
-        var child = std.process.Child.init(argv.items, self.a);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = if (self.config.verbose) .Inherit else .Ignore;
-        try child.spawn();
-        worker.child = child;
+        worker.child = try std.process.spawn(io, .{
+            .argv = argv.items,
+            .stdin = .ignore,
+            .stdout = .pipe,
+            .stderr = if (self.config.verbose) .inherit else .ignore,
+        });
         worker.open_file = null;
         worker.open_case = null;
         worker.timed_out = false;
@@ -2263,7 +2096,7 @@ const Supervisor = struct {
                 const name = try self.a.dupe(u8, try column(&fields));
                 const post_index = try std.fmt.parseInt(usize, try column(&fields), 10);
                 worker.open_case = .{ .ordinal = ordinal, .fork = fork, .suite = suite, .file = file, .name = name, .post_index = post_index };
-                worker.case_started_ms = std.time.milliTimestamp();
+                worker.case_started_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
             },
             'P' => {
                 const info = worker.open_case orelse return error.MalformedWorkerLine;
@@ -2306,15 +2139,15 @@ const Supervisor = struct {
     /// The worker's stdout closed: reap it, record a lost case, restart.
     fn exited(self: *Supervisor, worker: *Supervised) !void {
         var child = worker.child orelse return error.WorkerNotRunning;
-        const term = try child.wait();
+        const term = try child.wait(io);
         worker.child = null;
         if (worker.finished) return;
 
         const how = switch (term) {
-            .Exited => |code| try std.fmt.allocPrint(self.a, "worker exited with code {d}", .{code}),
-            .Signal => |signal| try std.fmt.allocPrint(self.a, "worker killed by signal {d}", .{signal}),
-            .Stopped => |signal| try std.fmt.allocPrint(self.a, "worker stopped by signal {d}", .{signal}),
-            .Unknown => |status| try std.fmt.allocPrint(self.a, "worker ended with status {d}", .{status}),
+            .exited => |code| try std.fmt.allocPrint(self.a, "worker exited with code {d}", .{code}),
+            .signal => |signal| try std.fmt.allocPrint(self.a, "worker killed by signal {d}", .{@intFromEnum(signal)}),
+            .stopped => |signal| try std.fmt.allocPrint(self.a, "worker stopped by signal {d}", .{@intFromEnum(signal)}),
+            .unknown => |status| try std.fmt.allocPrint(self.a, "worker ended with status {d}", .{status}),
         };
         const category: []const u8 = if (worker.timed_out) "timeout" else "crash";
         const detail = if (worker.timed_out)
@@ -2351,7 +2184,7 @@ const Supervisor = struct {
         // Died outside any file. Restart where it stopped; `spawn` refuses a
         // restart that cannot make progress.
         const message = try std.fmt.allocPrint(self.a, "eest-runner: worker {d} failed outside a fixture: {s}\n", .{ worker.shard, how });
-        try std.fs.File.stderr().writeAll(message);
+        try std.Io.File.stderr().writeStreamingAll(io, message);
         try self.spawn(worker, worker.next_file, 0);
     }
 
@@ -2385,14 +2218,15 @@ const Supervisor = struct {
                 try self.drain(worker);
             }
 
-            const now = std.time.milliTimestamp();
+            const now = std.Io.Timestamp.now(io, .awake).toMilliseconds();
             const limit_ms: i64 = @intCast(self.config.timeout_secs * 1000);
             for (self.workers) |*worker| {
                 const child = worker.child orelse continue;
                 if (worker.open_case == null or worker.timed_out) continue;
                 if (now - worker.case_started_ms <= limit_ms) continue;
                 worker.timed_out = true;
-                std.posix.kill(child.id, std.posix.SIG.KILL) catch |err| switch (err) {
+                const pid = child.id orelse continue;
+                std.posix.kill(pid, std.posix.SIG.KILL) catch |err| switch (err) {
                     // Already gone: the closed pipe reports the exit.
                     error.ProcessNotFound => {},
                     else => return err,
@@ -2634,8 +2468,8 @@ fn renderSummary(a: Allocator, aggregator: *const Aggregator, info: RunInfo) ![]
 /// Reads the release tag that `scripts/fetch-eest-fixtures.sh` stamps beside
 /// the `fixtures` directory.
 fn readRelease(a: Allocator, fixtures_dir: []const u8) !?[]const u8 {
-    const path = try std.fs.path.join(a, &.{ fixtures_dir, "..", "..", "STAMP" });
-    const stamp = std.fs.cwd().readFileAlloc(a, path, 4096) catch |err| switch (err) {
+    const path = try std.Io.Dir.path.join(a, &.{ fixtures_dir, "..", "..", "STAMP" });
+    const stamp = std.Io.Dir.cwd().readFileAlloc(io, path, a, .limited(4096 + 1)) catch |err| switch (err) {
         // Fixtures fetched by other means carry no stamp.
         error.FileNotFound, error.NotDir => return null,
         else => return err,
@@ -2657,12 +2491,14 @@ fn exitUsage(err: anyerror) !u8 {
     return err;
 }
 
-pub fn main() !u8 {
+pub fn main(init: std.process.Init) !u8 {
+    io = init.io;
+    environ_map = init.environ_map;
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
 
-    const args = try std.process.argsAlloc(a);
+    const args = try init.minimal.args.toSlice(a);
     const config = loadConfig(a, args) catch |err| return exitUsage(err);
 
     const files = collectFiles(a, config.fixtures_dir) catch |err| switch (err) {
@@ -2671,14 +2507,14 @@ pub fn main() !u8 {
     };
 
     if (config.worker) |worker_args| {
-        var sink = Sink{ .target = .{ .pipe = std.fs.File.stdout() }, .a = a };
+        var sink = Sink{ .target = .{ .pipe = std.Io.File.stdout() }, .a = a };
         try runWorkerThread(&config, &sink, files, worker_args);
         return 0;
     }
 
     if (files.len == 0) return exitUsage(usage(a, "no *.json fixtures below '{s}'", .{config.fixtures_dir}));
 
-    const started = std.time.milliTimestamp();
+    const started = std.Io.Timestamp.now(io, .awake).toMilliseconds();
     var aggregator = Aggregator{ .a = a, .verbose = config.verbose };
     if (config.jobs == 0) {
         var sink = Sink{ .target = .{ .direct = &aggregator }, .a = a };
@@ -2691,7 +2527,7 @@ pub fn main() !u8 {
             .a = a,
             .config = &config,
             .aggregator = &aggregator,
-            .exe_path = try std.fs.selfExePathAlloc(a),
+            .exe_path = try std.process.executablePathAlloc(io, a),
             .files = files,
             .workers = workers,
         };
@@ -2702,11 +2538,11 @@ pub fn main() !u8 {
         .config = &config,
         .release = try readRelease(a, config.fixtures_dir),
         .files = files.len,
-        .duration_ms = @intCast(std.time.milliTimestamp() - started),
+        .duration_ms = @intCast(std.Io.Timestamp.now(io, .awake).toMilliseconds() - started),
     };
-    try std.fs.File.stdout().writeAll(try renderSummary(a, &aggregator, info));
+    try std.Io.File.stdout().writeStreamingAll(io, try renderSummary(a, &aggregator, info));
     if (config.report) |path| {
-        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = try renderReport(a, &aggregator, info) });
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = try renderReport(a, &aggregator, info) });
     }
 
     if (aggregator.passed + aggregator.failed == 0) {
@@ -2751,7 +2587,7 @@ test "RLP encodes scalars, strings and long lists" {
     try rlpAppendBytes(a, &out, "dog");
     try std.testing.expectEqualSlices(u8, &.{ 0x80, 0x7f, 0x81, 0x80, 0x82, 0x04, 0x00, 0x83, 'd', 'o', 'g' }, out.items);
 
-    const long = try rlpWrapList(a, &([_]u8{0x01} ** 60));
+    const long = try rlpWrapList(a, &(@as([60]u8, @splat(0x01))));
     try std.testing.expectEqual(@as(u8, 0xf8), long[0]);
     try std.testing.expectEqual(@as(u8, 60), long[1]);
     try std.testing.expectEqual(@as(usize, 62), long.len);
@@ -2801,7 +2637,7 @@ test "state root of one funded account matches the reference value" {
     try rlpAppendBytes(a, &leaf, account_rlp);
     const expected = keccak(try rlpWrapList(a, leaf.items));
 
-    try std.testing.expectEqualSlices(u8, &expected, &try stateRoot(a, &db));
+    try std.testing.expectEqualSlices(u8, &expected, &try db.get_state_root());
 }
 
 test "trie root does not depend on insertion order and separates branches" {
@@ -2834,7 +2670,7 @@ test "intrinsic gas follows each fork's schedule" {
         .max_priority_fee_per_gas = null,
         .max_fee_per_blob_gas = null,
         .to = null,
-        .sender = [_]u8{0} ** 20,
+        .sender = @as([20]u8, @splat(0)),
         .data = &.{},
         .gas_limit = &.{},
         .value = &.{},
@@ -2842,7 +2678,7 @@ test "intrinsic gas follows each fork's schedule" {
         .blob_hashes = null,
         .authorizations = null,
     };
-    const data = [_]u8{ 0x00, 0x01 } ++ [_]u8{0x02} ** 31;
+    const data = [_]u8{ 0x00, 0x01 } ++ @as([31]u8, @splat(0x02));
     const tx = Tx{ .template = &template, .data = &data, .gas_limit = 0, .value = 0, .access_list = &.{} };
 
     // Frontier: no creation surcharge, 68 gas per non-zero byte.
@@ -2879,7 +2715,7 @@ test "decodeSignature reads legacy and typed transactions" {
 
     var fields: std.ArrayList(u8) = .empty;
     for ([_]u256{ 0, 10, 21000 }) |value| try rlpAppendUint(a, &fields, value);
-    try rlpAppendBytes(a, &fields, &([_]u8{0xaa} ** 20));
+    try rlpAppendBytes(a, &fields, &(@as([20]u8, @splat(0xaa))));
     for ([_]u256{ 1, 0, 37, 0x1234, 0x5678 }) |value| try rlpAppendUint(a, &fields, value);
     const legacy = try rlpWrapList(a, fields.items);
 
@@ -2904,4 +2740,20 @@ test "suiteOf strips the per-fork directory" {
     try std.testing.expectEqualStrings("prague/eip7702_set_code_tx", suiteOf("for_prague/prague/eip7702_set_code_tx/calls/x.json"));
     try std.testing.expectEqualStrings("shanghai/eip3855_push0", suiteOf("shanghai/eip3855_push0/push0.json"));
     try std.testing.expectEqualStrings("x.json", suiteOf("x.json"));
+}
+
+test "state test block hashes are keccak256 of the decimal block number" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqual(@as(usize, 0), (try stateTestBlockHashes(a, 0)).len);
+    const one = try stateTestBlockHashes(a, 1);
+    try std.testing.expectEqual(@as(usize, 1), one.len);
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, "044852b2a670ade5407e78fb2863c51de9fcb96542a07186fe3aeda6bb8a116d");
+    try std.testing.expectEqualSlices(u8, &expected, &one[0]);
+    const many = try stateTestBlockHashes(a, 1000);
+    try std.testing.expectEqual(@as(usize, 256), many.len);
+    try std.testing.expectEqualSlices(u8, &keccak("999"), &many[0]);
+    try std.testing.expectEqualSlices(u8, &keccak("744"), &many[255]);
 }

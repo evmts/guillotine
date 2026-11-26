@@ -1,6 +1,6 @@
 //! C-ABI export harness for direct LLVM 20 IR formal verification (`zig build verify-ir`).
 //!
-//! Compiles Guillotine's actual `src/verified_ops.zig` functions under `-fllvm -OReleaseFast`
+//! Compiles Guillotine's actual `src/core/verified_ops.zig` functions under `-fllvm -OReleaseFast`
 //! to LLVM 20 IR (`.ll`), where `verify/llvm/llvm_ir_verify.py` verifies every `<name>_ref` vs
 //! `<name>_fast` pair for:
 //!   1. Bit-exact functional equivalence across ALL inputs (256-bit bitvectors).

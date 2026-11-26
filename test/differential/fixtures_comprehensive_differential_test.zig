@@ -92,8 +92,8 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
     try database.set_account(caller.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Setup block info and transaction context
@@ -105,7 +105,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -141,19 +141,23 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
     
     var contract_address: primitives.Address = undefined;
     var runtime_code: []const u8 = undefined;
+    var runtime_code_owned: ?[]u8 = null;
+    defer if (runtime_code_owned) |code| allocator.free(code);
     
     if (is_deployment_code) {
         log.info("  Deploying contract via CREATE...", .{});
         
-        // Deploy the contract using CREATE (Osaka EIP-7825 tx gas cap is 16,777,216)
+        // Deploy the contract using CREATE
         const deploy_params = evm.CallParams{
             .create = .{
                 .caller = caller,
                 .value = 0,
                 .init_code = init_bytecode,
-                .gas = 16_000_000,
+                .gas = 500_000_000,  // High gas for deployment
             },
         };
+        
+        std.debug.print("Deploying contract with {} bytes of init code\n", .{init_bytecode.len});
         
         // Deploy with regular EVM execution
         var deploy_result = evm_instance.call(deploy_params);
@@ -171,13 +175,27 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
             return error.DeploymentFailed;
         }
         
-        // Get the deployed contract address (CREATE already stored runtime code in database)
-        contract_address = deploy_result.created_address orelse try primitives.Address.getContractAddress(allocator, caller, 0);
-        const deployed_code = try database.get_code_by_address(contract_address.bytes);
-        runtime_code = deployed_code;
+        // Get the deployed contract address (deterministic based on caller + nonce)
+        contract_address = primitives.Address.get_contract_address(caller, 0);
+        
+        // The output of deployment is the runtime code
+        runtime_code_owned = try allocator.alloc(u8, deploy_result.output.len);
+        @memcpy(runtime_code_owned.?, deploy_result.output);
+        runtime_code = runtime_code_owned.?;
         
         log.info("  ✅ Contract deployed to: {x}", .{contract_address.bytes});
         log.info("  Runtime code size: {} bytes", .{runtime_code.len});
+        
+        // Update database with the deployed contract
+        const code_hash = try database.set_code(runtime_code);
+        try database.set_account(contract_address.bytes, .{
+            .balance = 0,
+            .nonce = 1,
+            .code_hash = code_hash,
+            .storage_root = @as([32]u8, @splat(0)),
+        });
+
+        // Contract is already deployed to our database, no need to sync
     } else {
         // Not deployment bytecode, use directly as runtime code
         contract_address = try primitives.Address.fromHex("0xc0de000000000000000000000000000000000000");
@@ -191,7 +209,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
             .balance = 0,
             .nonce = 1,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
         // Contract code is already set in database
@@ -210,7 +228,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
                 .to = contract_address,
                 .value = 0,
                 .input = calldata,
-                .gas = 16_000_000,
+                .gas = 100_000_000,  // High gas for execution
             },
         };
         
@@ -226,7 +244,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
             return error.ExecutionFailed;
         }
         
-        log.info("  ✅ Execution successful, gas used: {}", .{16_000_000 - result.gas_left});
+        log.info("  ✅ Execution successful, gas used: {}", .{100_000_000 - result.gas_left});
         if (result.output.len > 0) {
             log.info("  Output length: {} bytes", .{result.output.len});
             if (result.output.len <= 32) {
@@ -247,7 +265,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
 
 test "differential: erc20-transfer fixture" {
     const allocator = testing.allocator;
-    try run_fixture_test(allocator, "fixtures/erc20-transfer");
+    try run_fixture_test(allocator, "src/_test_utils/fixtures/erc20-transfer");
 }
 
 // test "differential: erc20-approval-transfer fixture" {

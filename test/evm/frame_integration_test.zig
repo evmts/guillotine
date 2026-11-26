@@ -13,7 +13,7 @@ const Hardfork = @import("evm").Hardfork;
 
 // Helper to convert number to Address
 fn to_address(value: u256) Address {
-    var addr: Address = [_]u8{0} ** 20;
+    var addr: Address = @as([20]u8, @splat(0));
     var i: usize = 0;
     while (i < 20) : (i += 1) {
         addr[19 - i] = @truncate(value >> @intCast(i * 8));
@@ -294,7 +294,7 @@ test "Frame CREATE operation - real integration test" {
 
 // Helper to convert u256 to Address
 fn from_u256(value: u256) Address {
-    var addr: Address = [_]u8{0} ** 20;
+    var addr: Address = @as([20]u8, @splat(0));
     var i: usize = 0;
     while (i < 20) : (i += 1) {
         addr[19 - i] = @truncate(value >> @intCast(i * 8));

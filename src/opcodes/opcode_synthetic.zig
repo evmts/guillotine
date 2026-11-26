@@ -41,24 +41,10 @@ pub const OpcodeSynthetic = enum(u8) {
     // Static jump optimizations - jump directly to known dispatch locations
     JUMP_TO_STATIC_LOCATION = 0xBD,   // Direct jump without binary search
     JUMPI_TO_STATIC_LOCATION = 0xBE,  // Conditional jump without binary search
-    // Advanced fusion patterns (3+ opcodes)
-    MULTI_PUSH_2 = 0xBF,          // Two consecutive PUSH operations
-    MULTI_PUSH_3 = 0xC0,          // Three consecutive PUSH operations
-    MULTI_POP_2 = 0xC1,           // Two consecutive POP operations
-    MULTI_POP_3 = 0xC2,           // Three consecutive POP operations
+    // Three-opcode fusion patterns
     ISZERO_JUMPI = 0xC3,          // ISZERO + PUSH + JUMPI pattern
-    DUP2_MSTORE_PUSH = 0xC4,      // DUP2 + MSTORE + PUSH pattern
-    
-    // New high-impact fusions based on pattern analysis
-    DUP3_ADD_MSTORE = 0xC5,       // DUP3 + ADD + MSTORE (60 occurrences)
-    SWAP1_DUP2_ADD = 0xC6,        // SWAP1 + DUP2 + ADD (134+ occurrences)
-    PUSH_DUP3_ADD = 0xC7,         // PUSH + DUP3 + ADD (58 occurrences)
-    FUNCTION_DISPATCH = 0xC8,     // PUSH4 + EQ + PUSH + JUMPI (function selector)
-    CALLVALUE_CHECK = 0xC9,        // CALLVALUE + DUP1 + ISZERO (payable check)
-    PUSH0_REVERT = 0xCA,           // PUSH0 + PUSH0 + REVERT (error pattern)
-    PUSH_ADD_DUP1 = 0xCB,          // PUSH + ADD + DUP1 (common in loops)
-    MLOAD_SWAP1_DUP2 = 0xCC,       // MLOAD + SWAP1 + DUP2 (memory pattern)
-    BACKWARD_LOOP_JUMPI = 0xCD,   // Backward loop: PUSH+JUMPI(exit) + [body] + PUSH+JUMP(loop)
+    PUSH_ADD_DUP1_INLINE = 0xCB,   // PUSH + ADD + DUP1, push value fits in 64 bits
+    PUSH_ADD_DUP1_POINTER = 0xCC,  // PUSH + ADD + DUP1, push value wider than 64 bits
     BLOCK_BEGIN = 0xCE,           // Basic block entered by falling through a non-taken JUMPI (charges block gas)
     INVALID_JUMP_TARGET = 0xCF,   // Target of a static jump whose destination is not a JUMPDEST
     
@@ -77,21 +63,8 @@ pub const OpcodeSynthetic = enum(u8) {
             .PUSH_MLOAD_INLINE, .PUSH_MLOAD_POINTER => "PUSH+MLOAD fusion",
             .JUMP_TO_STATIC_LOCATION => "Static JUMP optimization",
             .JUMPI_TO_STATIC_LOCATION => "Static JUMPI optimization",
-            .MULTI_PUSH_2 => "Double PUSH fusion",
-            .MULTI_PUSH_3 => "Triple PUSH fusion",
-            .MULTI_POP_2 => "Double POP fusion",
-            .MULTI_POP_3 => "Triple POP fusion",
             .ISZERO_JUMPI => "ISZERO+JUMPI pattern",
-            .DUP2_MSTORE_PUSH => "DUP2+MSTORE+PUSH pattern",
-            .DUP3_ADD_MSTORE => "DUP3+ADD+MSTORE pattern",
-            .SWAP1_DUP2_ADD => "SWAP1+DUP2+ADD pattern",
-            .PUSH_DUP3_ADD => "PUSH+DUP3+ADD pattern",
-            .FUNCTION_DISPATCH => "Function selector dispatch (PUSH4+EQ+PUSH+JUMPI)",
-            .CALLVALUE_CHECK => "Payable check (CALLVALUE+DUP1+ISZERO)",
-            .PUSH0_REVERT => "Error pattern (PUSH0+PUSH0+REVERT)",
-            .PUSH_ADD_DUP1 => "PUSH+ADD+DUP1 pattern",
-            .MLOAD_SWAP1_DUP2 => "MLOAD+SWAP1+DUP2 pattern",
-            .BACKWARD_LOOP_JUMPI => "Backward loop (PUSH+JUMPI exit + PUSH+JUMP loop)",
+            .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => "PUSH+ADD+DUP1 pattern",
             .BLOCK_BEGIN => "Fall-through basic block gas and stack check after JUMPI",
             .INVALID_JUMP_TARGET => "Taken static jump to a non-JUMPDEST (raises InvalidJump)",
         };
@@ -101,12 +74,12 @@ pub const OpcodeSynthetic = enum(u8) {
 // Compile-time check to ensure synthetic opcodes don't overlap with normal opcodes
 comptime {
     @setEvalBranchQuota(20000);
-    for (@typeInfo(OpcodeSynthetic).@"enum".fields) |syn_field| {
+    for (std.meta.tags(OpcodeSynthetic)) |synthetic| {
         // Try to convert the synthetic opcode value to a regular Opcode
-        if (std.meta.intToEnum(Opcode, syn_field.value) catch null) |conflicting_opcode| {
+        if (std.enums.fromInt(Opcode, @intFromEnum(synthetic))) |conflicting_opcode| {
             @compileError(std.fmt.comptimePrint(
                 "Synthetic opcode {s} (0x{X}) conflicts with normal opcode {s}",
-                .{ syn_field.name, syn_field.value, @tagName(conflicting_opcode) }
+                .{ @tagName(synthetic), @intFromEnum(synthetic), @tagName(conflicting_opcode) }
             ));
         } 
     }

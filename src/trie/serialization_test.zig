@@ -268,7 +268,7 @@ test "LeafNode - long value encoding" {
 
     const path = [_]u8{ 1, 2 };
     // Create a value longer than 55 bytes to test long string encoding
-    var long_value = try allocator.alloc(u8, 100);
+    const long_value = try allocator.alloc(u8, 100);
     defer allocator.free(long_value);
     for (long_value, 0..) |*byte, i| {
         byte.* = @intCast(i % 256);
@@ -621,7 +621,7 @@ test "Node serialization - inline vs hash storage" {
 
     // Test large value (would normally be hashed, but we're testing Raw encoding)
     {
-        var large_data = try allocator.alloc(u8, 50);
+        const large_data = try allocator.alloc(u8, 50);
         defer allocator.free(large_data);
         for (large_data, 0..) |*byte, i| {
             byte.* = @intCast(i % 256);

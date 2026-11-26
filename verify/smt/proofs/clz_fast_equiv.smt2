@@ -7,12 +7,12 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:257 (clzRef)
+;; --- src/core/verified_ops.zig:257 (clzRef)
 ;;   | pub inline fn clzRef(value: u256) u256 {
 ;;   |     if (value == 0) return 256;
 ;;   |     return @as(u256, @clz(value));
 ;;   | }
-;; --- src/verified_ops.zig:263 (clzFast)
+;; --- src/core/verified_ops.zig:263 (clzFast)
 ;;   | pub inline fn clzFast(value: u256) u256 {
 ;;   |     return @as(u256, @clz(value));
 ;;   | }

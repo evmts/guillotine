@@ -135,15 +135,23 @@ const seed_corpus: []const []const u8 = &.{
     &.{ 0, 8, 10, 0, 9, 20, 0, 10, 30, 0, 11, 40 }, // do/dog/doge/horse classic MPT case
     &.{ 0, 0, 1, 0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0 }, // shared prefix insert + delete middle
     &.{ 0, 12, 5, 0, 13, 6, 0, 14, 7, 1, 13, 99, 2, 12, 0, 2, 14, 0 },
-    // Regression seed found by fuzz-campaign (branch child Raw overwrite + empty-leaf collapse)
-    &.{
-        0x5a, 0x8a, 0x43, 0x56, 0xb5, 0xea, 0xe0, 0xa5, 0xb7, 0xf3, 0x7b, 0x34, 0x28, 0x34, 0x44, 0x95,
-        0x64, 0x3f, 0xfe, 0xc5, 0xc1, 0xa5, 0xd5, 0x2a, 0x76, 0xe1, 0x0e, 0xad, 0xfd, 0x21, 0x10, 0x9b,
-        0x07, 0xbc, 0x17, 0x0f, 0x45, 0x86, 0x02, 0x46, 0x05, 0x46, 0xac, 0x72, 0xc3, 0x55, 0xaa, 0x27,
-        0x75, 0xf7, 0x7e, 0xd7, 0xad, 0xf0, 0xee,
-    },
 };
 
 test "fuzz Merkle Patricia Trie stateful model and cryptographic order-independence" {
-    try std.testing.fuzz({}, fuzzMerkleTrieModelAndOrderIndependence, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMerkleTrieModelAndOrderIndependence), .{ .corpus = seed_corpus });
+}
+
+// Found by `zig build fuzz-campaign` (seed 1795676789943920650, iteration 134),
+// minimized: put("ab"), put("ac"), put("ab") gave a different root than
+// inserting {"ab", "ac"} fresh, because overwriting a value stored inline in a
+// branch slot replaced it with a hashed empty-path leaf.
+test "trie_mpt: overwriting a key that ends at a branch slot keeps the root canonical" {
+    try fuzzMerkleTrieModelAndOrderIndependence({}, &.{ 0xd0, 0x81, 0x34, 0x49, 0x54, 0xd0, 0xa9, 0x91, 0xf2 });
+}
+
+// Found by `zig build fuzz-campaign` (seed 1795677607958640078, iteration 18),
+// minimized: put("abc"), put("ab"), put("ac"), delete("abc") left "ab" in a
+// hashed empty-path leaf where a fresh insert stores it inline.
+test "trie_mpt: deleting below a key that ends at a branch slot keeps the root canonical" {
+    try fuzzMerkleTrieModelAndOrderIndependence({}, &.{ 0x10, 0x92, 0xb0, 0xf0, 0xc1, 0x4e, 0x2d, 0x64, 0x1d, 0x9a, 0xd2, 0xd5 });
 }

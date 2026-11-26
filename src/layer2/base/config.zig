@@ -10,6 +10,7 @@ const Address = primitives.Address;
 const OpSpecId = @import("../optimism/spec.zig").OpSpecId;
 const constants = @import("../optimism/constants.zig");
 const hardforks = @import("hardforks.zig");
+const eip1559 = @import("../optimism/eip1559.zig");
 
 pub const Schedule = hardforks.Schedule;
 pub const ScheduleError = hardforks.ScheduleError;
@@ -56,6 +57,23 @@ pub const BaseChain = enum {
     /// EIP-1559 base fee max change denominator, Canyon and later.
     pub fn eip1559DenominatorCanyon(_: BaseChain) u64 {
         return 250;
+    }
+
+    /// Pre-Holocene EIP-1559 constants (superchain-registry base.toml @ 720185c3).
+    pub fn eip1559Constants(self: BaseChain) eip1559.Constants {
+        return .{
+            .elasticity = self.eip1559Elasticity(),
+            .denominator = self.eip1559Denominator(),
+            .denominator_canyon = self.eip1559DenominatorCanyon(),
+        };
+    }
+
+    /// Base fee of the block at `child_timestamp` whose parent block was at
+    /// `parent_timestamp` (op-geth `CalcBaseFee`; Holocene/Jovian read the parent extraData).
+    pub fn nextBaseFee(self: BaseChain, parent_timestamp: u64, child_timestamp: u64, parent: eip1559.Parent) !u256 {
+        if (child_timestamp <= parent_timestamp) return error.TimestampNotIncreasing;
+        const schedule_ = self.schedule();
+        return eip1559.nextBaseFee(self.eip1559Constants(), try schedule_.specAt(parent_timestamp), try schedule_.specAt(child_timestamp), parent);
     }
 
     pub fn name(self: BaseChain) []const u8 {
@@ -123,6 +141,45 @@ test "Base EIP-1559 parameters" {
     try testing.expectEqual(@as(u64, 10), BaseChain.sepolia.eip1559Elasticity());
     try testing.expectEqual(@as(u64, 50), BaseChain.mainnet.eip1559Denominator());
     try testing.expectEqual(@as(u64, 250), BaseChain.mainnet.eip1559DenominatorCanyon());
+}
+
+test "Base next base fee: Canyon constants differ between mainnet and Sepolia" {
+    // 30M gas limit, 10M used, 1 gwei parent. Mainnet elasticity 6: target 5M,
+    // 1e9 * 5M / 5M / 250 = 4,000,000. Sepolia elasticity 10: target 3M,
+    // 1e9 * 7M / 3M = 2,333,333,333; / 250 = 9,333,333.
+    const parent = eip1559.Parent{ .gas_limit = 30_000_000, .gas_used = 10_000_000, .base_fee = 1_000_000_000 };
+    const mainnet = hardforks.MAINNET.ecotone;
+    try testing.expectEqual(@as(u256, 1_004_000_000), try BaseChain.mainnet.nextBaseFee(mainnet, mainnet + 2, parent));
+    const sepolia = hardforks.SEPOLIA.ecotone;
+    try testing.expectEqual(@as(u256, 1_009_333_333), try BaseChain.sepolia.nextBaseFee(sepolia, sepolia + 2, parent));
+    // Pre-Canyon child: denominator 50 (1e9 * 5M / 5M / 50 = 20,000,000).
+    const regolith = hardforks.MAINNET.regolith;
+    try testing.expectEqual(@as(u256, 1_020_000_000), try BaseChain.mainnet.nextBaseFee(regolith, regolith + 2, parent));
+    // The first Canyon child of a Regolith parent already uses the Canyon denominator.
+    try testing.expectEqual(@as(u256, 1_004_000_000), try BaseChain.mainnet.nextBaseFee(hardforks.MAINNET.canyon - 2, hardforks.MAINNET.canyon, parent));
+}
+
+test "Base next base fee: Holocene and Jovian read the parent extraData" {
+    for ([_]BaseChain{ .mainnet, .sepolia }) |chain| {
+        const s = chain.schedule();
+        // Holocene parent: denominator 250, elasticity 2 from extraData, not the chain constants.
+        const holocene_extra = [_]u8{ 0, 0, 0, 0, 250, 0, 0, 0, 2 };
+        const holocene = eip1559.Parent{ .gas_limit = 30_000_000, .gas_used = 25_000_000, .base_fee = 1_000_000, .extra_data = &holocene_extra };
+        // target 15M; 1e6 * 10M / 15M = 666,666; / 250 = 2,666.
+        try testing.expectEqual(@as(u256, 1_002_666), try chain.nextBaseFee(s.holocene, s.holocene + 2, holocene));
+        try testing.expectError(error.InvalidExtraDataLength, chain.nextBaseFee(s.jovian, s.jovian + 2, holocene));
+        // Jovian parent: DA footprint (blobGasUsed) above gasUsed drives the change, then the
+        // 0.05 gwei minimum base fee applies.
+        const jovian_extra = [_]u8{ 1, 0, 0, 0, 250, 0, 0, 0, 2, 0, 0, 0, 0, 0x02, 0xfa, 0xf0, 0x80 };
+        const jovian = eip1559.Parent{ .gas_limit = 30_000_000, .gas_used = 1_000_000, .blob_gas_used = 25_000_000, .base_fee = 1_000_000, .extra_data = &jovian_extra };
+        try testing.expectEqual(@as(u256, 50_000_000), try chain.nextBaseFee(s.jovian, s.jovian + 2, jovian));
+        var above_min = jovian;
+        above_min.base_fee = 100_000_000;
+        // 1e8 * 10M / 15M = 66,666,666; / 250 = 266,666.
+        try testing.expectEqual(@as(u256, 100_266_666), try chain.nextBaseFee(s.jovian, s.jovian + 2, above_min));
+        try testing.expectError(error.TimestampNotIncreasing, chain.nextBaseFee(s.jovian, s.jovian, jovian));
+        try testing.expectError(error.UnmodeledBaseUpgrade, chain.nextBaseFee(s.azul.? - 2, s.azul.?, jovian));
+    }
 }
 
 test "Base system contracts" {

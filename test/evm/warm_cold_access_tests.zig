@@ -11,11 +11,11 @@ const TransactionContext = @import("evm").TransactionContext;
 const CallParams = @import("call_params.zig").CallParams;
 const CallKind = @import("call_params.zig").CallKind;
 
-const ZERO_ADDRESS = [_]u8{0} ** 20;
-const TEST_ADDRESS_1 = [_]u8{1} ** 20;
-const TEST_ADDRESS_2 = [_]u8{2} ** 20;
-const TEST_ADDRESS_3 = [_]u8{3} ** 20;
-const TEST_ADDRESS_4 = [_]u8{4} ** 20;
+const ZERO_ADDRESS = @as([20]u8, @splat(0));
+const TEST_ADDRESS_1 = @as([20]u8, @splat(1));
+const TEST_ADDRESS_2 = @as([20]u8, @splat(2));
+const TEST_ADDRESS_3 = @as([20]u8, @splat(3));
+const TEST_ADDRESS_4 = @as([20]u8, @splat(4));
 
 test "warm/cold access - multiple addresses in single transaction" {
     const allocator = testing.allocator;
@@ -32,7 +32,7 @@ test "warm/cold access - multiple addresses in single transaction" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -112,7 +112,7 @@ test "warm/cold access - storage slots across different addresses" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -163,7 +163,7 @@ test "warm/cold access - EXTCODESIZE and EXTCODEHASH" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -203,7 +203,7 @@ test "warm/cold access - nested calls preserve access list" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -258,7 +258,7 @@ test "warm/cold access - SSTORE gas calculation" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -299,7 +299,7 @@ test "warm/cold access - pre-warming validation" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = TEST_ADDRESS_3,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -349,7 +349,7 @@ test "warm/cold access - large number of unique accesses" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     
@@ -368,7 +368,7 @@ test "warm/cold access - large number of unique accesses" {
     var total_gas: u64 = 0;
     var i: u8 = 0;
     while (i < 100) : (i += 1) {
-        var addr = [_]u8{0} ** 20;
+        var addr = @as([20]u8, @splat(0));
         addr[19] = i;
         
         // First access should be cold
@@ -402,7 +402,7 @@ test "warm/cold access - CALL opcode target pre-warming" {
         .gas_limit = 30_000_000,
         .basefee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prevrandao = [_]u8{1} ** 32,
+        .prevrandao = @as([32]u8, @splat(1)),
         .blob_base_fee = 1,
     };
     

@@ -7,7 +7,7 @@
 ;; This file asserts ONLY the hypotheses. Expected `sat`: the hypotheses
 ;; are consistent, so the companion `unsat` proof is not vacuous.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:102 (blockStackGuardRef)
+;; --- src/core/verified_ops.zig:102 (blockStackGuardRef)
 ;;   | pub inline fn blockStackGuardRef(
 ;;   |     size: u32,
 ;;   |     min_stack: u16,
@@ -18,7 +18,7 @@
 ;;   |     if (@as(u64, size) + @as(u64, max_stack) > @as(u64, stack_capacity)) return .overflow;
 ;;   |     return .ok;
 ;;   | }
-;; --- src/verified_ops.zig:117 (blockStackGuardFast)
+;; --- src/core/verified_ops.zig:117 (blockStackGuardFast)
 ;;   | pub inline fn blockStackGuardFast(
 ;;   |     size: u32,
 ;;   |     min_stack: u16,

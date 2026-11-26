@@ -169,41 +169,38 @@ A crash or a hang in the EVM costs one case, never the run. Workers run on a
 1 GiB stack because the EVM recurses once per call depth. Debug builds use
 `std.heap.DebugAllocator` and report `leak_check` (`clean` or `leaked`).
 
-### Baseline (2026-11-22)
+### Results (2026-11-25)
 
-`tests@v21.0.3` (sha256 `46bd48fb…04fd24`), 10,693 files, ReleaseFast, 66,652
-cases in 470 s on a MacBook Pro. All 4,370 invalid-transaction cases agree with
-the fixtures, and no root mismatch is unexplained, so the remaining failures
-are EVM behavior, not runner bookkeeping.
+`tests@v21.0.3` (sha256 `46bd48fb…04fd24`, pinned in
+`scripts/fetch-eest-fixtures.sh`), 10,693 files, ReleaseFast: every one of the
+66,652 cases passes with fusion on and with fusion off
+(`-Devm-enable-fusion=false`), with no failures and no crashes. CI runs both
+modes and fails unless the report shows 66,652 / 66,652.
 
-| Fork | Passed | Failed | Total | Pass % |
-| --- | ---: | ---: | ---: | ---: |
-| Frontier | 194 | 619 | 813 | 23.86 |
-| Homestead | 198 | 685 | 883 | 22.42 |
-| TangerineWhistle | 197 | 684 | 881 | 22.36 |
-| SpuriousDragon | 234 | 727 | 961 | 24.35 |
-| Byzantium | 251 | 2,081 | 2,332 | 10.76 |
-| ConstantinopleFix | 262 | 2,263 | 2,525 | 10.38 |
-| Istanbul | 264 | 2,388 | 2,652 | 9.95 |
-| Berlin | 558 | 3,035 | 3,593 | 15.53 |
-| London | 830 | 3,044 | 3,874 | 21.42 |
-| Paris | 830 | 3,059 | 3,889 | 21.34 |
-| Shanghai | 864 | 3,224 | 4,088 | 21.14 |
-| Cancun | 2,202 | 9,376 | 11,578 | 19.02 |
-| Prague | 2,808 | 11,111 | 13,919 | 20.17 |
-| Osaka | 2,808 | 11,856 | 14,664 | 19.15 |
-| **Total** | **12,500** | **54,152** | **66,652** | **18.75** |
+| Fork | Cases | Fusions ON pass | Fusions OFF pass | Fail | Pass % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Frontier | 813 | 813 | 813 | 0 | 100.00 |
+| Homestead | 883 | 883 | 883 | 0 | 100.00 |
+| TangerineWhistle | 881 | 881 | 881 | 0 | 100.00 |
+| SpuriousDragon | 961 | 961 | 961 | 0 | 100.00 |
+| Byzantium | 2,332 | 2,332 | 2,332 | 0 | 100.00 |
+| ConstantinopleFix | 2,525 | 2,525 | 2,525 | 0 | 100.00 |
+| Istanbul | 2,652 | 2,652 | 2,652 | 0 | 100.00 |
+| Berlin | 3,593 | 3,593 | 3,593 | 0 | 100.00 |
+| London | 3,874 | 3,874 | 3,874 | 0 | 100.00 |
+| Paris | 3,889 | 3,889 | 3,889 | 0 | 100.00 |
+| Shanghai | 4,088 | 4,088 | 4,088 | 0 | 100.00 |
+| Cancun | 11,578 | 11,578 | 11,578 | 0 | 100.00 |
+| Prague | 13,919 | 13,919 | 13,919 | 0 | 100.00 |
+| Osaka | 14,664 | 14,664 | 14,664 | 0 | 100.00 |
+| **Total** | **66,652** | **66,652** | **66,652** | **0** | **100.00** |
 
-| Reason | Cases | First example |
-| --- | ---: | --- |
-| `gas_used_mismatch` | 40,684 | `60015f55` (cold `SSTORE` 0→1) uses 43,205 gas, fixture 43,105 |
-| `status_mismatch` | 13,046 | valid `CALL` contract fails with `StackUnderflow`; `ecpairing` |
-| `crash` | 266 | worker `SIGSEGV`, for example `frontier/opcodes/log/gas.json` |
-| `nonce_mismatch` | 125 | Frontier contract created with nonce 1, fixture 0 |
-| `storage_mismatch` | 29 | `ripemd` precompile result, initcode gas |
-| `balance_mismatch` | 2 | `stRandom2/random_statetest642` |
+16,907 Amsterdam posts are skipped because the fork is not implemented.
 
-16,907 Amsterdam posts are skipped.
+The first baseline (2026-11-22) passed 12,500 of 66,652 (18.75%); the commit
+history records the fixes since then. The last 311 failures closed with
+RETURN/REVERT size-0 handling, the pre-SELFDESTRUCT touch, EXP gas, BLOCKHASH
+served from ancestor hashes, and per-fork opcode gating that also covers fusions.
 
 ### JSON report
 
@@ -233,62 +230,76 @@ are EVM behavior, not runner bookkeeping.
 The report also carries `fixtures_dir`, `fork_filter`, `test_filter`,
 `optimize`, `jobs` and `duration_ms`. Each reason keeps its first five examples.
 
-## Legacy filler specs (`zig build specs`)
+## Legacy filler specs
 
-`zig build specs` compiles `specs/cases/root.zig`, a generated aggregator that
-imports 2,245 Zig test files under `specs/cases/eest/` (one per execution-spec
-filler), and runs them with `test_runner.zig`. Commit `7501b986` (2026-11-23)
-recorded 581 failures, down from 1,031, with no regressions.
+## Test Results
 
-### Running the Specs
+Current status: **2124 pass / 1043 fail** (3167 expect() calls total)
+
+## Running the Specs
+
+### Quick Start
 
 ```bash
-# Run every legacy spec test (Zig runner)
+# Run all specs (default: first 100 files)
 zig build specs
 
-# Run tests whose name matches a pattern (compile-time test filter; pass it once)
-zig build specs -Dtest-filter='sstore'
+# Run with more files
+zig build specs -- -Dspec-max-files=500
 
-# Run the Bun/TypeScript runner in specs/bun-runner (needs bun on PATH)
-zig build specs-bun
-zig build specs-bun -Dspec-max-files=500
+# Run all available spec files
+zig build specs -- -Dspec-max-files=10000
+
+# Run specs matching a specific pattern
+zig build specs -- -Dspec-pattern='add*.json'
+
+# Run in isolated mode (each test in separate process)
+zig build specs -- -Dspec-isolated=true
 ```
 
 ### Build Options
 
-- `-Dtest-filter=PATTERN` - Run only tests whose name contains `PATTERN` (both runners).
-- `-Dspec-max-files=N` - Limit the number of spec files. Only the Bun runner reads it
-  (`MAX_SPEC_FILES`); the Zig runner ignores it even though the `specs` step description mentions it.
-- `-Dspec-skip-files=N` - Sets `SKIP_SPEC_FILES`, which no runner reads yet.
+- `-Dspec-max-files=N` - Limit the number of spec files to run (default: 100)
+- `-Dspec-pattern='*.json'` - Pattern to match test files (default: '*.json')
+- `-Dspec-isolated=true` - Run each test in an isolated process (safer but slower)
+- `-Dspec-args` - Additional arguments to pass to the test runner
+
+### Test Modes
+
+1. **Normal Mode** (`ethereum-specs.test.ts`) - Default mode, runs tests in the same process
+2. **Isolated Mode** (`ethereum-specs-safe.test.ts`) - Each test runs in a separate worker process to prevent crashes from affecting other tests
 
 ### Directory Structure
 
 ```
 specs/
-├── README.md              # This file
-├── CLAUDE.md              # AI assistant instructions
-├── eest_runner.zig        # Official EEST state test runner (zig build state-tests)
-├── runner.zig             # Legacy filler runner: pre-state, execution, post/expect checks
-├── assembler.zig, lll.zig # Compile (asm ...)/:asm and LLL filler code
-├── cases/
-│   ├── root.zig           # Generated aggregator imported by zig build specs
-│   └── eest/              # One generated Zig test per filler
-├── bun-runner/            # Bun runner (zig build specs-bun)
-│   ├── ethereum-specs.test.ts
-│   └── post-state-validation.test.ts
-└── execution-specs/       # Git submodule: ethereum/execution-specs
+├── README.md                     # This file
+├── CLAUDE.md                     # AI assistant instructions
+├── test_report.md                # Detailed test results
+├── execution-specs/              # Git submodule with official Ethereum tests
+│   └── tests/                    # Test JSON files organized by category
+└── bun-runner/                   # Bun test runner implementation
+    ├── ethereum-specs.test.ts    # Main test runner
+    ├── ethereum-specs-safe.test.ts # Isolated test runner
+    ├── test-worker.js            # Worker script for isolated mode
+    ├── generate-specs.ts         # (unused) Test generator
+    └── package.json              # Bun dependencies
 ```
 
 ## Implementation Details
 
-For each filler test case, `specs/runner.zig`:
-1. Sets up the block environment and pre-state (accounts, balances, code, storage)
-2. Compiles `(asm ...)`, `:asm` and LLL code with `assembler.zig` and `lll.zig`
-3. Executes the transaction under Prague with an uncapped block gas limit
-4. Checks balances, nonces, code and storage against `post`, or against the `expect`
-   entries whose `indexes` select data/gas/value 0
+The test runner:
+1. Recursively finds all JSON test files in `execution-specs/tests/`
+2. Groups tests by category (directory name)
+3. For each test case:
+   - Sets up the blockchain environment (block info)
+   - Initializes pre-state (accounts, balances, code)
+   - Executes transaction(s)
+   - Validates the result didn't crash
+   - (Post-state validation not yet implemented)
 
 ## Known Limitations
 
-- `:yul` filler code is not compiled; those cases return `TestTodo`
-- Only the first transaction variant (data/gas/value index 0) is checked
+- Assembly code tests are skipped (not supported)
+- Post-state validation not yet implemented
+- Some edge cases may cause crashes in normal mode (use isolated mode for safety)

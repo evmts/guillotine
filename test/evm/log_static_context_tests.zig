@@ -51,12 +51,12 @@ const MockHostWithStaticContext = struct {
     
     pub fn get_tx_origin(self: *MockHostWithStaticContext) Address {
         _ = self;
-        return [_]u8{0} ** 19 ++ [_]u8{0xde};
+        return @as([19]u8, @splat(0)) ++ [_]u8{0xde};
     }
     
     pub fn get_caller(self: *MockHostWithStaticContext) Address {
         _ = self;
-        return [_]u8{0} ** 19 ++ [_]u8{0xca};
+        return @as([19]u8, @splat(0)) ++ [_]u8{0xca};
     }
     
     pub fn get_call_value(self: *MockHostWithStaticContext) u256 {
@@ -243,7 +243,7 @@ test "LOG0 in static context fails with WriteProtection" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Setup stack for LOG0: offset, size
@@ -267,7 +267,7 @@ test "LOG1 in static context fails with WriteProtection" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Setup stack for LOG1: topic, offset, size
@@ -292,7 +292,7 @@ test "LOG2 in static context fails with WriteProtection" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Setup stack for LOG2: topic2, topic1, offset, size
@@ -318,7 +318,7 @@ test "LOG3 in static context fails with WriteProtection" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Setup stack for LOG3: topic3, topic2, topic1, offset, size
@@ -345,7 +345,7 @@ test "LOG4 in static context fails with WriteProtection" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Setup stack for LOG4: topic4, topic3, topic2, topic1, offset, size
@@ -373,10 +373,10 @@ test "LOG operations succeed in non-static context" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
-    const contract_address = [_]u8{0x12} ++ [_]u8{0} ** 19;
+    const contract_address = [_]u8{0x12} ++ @as([19]u8, @splat(0));
     frame.contract_address = contract_address;
     
     // Test LOG0 succeeds
@@ -420,7 +420,7 @@ test "LOG operations with data in static context fail" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Store some data in memory
@@ -449,7 +449,7 @@ test "LOG operations with maximum topics in static context fail" {
     const F = Frame(.{});
     const bytecode = [_]u8{ 0x00 }; // STOP
     
-    var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
     // Store some data in memory

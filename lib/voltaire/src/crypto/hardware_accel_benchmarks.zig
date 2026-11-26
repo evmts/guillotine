@@ -126,7 +126,7 @@ test "comprehensive_crypto_hardware_acceleration_benchmarks" {
     std.log.debug("\n=== EVM-Specific Pattern Benchmarks ===", .{});
 
     // Address generation (Keccak256 of public key)
-    const pub_key = [_]u8{0x04} ++ [_]u8{0x42} ** 64; // Uncompressed public key
+    const pub_key = [_]u8{0x04} ++ @as([64]u8, @splat(0x42)); // Uncompressed public key
     timer.reset();
     var j: usize = 0;
     while (j < 10000) : (j += 1) {
@@ -160,14 +160,14 @@ test "comprehensive_crypto_hardware_acceleration_benchmarks" {
         var hash: [32]u8 = undefined;
 
         // Address hashing
-        const addr = [_]u8{0x12} ** 20;
+        const addr = @as([20]u8, @splat(0x12));
         crypto.Keccak256_Accel.Keccak256_Accel.hash(&addr, &hash);
 
         // Function selector
         crypto.Keccak256_Accel.Keccak256_Accel.hash("balanceOf(address)", &hash);
 
         // Event data (128 bytes)
-        const event_data = [_]u8{0xEF} ** 128;
+        const event_data = @as([128]u8, @splat(0xEF));
         crypto.Keccak256_Accel.Keccak256_Accel.hash(&event_data, &hash);
 
         // SHA256 for some precompile work
@@ -181,12 +181,12 @@ test "comprehensive_crypto_hardware_acceleration_benchmarks" {
     while (j < workload_iterations) : (j += 1) {
         var hash: [32]u8 = undefined;
 
-        const addr = [_]u8{0x12} ** 20;
+        const addr = @as([20]u8, @splat(0x12));
         std.crypto.hash.sha3.Keccak256.hash(&addr, &hash, .{});
 
         std.crypto.hash.sha3.Keccak256.hash("balanceOf(address)", &hash, .{});
 
-        const event_data = [_]u8{0xEF} ** 128;
+        const event_data = @as([128]u8, @splat(0xEF));
         std.crypto.hash.sha3.Keccak256.hash(&event_data, &hash, .{});
 
         var sha_hasher = std.crypto.hash.sha2.Sha256.init(.{});

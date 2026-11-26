@@ -31,20 +31,8 @@ const SyntheticOpcodeSteps = struct {
     const PUSH_MLOAD_POINTER = 2;
     const JUMP_TO_STATIC_LOCATION = 2;
     const JUMPI_TO_STATIC_LOCATION = 2;
-    const FUNCTION_DISPATCH = 4;
-    const MULTI_PUSH_2 = 2;
-    const MULTI_PUSH_3 = 3;
-    const MULTI_POP_2 = 2;
-    const MULTI_POP_3 = 3;
     const ISZERO_JUMPI = 3; // ISZERO + PUSH + JUMPI = 3 steps
-    const DUP2_MSTORE_PUSH = 3;
-    const DUP3_ADD_MSTORE = 3;
-    const SWAP1_DUP2_ADD = 3;
-    const PUSH_DUP3_ADD = 3;
     const PUSH_ADD_DUP1 = 3;
-    const CALLVALUE_CHECK = 2;
-    const MLOAD_SWAP1_DUP2 = 3;
-    const PUSH0_REVERT = 2;
     const DEFAULT_MAX = 10;
 };
 
@@ -73,20 +61,8 @@ fn getMaxStepsForOpcode(opcode: UnifiedOpcode) u32 {
         .PUSH_MLOAD_POINTER => SyntheticOpcodeSteps.PUSH_MLOAD_POINTER,
         .JUMP_TO_STATIC_LOCATION => SyntheticOpcodeSteps.JUMP_TO_STATIC_LOCATION,
         .JUMPI_TO_STATIC_LOCATION => SyntheticOpcodeSteps.JUMPI_TO_STATIC_LOCATION,
-        .FUNCTION_DISPATCH => SyntheticOpcodeSteps.FUNCTION_DISPATCH,
-        .MULTI_PUSH_2 => SyntheticOpcodeSteps.MULTI_PUSH_2,
-        .MULTI_PUSH_3 => SyntheticOpcodeSteps.MULTI_PUSH_3,
-        .MULTI_POP_2 => SyntheticOpcodeSteps.MULTI_POP_2,
-        .MULTI_POP_3 => SyntheticOpcodeSteps.MULTI_POP_3,
         .ISZERO_JUMPI => SyntheticOpcodeSteps.ISZERO_JUMPI,
-        .DUP2_MSTORE_PUSH => SyntheticOpcodeSteps.DUP2_MSTORE_PUSH,
-        .DUP3_ADD_MSTORE => SyntheticOpcodeSteps.DUP3_ADD_MSTORE,
-        .SWAP1_DUP2_ADD => SyntheticOpcodeSteps.SWAP1_DUP2_ADD,
-        .PUSH_DUP3_ADD => SyntheticOpcodeSteps.PUSH_DUP3_ADD,
-        .PUSH_ADD_DUP1 => SyntheticOpcodeSteps.PUSH_ADD_DUP1,
-        .CALLVALUE_CHECK => SyntheticOpcodeSteps.CALLVALUE_CHECK,
-        .MLOAD_SWAP1_DUP2 => SyntheticOpcodeSteps.MLOAD_SWAP1_DUP2,
-        .PUSH0_REVERT => SyntheticOpcodeSteps.PUSH0_REVERT,
+        .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => SyntheticOpcodeSteps.PUSH_ADD_DUP1,
         else => 1, // Regular opcodes execute once
     };
 }
@@ -103,8 +79,7 @@ pub fn executeMinimalEvmForOpcode(
     frame: anytype,
     cursor: [*]const @TypeOf(frame.*).Dispatch.Item,
 ) void {
-    // frame parameter may be used for JUMPDEST special handling
-    
+    _ = cursor;
     const max_steps = getMaxStepsForOpcode(opcode);
     _ = evm.getPC(); // initial_pc for debugging
     
@@ -112,73 +87,17 @@ pub fn executeMinimalEvmForOpcode(
 
     // For regular opcodes (< 0x100), execute exactly once
     if (!isSyntheticOpcode(opcode)) {
-        const opcode_value = @intFromEnum(opcode);
         if (evm.getCurrentFrame()) |mf| {
-            // For regular opcodes, captureStep expects u8. Skip step capture for synthetic opcodes.
-            const step_before = if (tracer.config.enable_step_capture and opcode_value <= 0xFF) tracer.captureStep(mf, @intCast(opcode_value)) catch null else null;
-            // Note: We don't free stack_before here because it will be owned by the step
-            // that gets added to tracer.steps, and will be freed in tracer.deinit()
-
-            // Special handling: JUMPDEST in Frame pre-charges entire basic-block gas.
-            // MinimalEvm's JUMPDEST charges only JumpdestGas, so we reconcile here.
-            if (opcode_value == 0x5b) { // JUMPDEST
-                if (@TypeOf(frame) != void) {
-                    const DispatchType = @TypeOf(frame.*).Dispatch;
-                    const dispatch = DispatchType{ .cursor = cursor };
-                    const op_data = dispatch.getOpData(.JUMPDEST);
-                    const block_gas: u64 = op_data.metadata.gas;
-                    const jumpdest_gas: u64 = primitives.GasConstants.JumpdestGas;
-                    const extra: i64 = @as(i64, @intCast(block_gas)) - @as(i64, @intCast(jumpdest_gas));
-                    mf.gas_remaining -= extra;
-                }
-            }
-
+            // MinimalEvm charges each instruction as it runs it, JUMPDEST included.
+            // Frame charges a whole basic block at its JUMPDEST; the two agree again at
+            // the end of the block, where the tracer compares gas.
             evm.step() catch |e| {
-                if (step_before) |mut_step| {
-                    var step = mut_step;
-                    step.error_occurred = true;
-                    step.error_msg = @errorName(e);
-                    step.gas_after = @intCast(mf.gas_remaining);
-                    step.stack_after = &[_]u256{};
-                    step.memory_size_after = mf.memory_size;
-                    tracer.steps.append(tracer.allocator, step) catch |append_err| {
-                        tracer.debug("Failed to append error step for {s}: {any}", .{ @tagName(opcode), append_err });
-                    };
-                }
-
                 // Don't panic on any errors - just log and continue
                 var actual_opcode: u8 = 0;
                 if (mf.pc < mf.bytecode.len) actual_opcode = mf.bytecode[mf.pc];
                 tracer.debug("Regular opcode {s} failed at PC={d}, bytecode[PC]=0x{x:0>2}: {any}", .{ @tagName(opcode), mf.pc, actual_opcode, e });
                 return;
             };
-            
-
-            if (step_before) |mut_step| {
-                var step = mut_step;
-                step.gas_after = @intCast(mf.gas_remaining);
-                step.gas_cost = @intCast(@as(i64, step.gas_before) - @as(i64, step.gas_after));
-
-                if (mf.stack.items.len > 0) {
-                    if (tracer.allocator.alloc(u256, mf.stack.items.len)) |stack_after| {
-                        for (mf.stack.items, 0..) |val, i| {
-                            stack_after[mf.stack.items.len - 1 - i] = val; // LIFO order
-                        }
-                        step.stack_after = stack_after;
-                    } else |_| {
-                        step.stack_after = &[_]u256{};
-                    }
-                } else {
-                    step.stack_after = &[_]u256{};
-                }
-
-                step.memory_size_after = mf.memory_size;
-                step.error_occurred = false;
-
-                tracer.steps.append(tracer.allocator, step) catch |append_err| {
-                    tracer.debug("Failed to append step for {s}: {any}", .{ @tagName(opcode), append_err });
-                };
-            }
         } else {
             tracer.debug("MinimalEvm has no current frame when trying to execute opcode {s}", .{@tagName(opcode)});
             return;
@@ -202,8 +121,6 @@ pub fn executeMinimalEvmForOpcode(
     while (steps_executed < max_steps) : (steps_executed += 1) {
         // Get current state before step
         _ = evm.getPC(); // Get PC before step for debugging
-        
-        // Try to step MinimalEvm
         
         evm.step() catch |e| {
             // Log the error but don't panic - this is expected for some cases
@@ -252,5 +169,3 @@ pub fn executeMinimalEvmForOpcode(
     }
 }
 
-// Delete old switch statement implementation
-const _deleted_old_implementation = 0;

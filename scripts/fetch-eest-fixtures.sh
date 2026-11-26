@@ -14,10 +14,11 @@
 #
 # Environment:
 #   EEST_CACHE_DIR      Destination (default: <repo>/.cache/eest-fixtures)
-#   EEST_RELEASE_TAG    Release tag (default: latest stable "tests@v*" release)
+#   EEST_RELEASE_TAG    Release tag (default: the pinned tests@v21.0.3)
 #   EEST_REPO           GitHub repository (default: ethereum/execution-specs)
 #   EEST_ASSET          Asset name (default: fixtures.tar.gz)
-#   EEST_SHA256         Expected SHA-256 (default: digest published by GitHub)
+#   EEST_SHA256         Expected SHA-256 (default: the pinned digest when the
+#                       tag is the pinned tag, else the digest GitHub publishes)
 #   EEST_KEEP_TARBALL   Set to 1 to keep the downloaded tarball (default: delete)
 #   GITHUB_TOKEN        Optional token for the GitHub API when `gh` is absent
 #
@@ -45,7 +46,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CACHE_DIR="${EEST_CACHE_DIR:-$REPO_ROOT/.cache/eest-fixtures}"
 REPO="${EEST_REPO:-ethereum/execution-specs}"
 ASSET="${EEST_ASSET:-fixtures.tar.gz}"
-TAG="${EEST_RELEASE_TAG:-}"
+# The pinned release. The state-tests baseline (66,652 cases, Frontier through
+# Osaka) and CI's expected case count refer to exactly this tarball; bump the
+# tag, digest and EEST_EXPECTED_CASES in .github/workflows/ci.yml together.
+PINNED_TAG="tests@v21.0.3"
+PINNED_SHA256="46bd48fb71a23da084218fe856fe442ab0c8d00c85c1c1aead0d2a965804fd24"
+TAG="${EEST_RELEASE_TAG:-$PINNED_TAG}"
 KEEP="${EEST_KEEP_TARBALL:-0}"
 
 log() { echo "fetch-eest-fixtures: $*" >&2; }
@@ -95,15 +101,18 @@ sys.exit("release %s has no asset named %s" % (release.get("tag_name"), asset_na
 ' "$ASSET"
 }
 
-if [ -n "$TAG" ]; then
-  ENCODED_TAG="$(python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TAG")"
-  FIELDS="$(api "releases/tags/$ENCODED_TAG" | release_fields)" || die "cannot read release $TAG of $REPO"
-else
-  FIELDS="$(api "releases/latest" | release_fields)" || die "cannot read the latest release of $REPO"
-fi
+ENCODED_TAG="$(python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$TAG")"
+FIELDS="$(api "releases/tags/$ENCODED_TAG" | release_fields)" || die "cannot read release $TAG of $REPO"
 
 IFS=$'\t' read -r TAG URL API_SHA <<<"$FIELDS"
-EXPECTED_SHA="${EEST_SHA256:-$API_SHA}"
+DEFAULT_SHA="$API_SHA"
+if [ "$TAG" = "$PINNED_TAG" ] && [ "$ASSET" = "fixtures.tar.gz" ] && [ "$REPO" = "ethereum/execution-specs" ]; then
+  DEFAULT_SHA="$PINNED_SHA256"
+  if [ -n "$API_SHA" ] && [ "$API_SHA" != "$PINNED_SHA256" ]; then
+    die "GitHub reports sha256 $API_SHA for $TAG/$ASSET, but the pinned digest is $PINNED_SHA256"
+  fi
+fi
+EXPECTED_SHA="${EEST_SHA256:-$DEFAULT_SHA}"
 [ -n "$EXPECTED_SHA" ] || die "release $TAG publishes no SHA-256 digest for $ASSET; set EEST_SHA256"
 
 TAG_DIR_NAME="$(printf '%s' "$TAG" | tr -c 'A-Za-z0-9._-' '_')"

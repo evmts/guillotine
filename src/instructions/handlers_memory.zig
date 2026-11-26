@@ -13,9 +13,71 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
 
-        /// Maximum memory size unified with `FrameType.Memory.MEMORY_LIMIT`
-        const MEMORY_LIMIT: u64 = FrameType.Memory.MEMORY_LIMIT;
+        // The native handlers below take the common case inline: the accessed range lies
+        // inside the current memory, so there is no expansion and no dynamic gas. Every
+        // other case tail-calls the general handler, which charges expansion gas, grows
+        // memory, and reports errors.
+        const mload_general_handler = handler_abi.wrap(FrameType, mload_general);
+        const mstore_general_handler = handler_abi.wrap(FrameType, mstore_general);
+        const mstore8_general_handler = handler_abi.wrap(FrameType, mstore8_general);
+
+        /// MLOAD opcode (0x51) - Load word from memory.
+        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.word_ptr_in_bounds(sp[0])) |word| {
+                @branchHint(.likely);
+                N.before(self, .MLOAD, cursor, sp, gas);
+                sp[0] = @truncate(memory_mod.loadWordBigEndian(word));
+                return N.next(self, .MLOAD, cursor, sp, gas);
+            }
+            return @call(handler_abi.tail_mod, mload_general_handler, .{ self, cursor, sp, gas });
+        }
+
+        /// MSTORE opcode (0x52) - Store word to memory.
+        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.word_ptr_in_bounds(sp[0])) |word| {
+                @branchHint(.likely);
+                N.before(self, .MSTORE, cursor, sp, gas);
+                memory_mod.storeWordBigEndian(word, sp[1]);
+                return N.next(self, .MSTORE, cursor, sp + 2, gas);
+            }
+            return @call(handler_abi.tail_mod, mstore_general_handler, .{ self, cursor, sp, gas });
+        }
+
+        /// MSTORE8 opcode (0x53) - Store byte to memory.
+        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.byte_ptr_in_bounds(sp[0])) |byte| {
+                @branchHint(.likely);
+                N.before(self, .MSTORE8, cursor, sp, gas);
+                byte.* = @truncate(sp[1]);
+                return N.next(self, .MSTORE8, cursor, sp + 2, gas);
+            }
+            return @call(handler_abi.tail_mod, mstore8_general_handler, .{ self, cursor, sp, gas });
+        }
+
+        /// Memory never grows past this many bytes: the frame's configured memory limit,
+        /// capped at what the 32-bit offsets of the memory API can address.
+        const MEMORY_LIMIT: u64 = @min(FrameType.Memory.MEMORY_LIMIT, std.math.maxInt(u32));
+
+        /// Charge `cost` of dynamic gas. Returns false, and charges nothing, when the
+        /// frame cannot pay. The comparison is made in u64 before the subtraction, so a
+        /// cost wider than GasType can neither wrap nor trap.
+        inline fn chargeGas(self: *FrameType, cost: u64) bool {
+            if (self.gas_remaining < 0 or cost > @as(u64, @intCast(self.gas_remaining))) return false;
+            self.gas_remaining -= @intCast(cost);
+            return true;
+        }
+
+        /// Check if an offset plus size would exceed memory limit
+        inline fn checkMemoryBounds(offset: usize, size: usize) bool {
+            // Overflow-safe: a near-usize-max offset+size must not panic; overflow means it
+            // exceeds the memory limit.
+            const end = @addWithOverflow(offset, size);
+            if (end[1] != 0) return false;
+            return end[0] <= MEMORY_LIMIT;
+        }
 
         /// Check if a value fits within memory limit
         inline fn checkMemoryLimit(value: anytype) bool {
@@ -23,214 +85,230 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MLOAD opcode (0x51) - Load word from memory.
-        /// Verified single-compare bounds + in-bounds fast path (Bitwuzla + Lean 4 + LLVM 20 IR).
-        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        /// Pops memory offset from stack and pushes the 32-byte word at that offset.
+        pub fn mload_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MLOAD, cursor);
             self.validateOpcodeHandler(.MLOAD, cursor);
-            const verified_ops = @import("../verified_ops.zig");
+            // MLOAD loads a 32-byte word from memory
             const offset = self.stack.peek_unsafe();
 
-            if (!verified_ops.checkMemoryBoundsFast(@as(u256, offset), 32, MEMORY_LIMIT)) {
-                @branchHint(.unlikely);
+            // Check if offset fits in usize
+            if (offset > std.math.maxInt(usize)) {
                 self.afterComplete(.MLOAD);
                 return Error.OutOfBounds;
             }
-            const offset_usize: usize = @truncate(offset);
-            const end_offset = offset_usize + 32;
+            const offset_usize = @as(usize, @intCast(offset));
 
-            // Fast path: in-bounds access needs no gas and no expansion
-            if (end_offset > self.memory.size()) {
+            // Calculate gas cost for memory expansion
+            // Check if offset + 32 would overflow u32
+            if (!checkMemoryBounds(offset_usize, 32)) {
+                self.afterComplete(.MLOAD);
+                return Error.OutOfBounds;
+            }
+            const end_offset = offset_usize + 32;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
+            // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
+            if (!chargeGas(self, memory_expansion_cost)) {
                 @branchHint(.unlikely);
-                const memory_expansion_cost = self.memory.get_expansion_cost(@truncate(end_offset));
-                self.gas_remaining -= @intCast(memory_expansion_cost);
-                if (self.gas_remaining < 0) {
-                    @branchHint(.unlikely);
-                    self.afterComplete(.MLOAD);
-                    return Error.OutOfGas;
-                }
-                const word_aligned_end = verified_ops.alignUp32(@truncate(end_offset));
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), word_aligned_end) catch |err| switch (err) {
-                    memory_mod.MemoryError.MemoryOverflow => {
-                        self.afterComplete(.MLOAD);
-                        return Error.OutOfBounds;
-                    },
-                    else => {
-                        self.afterComplete(.MLOAD);
-                        return Error.AllocationError;
-                    },
-                };
+                self.afterComplete(.MLOAD);
+                return Error.OutOfGas;
             }
 
-            const value_u256 = self.memory.get_u256_unchecked(offset_usize);
-            self.stack.set_top_unsafe(@as(WordType, @truncate(value_u256)));
+            // Read 32 bytes from memory (EVM-compliant with automatic expansion)
+            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize))) catch |err| switch (err) {
+                memory_mod.MemoryError.OutOfBounds => {
+                    self.afterComplete(.MLOAD);
+                    return Error.OutOfBounds;
+                },
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.MLOAD);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.MLOAD);
+                    return Error.AllocationError;
+                },
+            };
+
+            // Convert to WordType (truncate if necessary for smaller word types)
+            const value = @as(WordType, @truncate(value_u256));
+            self.stack.set_top_unsafe(value);
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MLOAD);
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
-        /// Verified single-compare bounds + in-bounds fast path (Bitwuzla + Lean 4 + LLVM 20 IR).
-        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        /// Pops memory offset and value from stack, stores 32 bytes at that offset.
+        pub fn mstore_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MSTORE, cursor);
+            // MSTORE stores a 32-byte word to memory
             self.validateOpcodeHandler(.MSTORE, cursor);
-            const verified_ops = @import("../verified_ops.zig");
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
 
-            if (!verified_ops.checkMemoryBoundsFast(@as(u256, offset), 32, MEMORY_LIMIT)) {
-                @branchHint(.unlikely);
+            // Check if offset fits in usize
+            if (offset > std.math.maxInt(usize)) {
                 self.afterComplete(.MSTORE);
                 return Error.OutOfBounds;
             }
-            const offset_usize: usize = @truncate(offset);
-            const end_offset = offset_usize + 32;
+            const offset_usize = @as(usize, @intCast(offset));
 
-            // Fast path: in-bounds access needs no gas and no expansion
-            if (end_offset > self.memory.size()) {
+            // Calculate gas cost for memory expansion
+            // Check if offset + 32 would overflow u32
+            if (!checkMemoryBounds(offset_usize, 32)) {
+                self.afterComplete(.MSTORE);
+                return Error.OutOfBounds;
+            }
+            const end_offset = offset_usize + 32;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
+            // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
+            if (!chargeGas(self, memory_expansion_cost)) {
                 @branchHint(.unlikely);
-                const memory_expansion_cost = self.memory.get_expansion_cost(@truncate(end_offset));
-                self.gas_remaining -= @intCast(memory_expansion_cost);
-                if (self.gas_remaining < 0) {
-                    @branchHint(.unlikely);
-                    self.afterComplete(.MSTORE);
-                    return Error.OutOfGas;
-                }
-                const word_aligned_end = verified_ops.alignUp32(@truncate(end_offset));
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), word_aligned_end) catch |err| switch (err) {
-                    memory_mod.MemoryError.MemoryOverflow => {
-                        self.afterComplete(.MSTORE);
-                        return Error.OutOfBounds;
-                    },
-                    else => {
-                        self.afterComplete(.MSTORE);
-                        return Error.AllocationError;
-                    },
-                };
+                self.afterComplete(.MSTORE);
+                return Error.OutOfGas;
             }
 
-            self.memory.set_u256_unchecked(offset_usize, @as(u256, value));
+            // Convert to u256 if necessary and store
+            const value_u256 = @as(u256, value);
+            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
+                memory_mod.MemoryError.OutOfBounds => {
+                    self.afterComplete(.MSTORE);
+                    return Error.OutOfBounds;
+                },
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.MSTORE);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.MSTORE);
+                    return Error.AllocationError;
+                },
+            };
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MSTORE);
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
-        /// Verified single-compare bounds + in-bounds fast path (Bitwuzla + Lean 4 + LLVM 20 IR).
-        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        /// Pops memory offset and value from stack, stores the least significant byte at that offset.
+        pub fn mstore8_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MSTORE8, cursor);
             self.validateOpcodeHandler(.MSTORE8, cursor);
-            const verified_ops = @import("../verified_ops.zig");
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
 
-            if (!verified_ops.checkMemoryBoundsFast(@as(u256, offset), 1, MEMORY_LIMIT)) {
-                @branchHint(.unlikely);
+            // Check if offset fits in usize
+            if (offset > std.math.maxInt(usize)) {
                 self.afterComplete(.MSTORE8);
                 return Error.OutOfBounds;
             }
-            const offset_usize: usize = @truncate(offset);
-            const end_offset = offset_usize + 1;
+            const offset_usize = @as(usize, @intCast(offset));
 
-            // Fast path: in-bounds access needs no gas and no expansion
-            if (end_offset > self.memory.size()) {
+            // Calculate gas cost for memory expansion
+            // Check if offset + 1 would overflow u32
+            if (!checkMemoryBounds(offset_usize, 1)) {
+                self.afterComplete(.MSTORE8);
+                return Error.OutOfBounds;
+            }
+            const end_offset = offset_usize + 1;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
+            // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
+            if (!chargeGas(self, memory_expansion_cost)) {
                 @branchHint(.unlikely);
-                const memory_expansion_cost = self.memory.get_expansion_cost(@truncate(end_offset));
-                self.gas_remaining -= @intCast(memory_expansion_cost);
-                if (self.gas_remaining < 0) {
-                    @branchHint(.unlikely);
-                    self.afterComplete(.MSTORE8);
-                    return Error.OutOfGas;
-                }
-                const word_aligned_end = verified_ops.alignUp32(@truncate(end_offset));
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), word_aligned_end) catch |err| switch (err) {
-                    memory_mod.MemoryError.MemoryOverflow => {
-                        self.afterComplete(.MSTORE8);
-                        return Error.OutOfBounds;
-                    },
-                    else => {
-                        self.afterComplete(.MSTORE8);
-                        return Error.AllocationError;
-                    },
-                };
+                self.afterComplete(.MSTORE8);
+                return Error.OutOfGas;
             }
 
-            self.memory.set_byte_unchecked(offset_usize, @as(u8, @truncate(value)));
+            // Store the least significant byte
+            const byte_value = @as(u8, @truncate(value));
+            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
+                memory_mod.MemoryError.OutOfBounds => {
+                    self.afterComplete(.MSTORE8);
+                    return Error.OutOfBounds;
+                },
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.MSTORE8);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.MSTORE8);
+                    return Error.AllocationError;
+                },
+            };
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MSTORE8);
         }
 
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
-        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MSIZE, cursor);
-            self.validateOpcodeHandler(.MSIZE, cursor);
-            const size = self.memory.size();
-            self.stack.push_unsafe(@as(WordType, @intCast(size)));
-
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MSIZE);
+        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .MSIZE, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            s.push_unsafe(@as(WordType, @intCast(self.memory.size())));
+            return N.next(self, .MSIZE, cursor, s.sp, gas);
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
         /// Copies memory from one location to another.
         /// Stack order per EIP-5656: [dest, src, length] (same as CALLDATACOPY)
-        pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MCOPY, cursor);
             self.validateOpcodeHandler(.MCOPY, cursor);
             const dest_offset = self.stack.pop_unsafe(); // Top of stack (dest)
             const src_offset = self.stack.pop_unsafe(); // Second from top (src)
             const size = self.stack.pop_unsafe(); // Third from top (length)
 
-            // EIP-5656: zero-length copy charges no dynamic gas and never expands
-            // memory, regardless of the offsets (which may be arbitrarily large).
+            // EIP-5656: a zero-size copy touches no memory, whatever the offsets.
             if (size == 0) {
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
             }
 
-            // Check if offsets and size fit within the memory limit
+            // Both ranges must lie inside addressable memory. Bounding each operand
+            // first keeps the sums below from wrapping.
             if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
 
-            const dst = @as(usize, @intCast(dest_offset));
-            const src = @as(usize, @intCast(src_offset));
-            const len = @as(usize, @intCast(size));
-
-            // Both ranges are covered by one expansion to the furthest end.
-            // Each term is <= MEMORY_LIMIT, so the sum cannot overflow usize.
-            const max_end = @max(dst, src) + len;
-            if (!checkMemoryLimit(max_end)) {
+            const dest: u64 = @intCast(dest_offset);
+            const src: u64 = @intCast(src_offset);
+            const len: u64 = @intCast(size);
+            const src_end = src + len;
+            const dest_end = dest + len;
+            if (!checkMemoryLimit(src_end) or !checkMemoryLimit(dest_end)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
 
-            // Calculate dynamic gas cost (static gas handled by JUMPDEST)
-            const words: u64 = @intCast((len + 31) >> 5);
+            // Dynamic gas (static gas is charged at block entry): 3 per word copied,
+            // plus expansion to cover the further of the two ranges.
+            const words = (len + 31) >> 5;
             const copy_gas_cost = words * GasConstants.CopyGas;
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_end)));
-
-            const total_gas_cost = copy_gas_cost + memory_expansion_cost;
-            if (self.gas_remaining < total_gas_cost) {
+            const memory_end: u32 = @intCast(@max(src_end, dest_end));
+            const memory_expansion_cost = self.memory.get_expansion_cost(memory_end);
+            if (!chargeGas(self, copy_gas_cost + memory_expansion_cost)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfGas;
             }
-            self.gas_remaining -= @intCast(total_gas_cost);
 
-            if (max_end > self.memory.size()) {
-                // EVM memory always grows to a 32-byte word boundary
-                const word_aligned_end = (max_end + 31) & ~@as(usize, 31);
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(word_aligned_end))) catch |err| switch (err) {
-                    error.MemoryOverflow, error.OutOfBounds => {
-                        self.afterComplete(.MCOPY);
-                        return Error.OutOfBounds;
-                    },
-                    error.OutOfMemory => {
-                        self.afterComplete(.MCOPY);
-                        return Error.AllocationError;
-                    },
-                };
+            // Memory expands over both ranges before the copy; source bytes beyond the old
+            // size read as zero.
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
+                self.afterComplete(.MCOPY);
+                return Error.AllocationError;
+            };
+
+            // Copy in place. The ranges may overlap, which @memmove handles; no
+            // temporary buffer is needed.
+            const base: usize = self.memory.checkpoint;
+            const bytes = self.memory.get_buffer_ref().items;
+            const src_start = base + @as(usize, @intCast(src));
+            const dest_start = base + @as(usize, @intCast(dest));
+            const count: usize = @intCast(len);
+            if (src_start + count > bytes.len or dest_start + count > bytes.len) {
+                self.afterComplete(.MCOPY);
+                return Error.OutOfBounds;
             }
-
-            // Overlap-safe in-place copy: no scratch allocation
-            self.memory.copy_within(dst, src, len);
+            @memmove(bytes[dest_start..][0..count], bytes[src_start..][0..count]);
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
         }

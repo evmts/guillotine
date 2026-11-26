@@ -18,6 +18,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const c_api = @import("evm_c_api");
+const fuzz_alloc = @import("fuzz_alloc.zig");
 const primitives = @import("voltaire");
 
 comptime {
@@ -56,36 +57,36 @@ pub fn fuzzCApiLifecycleAndExecution(_: void, input: []const u8) !void {
         .number = 20_000_000 + @as(u64, input[0]),
         .timestamp = 1_700_000_000 + @as(u64, input[1]),
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0} ** 19 ++ [_]u8{0xcc},
+        .coinbase = @as([19]u8, @splat(0)) ++ [_]u8{0xcc},
         .base_fee = 1,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const handle = guillotine_evm_create(&block) orelse return error.EvmCreateFailed;
     defer guillotine_evm_destroy(handle);
 
-    const caller = [_]u8{0} ** 19 ++ [_]u8{0x11};
-    const target = [_]u8{0} ** 19 ++ [_]u8{0x22};
+    const caller = @as([19]u8, @splat(0)) ++ [_]u8{0x11};
+    const target = @as([19]u8, @splat(0)) ++ [_]u8{0x22};
 
     // 1. Balance roundtrip across C ABI
-    var bal_in = [_]u8{0} ** 32;
+    var bal_in = @as([32]u8, @splat(0));
     bal_in[24] = 0x01; // ample balance
     bal_in[31] = input[2];
     try std.testing.expect(guillotine_set_balance(handle, &caller, &bal_in));
-    var bal_out = [_]u8{0} ** 32;
+    var bal_out = @as([32]u8, @splat(0));
     try std.testing.expect(guillotine_get_balance(handle, &caller, &bal_out));
     try std.testing.expectEqualSlices(u8, &bal_in, &bal_out);
 
     // 2. Nonce & storage roundtrip across C ABI
     try std.testing.expect(guillotine_set_nonce(handle, &caller, input[3]));
-    var slot_key = [_]u8{0} ** 32;
+    var slot_key = @as([32]u8, @splat(0));
     slot_key[31] = input[3] & 0x0f;
-    var slot_val = [_]u8{0} ** 32;
+    var slot_val = @as([32]u8, @splat(0));
     slot_val[31] = input[4];
     try std.testing.expect(guillotine_set_storage(handle, &target, &slot_key, &slot_val));
-    var slot_out = [_]u8{0} ** 32;
+    var slot_out = @as([32]u8, @splat(0));
     try std.testing.expect(guillotine_get_storage(handle, &target, &slot_key, &slot_out));
     try std.testing.expectEqualSlices(u8, &slot_val, &slot_out);
 
@@ -109,12 +110,12 @@ pub fn fuzzCApiLifecycleAndExecution(_: void, input: []const u8) !void {
     var bad_params = CallParamsFFI{
         .caller = caller,
         .to = target,
-        .value = [_]u8{0} ** 32,
+        .value = @as([32]u8, @splat(0)),
         .input = &sentinel,
         .input_len = 0,
         .gas = 100_000,
         .call_type = bad_type,
-        .salt = [_]u8{0} ** 32,
+        .salt = @as([32]u8, @splat(0)),
     };
     if (guillotine_call(handle, &bad_params)) |r| {
         defer guillotine_free_result(r);
@@ -127,19 +128,19 @@ pub fn fuzzCApiLifecycleAndExecution(_: void, input: []const u8) !void {
     var params = CallParamsFFI{
         .caller = caller,
         .to = target,
-        .value = [_]u8{0} ** 32,
+        .value = @as([32]u8, @splat(0)),
         .input = code_ptr,
         .input_len = if (call_type == 4 or call_type == 5) code.len else @min(code.len, 32),
         .gas = gas_limit,
         .call_type = call_type,
-        .salt = [_]u8{0} ** 31 ++ [_]u8{input[1]},
+        .salt = @as([31]u8, @splat(0)) ++ [_]u8{input[1]},
     };
 
     const sim_opt = guillotine_simulate(handle, &params);
     defer guillotine_free_result(sim_opt);
 
     // Storage must remain completely untouched after simulate()
-    var after_sim_slot = [_]u8{0} ** 32;
+    var after_sim_slot = @as([32]u8, @splat(0));
     try std.testing.expect(guillotine_get_storage(handle, &target, &slot_key, &after_sim_slot));
     try std.testing.expectEqualSlices(u8, &slot_val, &after_sim_slot);
 
@@ -174,5 +175,5 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz C FFI boundary lifecycle, invalid call types, simulate isolation, and execution" {
-    try std.testing.fuzz({}, fuzzCApiLifecycleAndExecution, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCApiLifecycleAndExecution), .{ .corpus = seed_corpus });
 }

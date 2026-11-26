@@ -76,27 +76,27 @@ test "validation - reject address with non-hex characters" {
 }
 
 test "validation - transaction hash with 0x prefix" {
-    const hash = "0x" ++ "a" ** 64;
+    const hash = "0x" ++ &@as([64]u8, @splat('a'));
     try validation.validateTransactionHash(hash);
 }
 
 test "validation - transaction hash without 0x prefix" {
-    const hash = "a" ** 64;
+    const hash: []const u8 = &@as([64]u8, @splat('a'));
     try validation.validateTransactionHash(hash);
 }
 
 test "validation - reject short transaction hash" {
-    const hash = "0x" ++ "a" ** 63;
+    const hash = "0x" ++ &@as([63]u8, @splat('a'));
     try std.testing.expectError(validation.ValidationError.InvalidTransactionHash, validation.validateTransactionHash(hash));
 }
 
 test "validation - reject long transaction hash" {
-    const hash = "0x" ++ "a" ** 65;
+    const hash = "0x" ++ &@as([65]u8, @splat('a'));
     try std.testing.expectError(validation.ValidationError.InvalidTransactionHash, validation.validateTransactionHash(hash));
 }
 
 test "validation - reject transaction hash with non-hex" {
-    const hash = "0x" ++ "g" ** 64;
+    const hash = "0x" ++ &@as([64]u8, @splat('g'));
     try std.testing.expectError(validation.ValidationError.InvalidTransactionHash, validation.validateTransactionHash(hash));
 }
 
@@ -152,7 +152,7 @@ test "validation - hex number no prefix" {
 }
 
 test "validation - reject hex number too long" {
-    const long_hex = "0x" ++ "0" ** 65;
+    const long_hex = "0x" ++ &@as([65]u8, @splat('0'));
     try std.testing.expectError(validation.ValidationError.StringTooLong, validation.validateHexNumber(long_hex));
 }
 

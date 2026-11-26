@@ -573,7 +573,7 @@ pub const BranchNode = struct {
 
     pub fn init() BranchNode {
         return BranchNode{
-            .children = [_]?[32]u8{null} ** 16,
+            .children = @as([16]?[32]u8, @splat(null)),
             .value = null,
             .mask = TrieMask.init(),
         };
@@ -680,7 +680,7 @@ test "ExtensionNode - init and deinit" {
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 0x1, 0x2 };
-    const hash = [_]u8{0xAB} ** 32;
+    const hash = @as([32]u8, @splat(0xAB));
 
     var ext = try ExtensionNode.init(allocator, &nibbles, hash);
     defer ext.deinit(allocator);
@@ -701,7 +701,7 @@ test "BranchNode - init and operations" {
     try testing.expect(!branch.has_single_child());
 
     // Add a child
-    const hash1 = [_]u8{0x11} ** 32;
+    const hash1 = @as([32]u8, @splat(0x11));
     branch.set_child(5, hash1);
 
     try testing.expect(!branch.is_empty());
@@ -710,7 +710,7 @@ test "BranchNode - init and operations" {
     try testing.expectEqual(hash1, branch.get_child(5).?);
 
     // Add another child
-    const hash2 = [_]u8{0x22} ** 32;
+    const hash2 = @as([32]u8, @splat(0x22));
     branch.set_child(10, hash2);
 
     try testing.expect(!branch.has_single_child());
@@ -1175,7 +1175,7 @@ fn hash_node(allocator: Allocator, node: *const Node) ![32]u8 {
             const path_encoded = try encodePath(allocator, leaf.nibbles, true);
             defer allocator.free(path_encoded);
 
-            var list = std.ArrayList([]const u8){};
+            var list = std.ArrayList([]const u8).empty;
             defer {
                 for (list.items) |item| {
                     allocator.free(item);
@@ -1192,7 +1192,7 @@ fn hash_node(allocator: Allocator, node: *const Node) ![32]u8 {
             const path_encoded = try encodePath(allocator, ext.nibbles, false);
             defer allocator.free(path_encoded);
 
-            var list = std.ArrayList([]const u8){};
+            var list = std.ArrayList([]const u8).empty;
             defer {
                 for (list.items) |item| {
                     allocator.free(item);
@@ -1206,7 +1206,7 @@ fn hash_node(allocator: Allocator, node: *const Node) ![32]u8 {
             break :blk try Rlp.encode(allocator, list.items);
         },
         .Branch => |branch| blk: {
-            var list = std.ArrayList([]const u8){};
+            var list = std.ArrayList([]const u8).empty;
             defer {
                 for (list.items) |item| {
                     allocator.free(item);
@@ -1877,7 +1877,7 @@ test "Trie - hash_to_string and back" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const hash = [_]u8{0xAB} ** 32;
+    const hash = @as([32]u8, @splat(0xAB));
     const hash_str = try hash_to_string(allocator, &hash);
     defer allocator.free(hash_str);
 

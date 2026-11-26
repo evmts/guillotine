@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 // and factory reports cannot invalidate targets or become cached source inputs.
 const repository = S.Filegroup({ cwd: "//", srcs: [S.glob("//**", { exclude: [
   "//.git/**", "//.jj/**", "//.flows/**", "//.smithers/cache/**", "//.smithers/reports/**",
-  "//.zig-cache/**", "//zig-out/**", "//target/**", "//node_modules/**", "//bench/results/**",
+  "//.zig-cache/**", "//zig-out/**", "//target/**", "//node_modules/**",
   "//**/.git/**", "//**/.zig-cache/**", "//**/zig-out/**", "//**/target/**"
 ] })] })
 // Globs are package scoped even with a // prefix. Anchor the repository group
@@ -20,23 +20,14 @@ const env = {
 const tools = [S.Host.bin("cargo"), S.Host.bin("rustc"), S.Host.bin("cc")]
 const common = { bin: S.Host.bin("zig"), tools, env, sandbox: "none" as const, timeout: "6h" as const }
 
-const crypto = S.Shell.Build({
-  bin: S.Host.bin("node"), tools,
-  args: [".smithers/build-crypto.mjs"],
-  sandbox: "none", timeout: "1h", data: [source],
-  outFiles: ["//lib/voltaire/target/release/libcrypto_wrappers.a"]
-})
-const build = S.Shell.Build({ ...common, args: ["build"], data: [source, crypto], outDirs: ["//zig-out"] })
-const unit = S.Shell.Test({ ...common, args: ["build", "test-unit"], data: [source, build] })
-const opcodes = S.Shell.Test({ ...common, args: ["build", "test-opcodes"], data: [source, build] })
-const modexp = S.Shell.Test({
-  ...common, args: ["build", "test-modexp", "--build-file", ".smithers/build.zig"], data: [source, build]
-})
-const fusions = S.Shell.Test({ ...common, args: ["build", "test-fusions"], data: [source, build] })
-const specs = S.Shell.Test({ ...common, args: ["build", "state-tests"], data: [source, build] })
+// `zig build` compiles Voltaire's Rust archive itself (lib/voltaire/build.zig
+// runs `cargo build --release --locked` into a Zig cache output directory).
+const build = S.Shell.Build({ ...common, args: ["build"], data: [source], outDirs: ["//zig-out"] })
+// Every target runs a step of the root build.zig (Zig 0.17.1).
+const step = (name: string, manual = false) =>
+  S.Shell.Test({ ...common, args: ["build", name], data: [source, build], manual })
 const bench = S.Shell.Build({
-  ...common, args: ["build", "--build-file", ".smithers/build.zig", "-Doptimize=ReleaseFast",
-    "--prefix", "zig-out/smithers"],
+  ...common, args: ["build", "bench-build", "--prefix", "zig-out/smithers"],
   data: [source], outDirs: ["//zig-out/smithers"]
 })
 
@@ -45,17 +36,20 @@ export const Package = S.Package({ targets: {
   sources: source,
   "factory-write": S.FactoryProjection({ mode: "write" }),
   "factory-check": S.FactoryProjection({ mode: "check" }),
-  "build-crypto": crypto,
   build,
-  "test-unit": unit,
-  "test-opcodes": opcodes,
-  "test-modexp": modexp,
-  "test-fusions": fusions,
-  "test-specs": specs,
+  "test-unit": step("test-unit"),
+  "test-opcodes": step("test-opcodes"),
+  "test-modexp": step("test-modexp"),
+  "test-fusions": step("test-fusions"),
+  "test-layer2": step("test-layer2"),
+  "test-bench": step("test-bench"),
+  "state-tests": step("state-tests"),
+  // Needs the Lean 4 toolchain (elan) on the host; builds the reference itself.
+  "test-lean-diff": step("test-lean-diff", true),
   "bench-build": bench,
   // Timing observations must be fresh; compilation is cached by bench-build.
   bench: S.Shell.Run({
-    shell: "zig-out/smithers/bin/guillotine-modexp-bench", sandbox: "none", timeout: "5m", data: [bench], manual: true
+    shell: "zig-out/smithers/bin/guillotine-bench", sandbox: "none", timeout: "30m", data: [bench], manual: true
   }),
   "test-foundry-link": S.Shell.Test({
     bin: S.Host.bin("node"), args: ["--test", ".smithers/tests/foundry-link.test.mjs"],

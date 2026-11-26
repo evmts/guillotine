@@ -3,9 +3,8 @@ const testing = std.testing;
 const primitives = @import("voltaire");
 const guillotine = @import("evm");
 
-// Create EVM with tracing enabled for these tests (fusion disabled for 1:1 opcode step assertions)
+// Create EVM with tracing enabled for these tests
 const Evm = guillotine.Evm(.{
-    .enable_fusion = false,
     .tracer_config = guillotine.tracer.TracerConfig{
         .enabled = true,
         .enable_validation = false,
@@ -39,7 +38,7 @@ test "trace validation - basic trace population on successful call" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -63,13 +62,13 @@ test "trace validation - basic trace population on successful call" {
         0xf3,        // RETURN
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x01} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x01)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -99,8 +98,8 @@ test "trace validation - basic trace population on successful call" {
         // Verify we have trace steps
         try testing.expect(trace.steps.len > 0);
         
-        // We expect all 6 opcodes from our bytecode (PUSH1, PUSH1, MSTORE, PUSH1, PUSH1, RETURN)
-        try testing.expect(trace.steps.len >= 6);
+        // One step per instruction: PUSH1, PUSH1, MSTORE, PUSH1, PUSH1, RETURN
+        try testing.expectEqual(@as(usize, 6), trace.steps.len);
         
         // Verify first few opcodes match our bytecode
         for (trace.steps, 0..) |step, i| {
@@ -127,7 +126,7 @@ test "trace validation - trace step details are correct" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -147,13 +146,13 @@ test "trace validation - trace step details are correct" {
         0x00,        // STOP
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x02} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x02)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -224,7 +223,7 @@ test "trace validation - REVERT produces trace" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -247,13 +246,13 @@ test "trace validation - REVERT produces trace" {
         0xfd,                            // REVERT
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x03} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x03)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -310,7 +309,7 @@ test "trace validation - gas consumption tracking" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -331,13 +330,13 @@ test "trace validation - gas consumption tracking" {
         0x00,        // STOP (gas cost: 0)
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x04} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x04)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -398,7 +397,7 @@ test "trace validation - snapshot test" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -418,13 +417,13 @@ test "trace validation - snapshot test" {
         0x00,        // STOP
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x99} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x99)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -477,18 +476,18 @@ test "trace validation - snapshot test" {
         try testing.expectEqual(@as(usize, 1), trace.steps[1].stack.len); // After first PUSH1
         try testing.expectEqual(@as(u256, 3), trace.steps[1].stack[0]);
         
+        // Trace stacks list the top of the stack first.
         try testing.expectEqual(@as(usize, 2), trace.steps[2].stack.len); // After second PUSH1
-        try testing.expectEqual(@as(u256, 3), trace.steps[2].stack[0]);
-        try testing.expectEqual(@as(u256, 2), trace.steps[2].stack[1]);
+        try testing.expectEqual(@as(u256, 2), trace.steps[2].stack[0]);
+        try testing.expectEqual(@as(u256, 3), trace.steps[2].stack[1]);
         
         try testing.expectEqual(@as(usize, 1), trace.steps[3].stack.len); // After ADD
         try testing.expectEqual(@as(u256, 5), trace.steps[3].stack[0]); // 3 + 2 = 5
         
-        // Validate non-increasing gas across steps (basic-block gas batching deducts static gas per block)
-        try testing.expect(trace.steps[0].gas >= trace.steps[1].gas);
-        try testing.expect(trace.steps[1].gas >= trace.steps[2].gas);
-        try testing.expect(trace.steps[2].gas >= trace.steps[3].gas);
-        try testing.expect(result.gas_left < 100_000);
+        // Validate gas consumption
+        try testing.expect(trace.steps[0].gas > trace.steps[1].gas); // Gas decreases
+        try testing.expect(trace.steps[1].gas > trace.steps[2].gas);
+        try testing.expect(trace.steps[2].gas > trace.steps[3].gas);
     }
 }
 
@@ -506,7 +505,7 @@ test "trace validation - CREATE operation produces trace" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{

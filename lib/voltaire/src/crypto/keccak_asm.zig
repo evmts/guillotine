@@ -20,9 +20,7 @@ pub const KeccakError = error{
     Unknown,
 };
 
-const c = if (builtin.target.cpu.arch != .wasm32) @cImport({
-    @cInclude("keccak_wrapper.h");
-}) else struct {};
+const c = if (builtin.target.cpu.arch != .wasm32) @import("keccak_wrapper_c") else struct {};
 
 fn keccakResultToError(result: c_uint) KeccakError!void {
     if (builtin.target.cpu.arch == .wasm32) return;
@@ -31,6 +29,7 @@ fn keccakResultToError(result: c_uint) KeccakError!void {
         c.KECCAK_SUCCESS => {},
         c.KECCAK_INVALID_INPUT => KeccakError.InvalidInput,
         c.KECCAK_INVALID_OUTPUT_SIZE => KeccakError.InvalidOutputSize,
+        c.KECCAK_COMPUTATION_FAILED => KeccakError.ExecutionError,
         else => KeccakError.Unknown,
     };
 }
@@ -101,7 +100,7 @@ pub fn keccak256_batch(inputs: [][]const u8, outputs: [][32]u8) !void {
     const input_ptrs = try allocator.alloc([*c]const u8, inputs.len);
     defer allocator.free(input_ptrs);
 
-    const input_lens = try allocator.alloc(c_ulong, inputs.len);
+    const input_lens = try allocator.alloc(usize, inputs.len);
     defer allocator.free(input_lens);
 
     const output_ptrs = try allocator.alloc([*c]u8, outputs.len);
@@ -156,27 +155,25 @@ pub fn keccak256_u256(data: []const u8) !u256 {
 }
 
 /// Performance benchmark comparing assembly vs standard implementation
-pub fn benchmark_comparison(data: []const u8, iterations: u32) !struct {
+pub fn benchmark_comparison(io: std.Io, data: []const u8, iterations: u32) !struct {
     asm_time_ns: u64,
     std_time_ns: u64,
     speedup: f64,
 } {
     var hash_out: [32]u8 = undefined;
-    var timer = std.time.Timer.start() catch return error.TimerUnsupported;
-
     // Benchmark assembly implementation
-    timer.reset();
+    const asm_start = std.Io.Timestamp.now(io, .awake);
     for (0..iterations) |_| {
         try keccak256(data, &hash_out);
     }
-    const asm_time = timer.read();
+    const asm_time: u64 = @intCast(asm_start.durationTo(std.Io.Timestamp.now(io, .awake)).nanoseconds);
 
     // Benchmark standard library implementation
-    timer.reset();
+    const std_start = std.Io.Timestamp.now(io, .awake);
     for (0..iterations) |_| {
         std.crypto.hash.sha3.Keccak256.hash(data, &hash_out, .{});
     }
-    const std_time = timer.read();
+    const std_time: u64 = @intCast(std_start.durationTo(std.Io.Timestamp.now(io, .awake)).nanoseconds);
 
     const speedup = @as(f64, @floatFromInt(std_time)) / @as(f64, @floatFromInt(asm_time));
 
@@ -247,7 +244,7 @@ test "keccak256_batch" {
 }
 
 test "bytes_to_u256 conversion" {
-    const bytes = [_]u8{0} ** 31 ++ [_]u8{0x42};
+    const bytes = @as([31]u8, @splat(0)) ++ [_]u8{0x42};
     const result = bytes_to_u256(bytes);
     try std.testing.expectEqual(@as(u256, 0x42), result);
 }
@@ -255,7 +252,7 @@ test "bytes_to_u256 conversion" {
 test "u256_to_bytes conversion" {
     const value: u256 = 0x1234567890abcdef;
     const bytes = u256_to_bytes(value);
-    const expected = [_]u8{0} ** 24 ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef };
+    const expected = @as([24]u8, @splat(0)) ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef };
     try std.testing.expectEqualSlices(u8, &expected, &bytes);
 }
 
@@ -466,18 +463,18 @@ test "bytes_to_u256 - boundary values" {
     const testing = std.testing;
 
     // Test minimum value (all zeros)
-    const min_bytes = [_]u8{0} ** 32;
+    const min_bytes = @as([32]u8, @splat(0));
     const min_result = bytes_to_u256(min_bytes);
     try testing.expectEqual(@as(u256, 0), min_result);
 
     // Test maximum value (all ones)
-    const max_bytes = [_]u8{0xFF} ** 32;
+    const max_bytes = @as([32]u8, @splat(0xFF));
     const max_result = bytes_to_u256(max_bytes);
     try testing.expectEqual(std.math.maxInt(u256), max_result);
 
     // Test single bit patterns
     for (0..32) |byte_pos| {
-        var test_bytes = [_]u8{0} ** 32;
+        var test_bytes = @as([32]u8, @splat(0));
         test_bytes[byte_pos] = 1;
         const result = bytes_to_u256(test_bytes);
         const expected: u256 = @as(u256, 1) << @intCast((31 - byte_pos) * 8);
@@ -490,12 +487,12 @@ test "u256_to_bytes - boundary values and round trip" {
 
     // Test zero
     const zero_bytes = u256_to_bytes(0);
-    const expected_zero = [_]u8{0} ** 32;
+    const expected_zero = @as([32]u8, @splat(0));
     try testing.expectEqualSlices(u8, &expected_zero, &zero_bytes);
 
     // Test maximum value
     const max_bytes = u256_to_bytes(std.math.maxInt(u256));
-    const expected_max = [_]u8{0xFF} ** 32;
+    const expected_max = @as([32]u8, @splat(0xFF));
     try testing.expectEqualSlices(u8, &expected_max, &max_bytes);
 
     // Test round trip conversion

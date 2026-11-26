@@ -10,37 +10,16 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:108 (iszero_jumpi)
-;;   |         pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.ISZERO_JUMPI, cursor);
-;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-;;   |             const op_data = dispatch_opcode_data.getOpData(.ISZERO_JUMPI, Dispatch, Dispatch.Item, cursor);
-;;   | 
-;;   |             // Validate stack has at least 1 item (for ISZERO to consume)
-;;   |             (&self.getEvm().tracer).assert(self.stack.size() >= 1, "ISZERO_JUMPI: Stack underflow (need 1 item for ISZERO)");
-;;   | 
-;;   |             // Get the jump target from items
-;;   |             const target_item = op_data.items[0];
-;;   |             const target = target_item.push_pointer.value_ptr.*;
-;;   | 
-;;   |             // Pop value and check if zero
-;;   |             const value = self.stack.pop_unsafe();
-;;   |             const should_jump = value == 0;
-;;   | 
-;;   |             // Jump if the value was zero
-;;   |             if (should_jump) {
-;;   |                 if (self.jump_table.findJumpTargetU256(target)) |jump_dispatch| {
-;;   |                     self.afterInstruction(.ISZERO_JUMPI, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor);
-;;   |                     return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
-;;   |                 } else {
-;;   |                     self.afterComplete(.ISZERO_JUMPI);
-;;   |                     return Error.InvalidJump;
-;;   |                 }
-;;   |             }
-;;   | 
-;;   |             // Continue to next instruction using getOpData
-;;   |             self.afterInstruction(.ISZERO_JUMPI, op_data.next_handler, op_data.next_cursor.cursor);
-;;   |             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+;; --- src/instructions/handlers_advanced_synthetic.zig:22 (iszero_jumpi)
+;;   |         pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             N.before(self, .ISZERO_JUMPI, cursor, sp, gas);
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             const value = s.pop_unsafe();
+;;   |             if (value != 0) return N.next(self, .ISZERO_JUMPI, cursor, s.sp, gas);
+;;   |             // cursor[1] holds the statically resolved target: the JUMPDEST's schedule
+;;   |             // cursor, or the invalid-jump item when the target is not a JUMPDEST.
+;;   |             const target: [*]const Dispatch.Item = @ptrCast(@alignCast(cursor[1].jump_static.dispatch));
+;;   |             return N.jump(self, .ISZERO_JUMPI, target, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

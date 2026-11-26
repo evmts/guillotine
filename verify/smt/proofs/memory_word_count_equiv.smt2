@@ -7,12 +7,12 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:160 (memoryWordCountRef)
+;; --- src/core/verified_ops.zig:160 (memoryWordCountRef)
 ;;   | pub inline fn memoryWordCountRef(byte_size: u32) u64 {
 ;;   |     const b: u64 = byte_size;
 ;;   |     return if (b == 0) 0 else ((b - 1) / 32) + 1;
 ;;   | }
-;; --- src/verified_ops.zig:166 (memoryWordCountFast)
+;; --- src/core/verified_ops.zig:166 (memoryWordCountFast)
 ;;   | pub inline fn memoryWordCountFast(byte_size: u32) u64 {
 ;;   |     return (@as(u64, byte_size) + 31) >> 5;
 ;;   | }

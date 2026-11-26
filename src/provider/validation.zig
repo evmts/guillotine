@@ -191,11 +191,11 @@ test "validateHexNumber - invalid hex" {
     try std.testing.expectError(ValidationError.InvalidHexString, validateHexNumber("0x"));
     try std.testing.expectError(ValidationError.InvalidHexString, validateHexNumber("0xGGG"));
     try std.testing.expectError(ValidationError.InvalidHexString, validateHexNumber("not_hex"));
-    try std.testing.expectError(ValidationError.StringTooLong, validateHexNumber("0x" ++ "0" ** 65));
+    try std.testing.expectError(ValidationError.StringTooLong, validateHexNumber("0x" ++ &@as([65]u8, @splat('0'))));
 }
 
 test "validateTransactionHash - valid hashes" {
-    const valid_hash = "0x" ++ "a" ** 64;
+    const valid_hash = "0x" ++ &@as([64]u8, @splat('a'));
     try validateTransactionHash(valid_hash);
     try validateTransactionHash(valid_hash[2..]);
 }
@@ -203,8 +203,8 @@ test "validateTransactionHash - valid hashes" {
 test "validateTransactionHash - invalid hashes" {
     try std.testing.expectError(ValidationError.EmptyString, validateTransactionHash(""));
     try std.testing.expectError(ValidationError.InvalidTransactionHash, validateTransactionHash("0x123"));
-    try std.testing.expectError(ValidationError.InvalidTransactionHash, validateTransactionHash("0x" ++ "a" ** 63));
-    try std.testing.expectError(ValidationError.InvalidTransactionHash, validateTransactionHash("0x" ++ "g" ** 64));
+    try std.testing.expectError(ValidationError.InvalidTransactionHash, validateTransactionHash("0x" ++ &@as([63]u8, @splat('a'))));
+    try std.testing.expectError(ValidationError.InvalidTransactionHash, validateTransactionHash("0x" ++ &@as([64]u8, @splat('g'))));
 }
 
 test "validateBlockNumber - valid block numbers" {

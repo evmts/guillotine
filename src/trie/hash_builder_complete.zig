@@ -31,7 +31,10 @@ pub const TrieIterator = struct {
 
         // Initialize with root if it exists
         if (builder.root_hash) |root| {
-            if (builder.nodes.get(root)) |root_node| {
+            const hash_str = try bytes_to_hex_string(allocator, &root);
+            defer allocator.free(hash_str);
+
+            if (builder.nodes.get(hash_str)) |root_node| {
                 const path = try allocator.alloc(u8, 0);
                 try stack.append(allocator, StackItem{
                     .node = root_node,
@@ -109,9 +112,13 @@ pub const TrieIterator = struct {
                     // Get next node
                     const next_node = switch (extension.next) {
                         .Raw => return TrieError.InvalidNode,
-                        .Hash => |hash| self.builder.nodes.get(hash) orelse {
-                            self.allocator.free(new_path);
-                            return TrieError.NonExistentNode;
+                        .Hash => |hash| blk: {
+                            const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                            defer self.allocator.free(hash_str);
+                            break :blk self.builder.nodes.get(hash_str) orelse {
+                                self.allocator.free(new_path);
+                                return TrieError.NonExistentNode;
+                            };
                         },
                     };
 
@@ -163,7 +170,10 @@ pub const TrieIterator = struct {
                                 },
                                 .Hash => |hash| {
                                     // Get the child node
-                                    const child_node = self.builder.nodes.get(hash) orelse {
+                                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                                    defer self.allocator.free(hash_str);
+
+                                    const child_node = self.builder.nodes.get(hash_str) orelse {
                                         self.allocator.free(new_path);
                                         return TrieError.NonExistentNode;
                                     };
@@ -200,24 +210,27 @@ pub const TrieIterator = struct {
 /// Complete Patricia Merkle Trie implementation with safe memory management
 pub const HashBuilder = struct {
     allocator: Allocator,
-    // Store nodes directly by their 32-byte Keccak256 hash (zero hex formatting/allocs)
-    nodes: std.AutoHashMap([32]u8, TrieNode),
+    // Store nodes by their hash (hex encoded) - safer than complex pointer management
+    nodes: std.StringHashMap(TrieNode),
     // The root node's hash (if built)
     root_hash: ?[32]u8,
 
     pub fn init(allocator: Allocator) HashBuilder {
         return HashBuilder{
             .allocator = allocator,
-            .nodes = std.AutoHashMap([32]u8, TrieNode).init(allocator),
+            .nodes = std.StringHashMap(TrieNode).init(allocator),
             .root_hash = null,
         };
     }
 
     pub fn deinit(self: *HashBuilder) void {
         // Clean up all nodes
-        var it = self.nodes.valueIterator();
-        while (it.next()) |node_ptr| {
-            var node = node_ptr.*;
+        var it = self.nodes.iterator();
+        while (it.next()) |entry| {
+            // Free the hash key string
+            self.allocator.free(entry.key_ptr.*);
+            // Deinit the node
+            var node = entry.value_ptr.*;
             node.deinit(self.allocator);
         }
         self.nodes.deinit();
@@ -225,9 +238,10 @@ pub const HashBuilder = struct {
 
     pub fn reset(self: *HashBuilder) void {
         // Clean up all nodes
-        var it = self.nodes.valueIterator();
-        while (it.next()) |node_ptr| {
-            var node = node_ptr.*;
+        var it = self.nodes.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            var node = entry.value_ptr.*;
             node.deinit(self.allocator);
         }
         self.nodes.clearRetainingCapacity();
@@ -239,13 +253,19 @@ pub const HashBuilder = struct {
     fn store_node(self: *HashBuilder, node: TrieNode) HashBuilderError![32]u8 {
         // Calculate the hash
         const hash = try node.hash(self.allocator);
-        const gop = try self.nodes.getOrPut(hash);
-        if (gop.found_existing) {
+        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+        errdefer self.allocator.free(hash_str);
+
+        // Check if we already have this node
+        if (self.nodes.contains(hash_str)) {
+            self.allocator.free(hash_str);
             var duplicate = node;
             duplicate.deinit(self.allocator);
             return hash;
         }
-        gop.value_ptr.* = node;
+
+        // Store the node
+        try self.nodes.put(hash_str, node);
         return hash;
     }
 
@@ -256,10 +276,11 @@ pub const HashBuilder = struct {
         defer self.allocator.free(nibbles);
 
         // Get or create root
-        const root_node = if (self.root_hash) |hash|
-            self.nodes.get(hash) orelse return TrieError.NonExistentNode
-        else
-            TrieNode{ .Empty = {} };
+        const root_node = if (self.root_hash) |hash| blk: {
+            const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+            defer self.allocator.free(hash_str);
+            break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+        } else TrieNode{ .Empty = {} };
 
         // Insert into the trie
         const new_root = try self.insert_node(root_node, nibbles, value);
@@ -270,23 +291,29 @@ pub const HashBuilder = struct {
 
     /// Get a value from the trie
     pub fn get(self: *HashBuilder, key: []const u8) HashBuilderError!?[]const u8 {
-        const root = self.root_hash orelse return null;
+        if (self.root_hash == null) return null;
 
         const nibbles = try trie.key_to_nibbles(self.allocator, key);
         defer self.allocator.free(nibbles);
 
-        const root_node = self.nodes.get(root) orelse return TrieError.NonExistentNode;
+        const hash_str = try bytes_to_hex_string(self.allocator, &self.root_hash.?);
+        defer self.allocator.free(hash_str);
+
+        const root_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
         return try self.get_value(root_node, nibbles);
     }
 
     /// Delete a key-value pair from the trie
     pub fn delete(self: *HashBuilder, key: []const u8) HashBuilderError!void {
-        const root = self.root_hash orelse return;
+        if (self.root_hash == null) return;
 
         const nibbles = try trie.key_to_nibbles(self.allocator, key);
         defer self.allocator.free(nibbles);
 
-        const root_node = self.nodes.get(root) orelse return TrieError.NonExistentNode;
+        const hash_str = try bytes_to_hex_string(self.allocator, &self.root_hash.?);
+        defer self.allocator.free(hash_str);
+
+        const root_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
 
         const result = try self.delete_node(root_node, nibbles);
         if (result) |new_root| {
@@ -360,8 +387,6 @@ pub const HashBuilder = struct {
                     branch.children[existing_key] = HashValue{ .Hash = hash };
                     branch.children_mask.set(@intCast(existing_key));
                 }
-            } else {
-                branch.value = try leaf.value.dupe(self.allocator);
             }
 
             // Add new value
@@ -444,7 +469,11 @@ pub const HashBuilder = struct {
             // Get next node
             const next_node = switch (extension.next) {
                 .Raw => return TrieError.InvalidNode,
-                .Hash => |hash| self.nodes.get(hash) orelse return TrieError.NonExistentNode,
+                .Hash => |hash| blk: {
+                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                    defer self.allocator.free(hash_str);
+                    break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+                },
             };
 
             // Insert into next node
@@ -531,18 +560,21 @@ pub const HashBuilder = struct {
             // Update existing child
             const child = new_branch.children[key].?;
             if (child == .Raw and remaining_path.len == 0) {
-                // Canonical direct replacement of a 1-nibble branch child value
-                const val_copy = try self.allocator.dupe(u8, value);
+                // The key ends at this slot. Keep the value inline, as split_leaf,
+                // split_extension and a new child store it, so the node (and the
+                // root hash) does not depend on whether the key was overwritten.
+                const replacement = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
                 new_branch.children[key].?.deinit(self.allocator);
-                new_branch.children[key] = HashValue{ .Raw = val_copy };
+                new_branch.children[key] = replacement;
                 return TrieNode{ .Branch = new_branch };
             }
             const updated_node = switch (child) {
                 .Raw => |data| blk: {
-                    // Need to create a branch to hold both the existing data and new value
+                    // The key continues past this slot: the inline value moves into a
+                    // new branch's value and the new key goes below it.
                     var sub_branch = BranchNode.init();
 
-                    // Add new value at remaining_path[0]
+                    // Add existing value at remaining_path[0]
                     if (remaining_path.len == 1) {
                         sub_branch.children[remaining_path[0]] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
                         sub_branch.children_mask.set(@intCast(remaining_path[0]));
@@ -561,7 +593,9 @@ pub const HashBuilder = struct {
                     break :blk TrieNode{ .Branch = sub_branch };
                 },
                 .Hash => |hash| blk: {
-                    const next_node = self.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                    defer self.allocator.free(hash_str);
+                    const next_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
                     break :blk try self.insert_node(next_node, remaining_path, value);
                 },
             };
@@ -605,7 +639,11 @@ pub const HashBuilder = struct {
 
                 const next_node = switch (extension.next) {
                     .Raw => return TrieError.InvalidNode,
-                    .Hash => |hash| self.nodes.get(hash) orelse return TrieError.NonExistentNode,
+                    .Hash => |hash| blk: {
+                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                        defer self.allocator.free(hash_str);
+                        break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+                    },
                 };
 
                 return try self.get_value(next_node, nibbles[extension.nibbles.len..]);
@@ -631,7 +669,9 @@ pub const HashBuilder = struct {
                         return null;
                     },
                     .Hash => |hash| blk: {
-                        const next_node = self.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                        defer self.allocator.free(hash_str);
+                        const next_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
                         break :blk try self.get_value(next_node, nibbles[1..]);
                     },
                 };
@@ -670,7 +710,11 @@ pub const HashBuilder = struct {
                 // Follow extension and delete from next node
                 const next_node = switch (extension.next) {
                     .Raw => return TrieError.InvalidNode,
-                    .Hash => |hash| self.nodes.get(hash) orelse return TrieError.NonExistentNode,
+                    .Hash => |hash| blk: {
+                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                        defer self.allocator.free(hash_str);
+                        break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+                    },
                 };
 
                 const result = try self.delete_node(next_node, nibbles[extension.nibbles.len..]);
@@ -720,7 +764,7 @@ pub const HashBuilder = struct {
                     if (new_branch.children_mask.is_set(@intCast(key))) {
                         const child = new_branch.children[key].?;
                         switch (child) {
-                            .Raw => |_| {
+                            .Raw => {
                                 if (nibbles.len == 1) {
                                     // Delete this child
                                     new_branch.children[key].?.deinit(self.allocator);
@@ -729,15 +773,21 @@ pub const HashBuilder = struct {
                                 }
                             },
                             .Hash => |hash| {
-                                const next_node = self.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                                const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                                defer self.allocator.free(hash_str);
+                                const next_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
 
                                 const result = try self.delete_node(next_node, nibbles[1..]);
                                 if (result) |new_next| {
-                                    // Canonical inline Raw when child collapses to an empty-path Leaf
                                     if (new_next == .Leaf and new_next.Leaf.nibbles.len == 0 and new_next.Leaf.value == .Raw) {
-                                        self.allocator.free(new_next.Leaf.nibbles);
+                                        // The remaining key ends at this slot. Store its value
+                                        // inline, as insertion does, so the root hash does not
+                                        // depend on the order of inserts and deletes.
+                                        const inline_value = HashValue{ .Raw = try self.allocator.dupe(u8, new_next.Leaf.value.Raw) };
+                                        var discarded = new_next;
+                                        discarded.deinit(self.allocator);
                                         new_branch.children[key].?.deinit(self.allocator);
-                                        new_branch.children[key] = new_next.Leaf.value;
+                                        new_branch.children[key] = inline_value;
                                     } else {
                                         const new_hash = try self.store_node(new_next);
                                         new_branch.children[key].?.deinit(self.allocator);
@@ -798,7 +848,9 @@ pub const HashBuilder = struct {
                     return TrieNode{ .Leaf = leaf };
                 },
                 .Hash => |child_hash| {
-                    if (self.nodes.get(child_hash)) |target_node| {
+                    const hash_str = try bytes_to_hex_string(self.allocator, &child_hash);
+                    defer self.allocator.free(hash_str);
+                    if (self.nodes.get(hash_str)) |target_node| {
                         switch (target_node) {
                             .Leaf => |child_leaf| {
                                 const merged = try self.allocator.alloc(u8, 1 + child_leaf.nibbles.len);
@@ -845,6 +897,19 @@ fn common_prefix_length(a: []const u8, b: []const u8) usize {
     var i: usize = 0;
     while (i < min_len and a[i] == b[i]) : (i += 1) {}
     return i;
+}
+
+fn bytes_to_hex_string(allocator: Allocator, bytes: []const u8) std.mem.Allocator.Error![]u8 {
+    const hex_chars = "0123456789abcdef";
+    const hex = try allocator.alloc(u8, bytes.len * 2);
+    errdefer allocator.free(hex);
+
+    for (bytes, 0..) |byte, i| {
+        hex[i * 2] = hex_chars[byte >> 4];
+        hex[i * 2 + 1] = hex_chars[byte & 0x0F];
+    }
+
+    return hex;
 }
 
 // Tests

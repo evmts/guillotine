@@ -8,7 +8,9 @@ L2 client exactly: op-revm for OP Stack, base/base for Base.
 ```
 src/layer2/
 ├── layer2_config.zig   Layer2Config = none | optimism: OptimismConfig | base: BaseConfig
-├── mod.zig             public exports
+├── mod.zig             public exports (the `evm` module exports it as `layer2`)
+├── executor.zig        transaction boundary: deposits, fees, nonce, host contract
+├── evm_host.zig        host backed by the real EVM; own test artifact, imports `evm` only
 ├── test_root.zig       test aggregator
 ├── optimism/           OP Stack rules (see optimism/CLAUDE.md)
 └── base/
@@ -35,15 +37,19 @@ contain no L2 code. `opSpec()` returns the `OpSpecId` for `.optimism` and `.base
 
 ## Wiring status
 
-Not yet wired into the build or EVM (pending lane merge):
-
-- `lib/voltaire/src/precompiles/root.zig` must export `p256verify`.
-- `src/root.zig` must export `layer2`, and `build.zig` must register `zig build test-layer2`
-  with imports `voltaire` and `precompiles`.
-- `src/evm.zig` does not yet consume `EvmConfig.precompile_overrides` or `Layer2Config`.
+- `src/root.zig` exports `layer2`; `zig build test-layer2` runs `layer2-tests`
+  (test_root.zig) and `layer2-evm-host-tests` (evm_host.zig).
+- `evm_host.zig` must not be imported from mod.zig or test_root.zig: the `evm` module
+  owns those files, and a file may belong to one module only.
+- `evm_host.Host` runs Bedrock through Jovian. `src/evm.zig` consults
+  `EvmConfig.precompile_overrides` in every frame, nested calls included.
+- `Host.runFrame` drives `Evm.inner_call` on a 64 MiB thread, not `Evm.call`: `call`
+  has no access list or authorization list input and resets its refund counter, so the
+  host applies intrinsic gas (EIP-2930 lists, EIP-7702 tuples), the warm set, the
+  authorization list (outside the call's snapshot, so a revert keeps it), refunds and the
+  EIP-7623 floor itself. It refuses at compile time an OP spec on Osaka (EIP-7825).
 
 ## Testing
 
-Until `test-layer2` exists, run the module with `zig test` and these modules:
-`root=src/layer2/test_root.zig`, `voltaire`, `precompiles` (with the `p256verify` export),
-`crypto`, `c_kzg`, linking blst, c-kzg, and voltaire's `libcrypto_wrappers.a`.
+`zig build test-layer2` from the repository root. New tests in evm_host.zig must use the
+host through `executor.execute`/`executeBase`, not the EVM directly.

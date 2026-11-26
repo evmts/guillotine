@@ -17,8 +17,8 @@ const TransactionContext = evm.TransactionContext;
 const EvmFusionOn = evm.Evm(.{ .enable_fusion = true });
 const EvmFusionOff = evm.Evm(.{ .enable_fusion = false });
 
-const CALLER = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x11} };
-const TARGET = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x22} };
+const CALLER = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x11} };
+const TARGET = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x22} };
 
 const BOUNDARY_WORDS = [_]u256{
     0,
@@ -51,7 +51,7 @@ fn decodeWord(input: []const u8, offset: usize) u256 {
     if (tag < 64) {
         return BOUNDARY_WORDS[tag % BOUNDARY_WORDS.len];
     }
-    var buf = [_]u8{0} ** 32;
+    var buf = @as([32]u8, @splat(0));
     const avail = @min(32, input.len - offset);
     @memcpy(buf[32 - avail ..], input[offset .. offset + avail]);
     return std.mem.readInt(u256, &buf, .big);
@@ -76,7 +76,7 @@ fn runAndCompareWord(allocator: std.mem.Allocator, code: []const u8) !struct { w
         .number = 20_000_000,
         .timestamp = 1_700_000_000,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 1,
@@ -95,12 +95,12 @@ fn runAndCompareWord(allocator: std.mem.Allocator, code: []const u8) !struct { w
     defer db_off.deinit();
 
     const code_hash_on = try db_on.set_code(code);
-    try db_on.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 });
-    try db_on.set_account(TARGET.bytes, .{ .balance = 0, .nonce = 1, .code_hash = code_hash_on, .storage_root = [_]u8{0} ** 32 });
+    try db_on.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
+    try db_on.set_account(TARGET.bytes, .{ .balance = 0, .nonce = 1, .code_hash = code_hash_on, .storage_root = @as([32]u8, @splat(0)) });
 
     const code_hash_off = try db_off.set_code(code);
-    try db_off.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 });
-    try db_off.set_account(TARGET.bytes, .{ .balance = 0, .nonce = 1, .code_hash = code_hash_off, .storage_root = [_]u8{0} ** 32 });
+    try db_off.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
+    try db_off.set_account(TARGET.bytes, .{ .balance = 0, .nonce = 1, .code_hash = code_hash_off, .storage_root = @as([32]u8, @splat(0)) });
 
     var evm_on = try EvmFusionOn.init(allocator, &db_on, block_info, tx_ctx, 1, CALLER);
     defer evm_on.deinit();
@@ -245,7 +245,7 @@ pub fn fuzzBinaryAndTernaryArithmetic(_: void, input: []const u8) !void {
     const b = decodeWord(input, if (input.len > 33) 33 else @min(2, input.len - 1));
     const c = decodeWord(input, if (input.len > 65) 65 else @min(3, input.len - 1));
 
-    var code = std.ArrayList(u8){};
+    var code = std.ArrayList(u8).empty;
     defer code.deinit(allocator);
 
     var expected: u256 = 0;
@@ -434,5 +434,5 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz all 256-bit arithmetic, bitwise, shift, and comparison opcodes vs big-int oracle" {
-    try std.testing.fuzz({}, fuzzBinaryAndTernaryArithmetic, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBinaryAndTernaryArithmetic), .{ .corpus = seed_corpus });
 }

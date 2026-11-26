@@ -1,91 +1,57 @@
 ---
 title: Changelog
-description: Release milestones and engineering changes across Guillotine.
+description: Release milestones for Guillotine.
 ---
 
 # Changelog
 
-This page summarizes major milestones in Guillotine. For the complete
-Keep-a-Changelog ledger and downloadable release binaries, see:
+This page summarizes each release. The full Keep a Changelog ledger is
+[`CHANGELOG.md`](https://github.com/evmts/guillotine/blob/main/CHANGELOG.md) in
+the repository root. Release binaries and checksums are on
+[GitHub Releases](https://github.com/evmts/guillotine/releases).
 
-- **[`CHANGELOG.md`](https://github.com/evmts/guillotine/blob/main/CHANGELOG.md)** in the repository root
-- **[GitHub Releases](https://github.com/evmts/guillotine/releases)** for tagged tarballs, `guillotine.h`, and `SHA256SUMS.txt`
+## `0.1.0` (2026-11-25)
 
-## `0.1.0-alpha.1` — 2026-11-25 (November 2026 Overhaul)
+The first tagged release.
 
-### Performance & benchmarks
+### Results
 
-- **Incremental Smithers benchmark DAG (`#867`, `78dbd431`):** Added 16
-  `ReleaseFast` suites (13 standalone subsystem microbenchmarks + full-EVM
-  opcode, contract, and precompile suites) with committed `bench/baseline.json`
-  and `smthrs test //bench:report`.
-- **Hot-path engine overhaul (`815ab72f`, `78dbd431`):**
-  - `contract/snailtracer` (Prague) improved to **42.95 ms (5.48 Ggas/s)** from
-    206.8 ms / 1.15 Ggas/s.
-  - **4.63x** geomean speedup vs `maint/unified-v2` (**7.46x** vs original
-    baseline) across the Osaka suite with 0 gas mismatches.
-  - **90.85x–153.66x** ECRECOVER speedup (`std.crypto.ecc.Secp256k1` +
-    pseudo-Mersenne + Jacobian + Shamir), Knuth Algorithm D 256-bit division,
-    adaptive Montgomery MODEXP with 4-bit sliding windows and even-modulus CRT,
-    and BN254 multi-Miller loop + GLV G1 mul.
-  - **6.92x** faster database snapshots/reverts via O(1) append-only undo-log
-    checkpoints and lazy O(1) `get_original_storage_indexed`.
-  - **31.78x** faster EIP-7623 calldata token counting (32-byte SIMD) and
-    **36.01x** faster O(1) `is_eip_active`.
-  - Removed per-call 64 MiB OS thread spawn for shallow calls, added bounded
-    per-`Evm` dispatch schedule caching, single-pass `packed_bitmap` jump
-    tables, and sparse-reset FastLZ for OP Stack (`5.78x` on 68 B).
-- **Opt-in native ARM64 JIT (`src/jit/`, `src/jit_bridge.zig`):** Added a
-  zero-dependency AArch64 direct bytecode compiler with bounded LRU `JitCache`
-  and exact interpreter replay on exceptional halts, opt-in via
-  `EvmConfig.enable_native_jit = true` (default `false`). See
-  [Benchmarks and native JIT](/guides/benchmarks-and-jit).
+| Area | Result |
+| --- | --- |
+| Toolchain | Stock Zig 0.17.1 with native `preserve_none` tail-call dispatch; no compiler fork required |
+| Official EEST state tests | **66,652 / 66,652 (100.00%)** across all 14 mainnet hardforks (Frontier through Osaka), fusions on and off |
+| Lean 4 differential fuzzing | **116,384 / 116,384 (100.00%)** Zig-to-Lean 4.32.0 vectors |
+| SMT proofs | **32 / 32** theorems proved |
+| `contract/snailtracer`, x86_64 Linux | **37.86 ms** (6.21 GGas/s), 1.25x faster than revm (47.21 ms) |
+| Precompiles | ECRECOVER **0.171 ms** (182x faster), MODEXP-256 **2.82 µs**, BN254-mul **8.16 µs** |
+| Layer 2 | Full Base L2 / OP Stack, Bedrock through Jovian (pre-Azul), on the real EVM engine |
 
-### Protocol & consensus
+See [Project status](/status) for sources and methodology.
 
-- **Prague & Osaka EIPs (`9af066f2`, `815ab72f`):** Completed Prague/Osaka
-  support including `CLZ` (EIP-7939), `P256VERIFY` (EIP-7951), EIP-2537
-  BLS12-381 precompile addresses, EIP-2935 historical block hashes, EIP-7623,
-  EIP-7702 delegation, and Osaka transaction/code/ModExp limits (EIP-7823,
-  EIP-7825, EIP-7883, EIP-7934).
-- **Spec & state fixes (`7501b986`, `57e7d712`, `a44a34f1`, release-prep):**
-  - Cut `zig build specs` failures from 1,031 → 581 → **38** (**2,213 / 2,251 passing = 98.31%**, with **100% of checked-in `eest/prague` passing**).
-  - Fixed `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` (`#842`), `LOG`/`RETURN`/`REVERT`/`CODECOPY`/`KECCAK256` bounds & zero-length handling, `CREATE`/`CREATE2` constructor `caller`/`value`, EIP-214 static-context checks, EIP-161 initial nonce, EIP-211/140 revert return data, Yellow Paper depth-1024 off-by-one, `SELFDESTRUCT` EIP-2929/150/6780 gas & end-of-tx cleanup, and Yellow Paper §9.4.1 right-zero-padding for truncated `PUSH1`–`PUSH32`.
-  - Refactored `static_wrappers` into comptime `DatabaseProxy` (`.pass_through`,
-    `.static`, `.lru`) and fixed canonical RLP account encoding in `database.zig`.
-  - Unified `FrameCheckpoint` and `revertFrame()` rollback across logs, refunds,
-    access lists, self-destructs, created contracts, and failed precompile value
-    transfers.
-  - Replaced hardcoded EVM gas and limit literals with named constants
-    (`src/limits.zig`, `#843`) and removed non-platform-guard `SkipZigTest` stubs (`#696`).
+### SDKs
 
-### Testing, verification & tooling
+- **Zig package**: public modules `evm`, `voltaire` and `layer2`; consume with
+  `dep.module("evm")`. See [Installation](/installation#use-it-from-a-zig-project).
+- **C FFI**: `libguillotine_ffi` and `guillotine.h`.
+- **TypeScript**: `@tevm/guillotine` over Bun FFI, 340 / 340 tests passing.
+- **Custom SDK Builder skill**: generates bindings for other languages over the
+  C ABI. See [Language bindings](/guides/bindings).
 
-- **Official EEST state test runner (`specs/eest_runner.zig`):** Added
-  `zig build state-tests` and `scripts/fetch-eest-fixtures.sh` to run official
-  pre-filled `ethereum/execution-specs` state tests (Frontier through Osaka)
-  with full MPT state-root and RLP logs-hash verification. See
-  [Project status](/status).
-- **Formal verification (`zig build verify`):** Added LLVM 20 IR equivalence
-  and UB-freedom checks, Bitwuzla/Z3 SMT-LIB2 proofs, and Lean 4 proofs under
-  `verify/`.
-- **Build & CI reliability (`c76088fa`, `8aa6216a`, `fe945ea7`):**
-  - Fixed fresh-clone Voltaire `libcrypto_wrappers.a` archive production
-    (`#862`, `#863`) and Linux `libunwind` linkage (`#815`).
-  - Added automatic macOS Xcode SDK probing in CI for Zig 0.15.2 on `macos-26`
-    runners.
-  - Removed 22 unreferenced legacy Zig files and dead build steps.
+### Release assets
 
-### SDKs, publishing & documentation
+| Asset | Contents |
+| --- | --- |
+| `libguillotine_ffi.so` | Linux x86_64, glibc >= 2.28 |
+| `libguillotine_ffi.dylib` | macOS arm64 |
+| `guillotine.h` | C header |
+| `SHA256SUMS.txt` | SHA-256 checksums of the files above |
 
-- **C ABI & `@tevm/guillotine` Bun FFI SDK:** Shipped the native C ABI
-  (`sdks/c/include/guillotine.h`, `src/evm_c_api.zig`) and Bun FFI TypeScript
-  package (`sdks/typescript/`, Bun ≥ 1.1), removing the stale WASM backend.
-- **Automated release pipeline:** Added `.github/workflows/release.yml`
-  (cross-platform `darwin-arm64` + `linux-x64` native builds, `@tevm/guillotine`
-  npm publish with provenance, and GitHub Releases with C FFI tarballs and
-  `SHA256SUMS.txt`) and `scripts/release.sh`. See
-  [Publishing and releases](/guides/publishing).
-- **Documentation site (`guillotine.tevm.sh`):** Audited all Vocs 2 pages
-  against `main` (`4ddc140b`) and added guides for benchmarks & native JIT,
-  publishing & releases, and this changelog.
+See [Publishing and releases](/guides/publishing).
+
+### Removed
+
+The duplicated `mini/` tree, `docs/mini/` and the `test-mini*` build steps are
+gone. MinimalEvm, the in-repo reference interpreter, lives in
+`src/tracer/minimal_evm.zig`. The standalone readable reference EVM is the
+separate repository
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini).

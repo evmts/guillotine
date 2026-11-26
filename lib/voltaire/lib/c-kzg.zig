@@ -17,18 +17,18 @@ pub fn createCKzgLibrary(
         }),
     });
 
-    lib.linkLibC();
-    lib.linkLibrary(blst_lib);
+    lib.root_module.link_libc = true;
+    lib.root_module.linkLibrary(blst_lib);
 
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .files = &.{
             "lib/c-kzg-4844/src/ckzg.c",
         },
         .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
     });
 
-    lib.addIncludePath(b.path("lib/c-kzg-4844/src"));
-    lib.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
+    lib.root_module.addIncludePath(b.path("lib/c-kzg-4844/src"));
+    lib.root_module.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
 
     return lib;
 }

@@ -21,10 +21,23 @@ const use_map_jit = is_macos and is_aarch64;
 extern "c" fn pthread_jit_write_protect_np(enabled: c_int) void;
 extern "c" fn sys_icache_invalidate(start: *anyopaque, len: usize) void;
 
+/// Zig 0.17 has no `std.posix.mprotect`; `protect` reports these instead.
+pub const ProtectError = error{ AccessDenied, OutOfMemory } || std.posix.UnexpectedError;
+
 pub const Error = error{
     UnsupportedPlatform,
     EmptyCode,
-} || std.posix.MMapError || std.posix.MProtectError;
+} || std.posix.MMapError || ProtectError;
+
+/// Changes the protection of whole pages returned by `mmap`.
+fn protect(bytes: []align(std.heap.page_size_min) u8, prot: std.posix.PROT) ProtectError!void {
+    switch (std.posix.errno(std.posix.system.mprotect(@ptrCast(@alignCast(bytes.ptr)), bytes.len, prot))) {
+        .SUCCESS => return,
+        .ACCES => return error.AccessDenied,
+        .NOMEM => return error.OutOfMemory,
+        else => |err| return std.posix.unexpectedErrno(err),
+    }
+}
 
 /// A sealed, executable copy of machine code. Owns its pages.
 pub const ExecMemory = struct {
@@ -37,13 +50,12 @@ pub const ExecMemory = struct {
         if (code.len == 0) return error.EmptyCode;
         const page = std.heap.pageSize();
         const len = std.mem.alignForward(usize, code.len, page);
-        const PROT = std.posix.PROT;
 
         if (comptime use_map_jit) {
             const bytes = try std.posix.mmap(
                 null,
                 len,
-                PROT.READ | PROT.WRITE | PROT.EXEC,
+                .{ .READ = true, .WRITE = true, .EXEC = true },
                 .{ .TYPE = .PRIVATE, .ANONYMOUS = true, .JIT = true },
                 -1,
                 0,
@@ -58,14 +70,14 @@ pub const ExecMemory = struct {
         const bytes = try std.posix.mmap(
             null,
             len,
-            PROT.READ | PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
             -1,
             0,
         );
         errdefer std.posix.munmap(bytes);
         @memcpy(bytes[0..code.len], code);
-        try std.posix.mprotect(bytes, PROT.READ | PROT.EXEC);
+        try protect(bytes, .{ .READ = true, .EXEC = true });
         if (comptime is_aarch64) clearCache(@intFromPtr(bytes.ptr), @intFromPtr(bytes.ptr) + code.len);
         return .{ .bytes = bytes, .code_len = code.len };
     }

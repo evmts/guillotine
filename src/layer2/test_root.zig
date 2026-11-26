@@ -6,6 +6,7 @@ comptime {
     _ = @import("optimism/transaction.zig");
     _ = @import("optimism/deposit.zig");
     _ = @import("optimism/da_footprint.zig");
+    _ = @import("optimism/eip1559.zig");
     _ = @import("optimism/fast_lz.zig");
     _ = @import("optimism/precompiles.zig");
     _ = @import("base/config.zig");
@@ -16,4 +17,8 @@ comptime {
 
 test {
     @import("std").testing.refAllDecls(@import("mod.zig"));
+}
+
+comptime {
+    _ = @import("executor.zig");
 }

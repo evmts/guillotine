@@ -11,8 +11,8 @@ test "CLZ opcode Osaka values, gas and Prague rejection" {
             for (0..257) |leading| {
                 var database = evm.Database.init(allocator);
                 defer database.deinit();
-                const caller = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 19 };
-                const contract = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 19 };
+                const caller = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([19]u8, @splat(0)) };
+                const contract = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([19]u8, @splat(0)) };
                 // PUSH32 word; CLZ; MSTORE(0); RETURN(0,32). The word is pushed
                 // rather than read from calldata so EIP-7623 calldata floor gas,
                 // a transaction-level charge MinimalEvm does not model, stays
@@ -28,13 +28,13 @@ test "CLZ opcode Osaka values, gas and Prague rejection" {
                     .balance = 0,
                     .nonce = 0,
                     .code_hash = hash,
-                    .storage_root = [_]u8{0} ** 32,
+                    .storage_root = @as([32]u8, @splat(0)),
                 });
                 try database.set_account(caller.bytes, .{
                     .balance = 1_000_000,
                     .nonce = 0,
-                    .code_hash = [_]u8{0} ** 32,
-                    .storage_root = [_]u8{0} ** 32,
+                    .code_hash = @as([32]u8, @splat(0)),
+                    .storage_root = @as([32]u8, @splat(0)),
                 });
                 var engine = try Engine.init(allocator, &database, .{
                     .chain_id = 1,
@@ -44,7 +44,7 @@ test "CLZ opcode Osaka values, gas and Prague rejection" {
                     .gas_limit = 60_000_000,
                     .coinbase = primitives.ZERO_ADDRESS,
                     .base_fee = 7,
-                    .prev_randao = [_]u8{0} ** 32,
+                    .prev_randao = @as([32]u8, @splat(0)),
                     .blob_base_fee = 1,
                     .blob_versioned_hashes = &.{},
                 }, .{ .gas_limit = 22_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
@@ -132,7 +132,7 @@ test "CLZ exact budget, underflow, full stack and static execution" {
                     .balance = 0,
                     .nonce = 0,
                     .code_hash = hash,
-                    .storage_root = [_]u8{0} ** 32,
+                    .storage_root = @as([32]u8, @splat(0)),
                 });
                 var engine = try evm.Evm(.{ .eips = .{ .hardfork = .OSAKA }, .enable_fusion = fusion }).init(allocator, &database, .{
                     .chain_id = 1,
@@ -142,7 +142,7 @@ test "CLZ exact budget, underflow, full stack and static execution" {
                     .gas_limit = 60_000_000,
                     .coinbase = primitives.ZERO_ADDRESS,
                     .base_fee = 0,
-                    .prev_randao = [_]u8{0} ** 32,
+                    .prev_randao = @as([32]u8, @splat(0)),
                     .blob_base_fee = 1,
                     .blob_versioned_hashes = &.{},
                 }, .{ .gas_limit = case.gas, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);

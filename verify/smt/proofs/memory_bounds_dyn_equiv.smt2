@@ -7,7 +7,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:136 (checkMemoryBoundsRef)
+;; --- src/core/verified_ops.zig:136 (checkMemoryBoundsRef)
 ;;   | pub inline fn checkMemoryBoundsRef(offset: u256, size: u64, comptime memory_limit: u64) bool {
 ;;   |     const max_usize: u256 = std.math.maxInt(u64);
 ;;   |     if (offset > max_usize) return false;
@@ -16,7 +16,7 @@
 ;;   |     if (res[1] != 0) return false;
 ;;   |     return res[0] <= memory_limit;
 ;;   | }
-;; --- src/verified_ops.zig:149 (checkMemoryBoundsFast)
+;; --- src/core/verified_ops.zig:149 (checkMemoryBoundsFast)
 ;;   | pub inline fn checkMemoryBoundsFast(offset: u256, size: u64, comptime memory_limit: u64) bool {
 ;;   |     if (size > memory_limit) return false;
 ;;   |     return offset <= @as(u256, memory_limit - size);

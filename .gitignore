@@ -161,7 +161,7 @@ bun.lock
 **/bun.lock
 
 # TypeScript/JavaScript build artifacts
-**/src/core/
+sdks/typescript/src/core/
 **/src/test/
 
 # Compiled binaries without extensions (common in development)
@@ -189,13 +189,17 @@ bubblesort_bytecode.txt
 *.a
 guillotine-cli
 target/
-lib/*/target/
+lib/*/target
 .astro/
 .flows/
 .zig-cache/
 zig-out/
-zig-pkg/
 .baseline_*.txt
 profile_results/
 dist/
-bench/results/
+
+# Zig dependency cache for the standalone Voltaire build
+/lib/voltaire/zig-pkg/
+
+# Inputs saved by zig build fuzz-campaign
+.fuzz-crashes/

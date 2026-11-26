@@ -9,14 +9,14 @@ test "GT: basic (10 > 5 = 1)" {
 
 fn run_gt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !void {
     // Build custom bytecode for GT test
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     
     // Push b first (will be second from top)
     if (b == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, b, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -31,7 +31,7 @@ fn run_gt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !
     if (a == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, a, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -62,8 +62,8 @@ fn run_gt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     const code_hash = try database.set_code(bytecode);
     
@@ -71,14 +71,14 @@ fn run_gt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -89,7 +89,7 @@ fn run_gt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -243,14 +243,14 @@ test "GT: one apart at boundary" {
 
 fn run_gt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !void {
     // Build custom bytecode for GT test with jump to prevent fusion
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     
     // Push b first (will be second from top)
     if (b == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, b, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -265,7 +265,7 @@ fn run_gt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expecte
     if (a == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, a, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -305,8 +305,8 @@ fn run_gt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expecte
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     const code_hash = try database.set_code(bytecode);
     
@@ -314,14 +314,14 @@ fn run_gt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expecte
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -332,7 +332,7 @@ fn run_gt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expecte
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };

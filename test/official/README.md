@@ -3,11 +3,14 @@
 This folder wires the Ethereum execution-spec-tests (v4.5.0) into Guillotine.
 
 Contents:
-- `fixtures/` — extracted from `fixtures_stable.tar.gz` published at v4.5.0
+- `fixtures/` — the two JSON files the smoke tests read by default, taken from
+  `fixtures_stable.tar.gz` published at v4.5.0. The rest of that archive is no
+  longer committed; the full official state-test suite comes from the pinned
+  release fetched by `scripts/fetch-eest-fixtures.sh` (`zig build state-tests`).
 - `state_smoke_test.zig` — a minimal, self-contained state-test runner
 
 Usage:
-- Download fixtures (already done here in development):
+- Run another case by setting `OFFICIAL_JSON=<path>`. To get the old archive:
   - `curl -L -o test/official/fixtures_stable.tar.gz https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_stable.tar.gz`
   - `tar -xzf test/official/fixtures_stable.tar.gz -C test/official`
 - Run the smoke test (non-strict — executes but does not enforce full post-state):

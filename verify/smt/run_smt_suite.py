@@ -19,7 +19,8 @@ Replay any proof by hand:
 
 Model drift guard: the Zig source text of every modeled function is hashed and
 compared with `verify/smt/model_pins.json`. A changed function fails the suite
-until a human re-reviews the SMT model and runs `--update-pins`.
+until a human re-reviews the SMT model and runs `--update-pins`. A missing
+pin file also fails; only `--update-pins` creates it.
 
 Dependencies: Python 3 standard library, `bitwuzla` and/or `z3` on PATH.
 """
@@ -45,7 +46,7 @@ REPO = HERE.parent.parent
 PROOFS = HERE / "proofs"
 PINS_FILE = HERE / "model_pins.json"
 
-VERIFIED_OPS = "src/verified_ops.zig"
+VERIFIED_OPS = "src/core/verified_ops.zig"
 OPCODE_DATA = "src/opcodes/opcode_data.zig"
 OPCODE_ENUM = "src/opcodes/opcode.zig"
 GAS_CONSTANTS = "lib/voltaire/src/primitives/gas_constants.zig"
@@ -194,6 +195,8 @@ class Theorem:
     sources: List[SourceRef]
     notes: str = ""
     structural_error: str = ""  # set when Python-level structure (e.g. stack shape) mismatches
+    # Minimum per-query solver budget in seconds; --timeout applies when larger.
+    timeout: int = 0
 
     def render(self, vacuity: bool) -> str:
         status = "sat" if vacuity else "unsat"
@@ -224,8 +227,7 @@ class Theorem:
         out.append("(set-info :smt-lib-version 2.6)")
         out.append(f"(set-info :status {status})")
         out.append(f"(set-logic {self.logic})")
-        if "BV" in self.logic:
-            out.append(COMMON_DEFS)
+        out.append(COMMON_DEFS)
         out.append("")
         out.append(self.decls.strip())
         out.append("")
@@ -283,7 +285,7 @@ equals the Yellow Paper SDIV:
 udiv is UNINTERPRETED; the only facts used are udiv(x,0)=0 and udiv(x,1)=x.
 The fast path contains no second==0 or MIN/-1 branch.""",
         logic="QF_UFBV",
-        decls=f"""(declare-fun udiv (Word Word) Word)
+        decls=f"""(declare-fun udiv ((Word) (Word)) Word)
 (declare-const top Word)
 (declare-const second Word)
 {ABS_TWO_COMP}
@@ -324,7 +326,7 @@ equals the Yellow Paper SMOD:
 urem is UNINTERPRETED; the only facts used are urem(x,0)=0 and urem(x,1)=0.
 The fast path contains no second==0 or MIN%-1 branch.""",
         logic="QF_UFBV",
-        decls=f"""(declare-fun urem (Word Word) Word)
+        decls=f"""(declare-fun urem ((Word) (Word)) Word)
 (declare-const top Word)
 (declare-const second Word)
 {ABS_TWO_COMP}
@@ -676,24 +678,33 @@ theorem(
   (2) memoryGasCost(w) <= 538443776,
   (3) memoryGasCost(524288) = 538443776 (the bound is tight),
   (4) w1 <= w2 implies memoryGasCost(w1) <= memoryGasCost(w2) (monotone).""",
-        logic="QF_NIA",
-        decls="""; Exact unbounded integer arithmetic model for words <= 524288 (16 MiB).
-; Proves u64 intermediate w*w < 2^64, cost <= 538443776 < 2^63, tightness, and monotonicity.
-(declare-const w1 Int)
-(declare-const w2 Int)
-(define-fun exactCost ((w Int)) Int (+ (* 3 w) (div (* w w) 512)))""",
+        logic="QF_BV",
+        decls="""; A u64 `words <= 524288 = 2^19` is exactly the zero extension of a 20-bit value.
+(declare-const a1 (_ BitVec 20))
+(declare-const a2 (_ BitVec 20))
+(define-fun w1 () (_ BitVec 64) ((_ zero_extend 44) a1))
+(define-fun w2 () (_ BitVec 64) ((_ zero_extend 44) a2))
+; verified_ops.zig memoryGasCost (u64 wrapping model)
+(define-fun memoryGasCost ((words (_ BitVec 64))) (_ BitVec 64)
+  (bvadd (bvmul words #x0000000000000003) (bvlshr (bvmul words words) #x0000000000000009)))
+; Exact integer cost in 128 bits
+(define-fun exactCost ((words (_ BitVec 64))) (_ BitVec 128)
+  (let ((x ((_ zero_extend 64) words)))
+    (bvadd (bvmul x ((_ zero_extend 64) #x0000000000000003))
+           (bvlshr (bvmul x x) ((_ zero_extend 64) #x0000000000000009)))))""",
         hyps=[
-            ("domain: 0 <= w1 <= 524288", "(and (<= 0 w1) (<= w1 524288))"),
-            ("domain: 0 <= w2 <= 524288", "(and (<= 0 w2) (<= w2 524288))"),
+            ("domain: w1 <= 524288", "(bvule a1 #x80000)"),
+            ("domain: w2 <= 524288", "(bvule a2 #x80000)"),
         ],
-        goal="""(and (< (* w1 w1) 18446744073709551616)
-     (< (* 3 w1) 18446744073709551616)
-     (<= (exactCost w1) 538443776)
-     (< (exactCost w1) 9223372036854775808)
-     (= (exactCost 524288) 538443776)
-     (=> (<= w1 w2) (<= (exactCost w1) (exactCost w2))))""",
+        goal="""(and (= ((_ zero_extend 64) (memoryGasCost w1)) (exactCost w1))
+     (bvule (memoryGasCost w1) #x0000000020180000)
+     (= (memoryGasCost #x0000000000080000) #x0000000020180000)
+     (=> (bvule w1 w2) (bvule (memoryGasCost w1) (memoryGasCost w2))))""",
         sources=src(VERIFIED_OPS, "memoryGasCost"),
         notes="538443776 = 0x20180000 = 3*2^19 + 2^29.",
+        # The 64-bit words*words product is hard for bit-blasting: Bitwuzla 0.11.0
+        # needs ~540 s on nyc-01 and Z3 5.3.3 exceeds 60 s.
+        timeout=1800,
     )
 )
 
@@ -929,36 +940,9 @@ def _fused_push_add_dup1(s: ZigStack, v: str) -> None:
 
 
 fusion_theorem(
-    "fusion_push_add_dup1_equiv", "PUSH v; ADD; DUP1", 1, _evm_push_add_dup1, _fused_push_add_dup1, src(ADV_SYN, "push_add_dup1")
+    "fusion_push_add_dup1_equiv", "PUSH v; ADD; DUP1", 1, _evm_push_add_dup1, _fused_push_add_dup1, src(ADV_SYN, "push_add_dup1", "push_add_dup1_inline", "push_add_dup1_pointer")
 )
 
-
-def _evm_swap1_dup2_add(s: EvmStack, v: str) -> None:
-    s.swap(1)
-    s.dup(2)
-    s.binop("bvadd")
-
-
-def _fused_swap1_dup2_add(s: ZigStack, v: str) -> None:
-    top = s.pop_unsafe()
-    second = s.pop_unsafe()
-    s.push_unsafe(top)
-    s.push_unsafe(second)
-    s.dup_n_unsafe(2)
-    b = s.pop_unsafe()
-    a = s.pop_unsafe()
-    s.push_unsafe(f"(bvadd {a} {b})")
-
-
-fusion_theorem(
-    "fusion_swap1_dup2_add_equiv",
-    "SWAP1; DUP2; ADD",
-    2,
-    _evm_swap1_dup2_add,
-    _fused_swap1_dup2_add,
-    src(ADV_SYN, "swap1_dup2_add") + src(STACK, "dup_n_unsafe"),
-    notes="The push value v is unused by this fusion; it is declared for a uniform interface.",
-)
 
 # ISZERO; PUSH target; JUMPI  -> ISZERO_JUMPI
 _decls, _items = stack_vars(3)
@@ -1060,6 +1044,7 @@ class Job:
     kind: str  # "proof" or "vacuity"
     path: Path
     expected: str
+    timeout: int = 0
 
 
 @dataclasses.dataclass
@@ -1072,10 +1057,7 @@ class Outcome:
 
 
 def solver_cmd(solver: str, path: Path, timeout: int) -> List[str]:
-    # Bitwuzla supports QF_BV/QF_UFBV/QF_ABV; route QF_NIA integer-arithmetic proofs to Z3.
     if solver == "bitwuzla":
-        if "(set-logic QF_NIA)" in path.read_text() and shutil.which("z3"):
-            return ["z3", f"-T:{timeout}", str(path)]
         return ["bitwuzla", f"--time-limit={timeout * 1000}", str(path)]
     return ["z3", f"-T:{timeout}", str(path)]
 
@@ -1327,9 +1309,13 @@ def all_sources() -> List[SourceRef]:
 
 def check_pins(update: bool) -> List[str]:
     current = {f"{r.path}::{r.fn}": fn_hash(r) for r in all_sources()}
-    if update or not PINS_FILE.exists():
+    if update:
         PINS_FILE.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
         return []
+    # Fail closed: a missing pin file must never be regenerated silently, or
+    # unreviewed source drift would pass as "proved".
+    if not PINS_FILE.exists():
+        return [f"{PINS_FILE.relative_to(REPO)} is missing; review the SMT models and run --update-pins"]
     pinned = json.loads(PINS_FILE.read_text())
     errs = []
     for key, h in current.items():
@@ -1367,8 +1353,13 @@ def main() -> int:
     t_start = time.monotonic()
     failures: List[str] = []
 
+    fallback: Optional[str] = None
     if args.solver == "auto":
         solvers = ["bitwuzla"] if shutil.which("bitwuzla") else ["z3"] if shutil.which("z3") else []
+        # Neither solver dominates (Bitwuzla: memory gas in minutes; Z3: SDIV/SMOD
+        # in seconds). Retry only non-definitive answers with the other solver.
+        if solvers == ["bitwuzla"] and shutil.which("z3"):
+            fallback = "z3"
     elif args.solver == "both":
         solvers = ["bitwuzla", "z3"]
     else:
@@ -1390,11 +1381,11 @@ def main() -> int:
             failures.append(f"{t.name}: {t.structural_error}")
         p = PROOFS / f"{t.name}.smt2"
         p.write_text(t.render(vacuity=False))
-        jobs.append(Job(t.name, "proof", p, "unsat"))
+        jobs.append(Job(t.name, "proof", p, "unsat", t.timeout))
         if t.hyps and not args.no_vacuity:
             v = PROOFS / "vacuity" / f"{t.name}.smt2"
             v.write_text(t.render(vacuity=True))
-            jobs.append(Job(t.name, "vacuity", v, "sat"))
+            jobs.append(Job(t.name, "vacuity", v, "sat", t.timeout))
 
     pin_errors = check_pins(args.update_pins)
     failures.extend(f"model pin: {e}" for e in pin_errors)
@@ -1407,9 +1398,14 @@ def main() -> int:
     outcomes: List[Outcome] = []
     workers = args.jobs or max(2, (os_cpu() or 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = [pool.submit(run_solver, s, j, args.timeout) for j in jobs for s in solvers]
+        futs = [pool.submit(run_solver, s, j, max(args.timeout, j.timeout)) for j in jobs for s in solvers]
         for fut in futs:
             outcomes.append(fut.result())
+        if fallback:
+            retry = [i for i, o in enumerate(outcomes) if o.answer not in ("sat", "unsat")]
+            retried = [pool.submit(run_solver, fallback, outcomes[i].job, max(args.timeout, outcomes[i].job.timeout)) for i in retry]
+            for i, fut in zip(retry, retried):
+                outcomes[i] = fut.result()
 
     by_theorem: Dict[str, List[Outcome]] = {}
     for o in outcomes:

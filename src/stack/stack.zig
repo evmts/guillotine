@@ -14,7 +14,6 @@
 //! - Assertion-based validation in unsafe operations (*_unsafe variants)
 //! - Proper ownership of aligned memory allocation
 const std = @import("std");
-const builtin = @import("builtin");
 
 const StackConfig = @import("stack_config.zig").StackConfig;
 
@@ -31,7 +30,6 @@ pub fn Stack(config: StackConfig) type {
         pub const WordType = config.WordType;
         pub const IndexType = config.StackIndexType();
         pub const stack_capacity = config.stack_size;
-        pub const ptr_align: usize = if (std.math.isPowerOfTwo(@sizeOf(WordType))) @min(64, @sizeOf(WordType)) else @alignOf(WordType);
 
         pub const Error = error{
             StackOverflow,
@@ -39,10 +37,13 @@ pub fn Stack(config: StackConfig) type {
             AllocationError,
         };
 
+        // Ownership: pointer to aligned memory returned by alignedAlloc
         buf_ptr: [*]align(64) WordType,
 
-        // Points to the top item, or one past the buffer when empty.
-        stack_ptr: [*]align(ptr_align) WordType,
+        // Downward stack growth: stack_ptr points to next empty slot
+        // Push: *stack_ptr = value; stack_ptr -= 1;
+        // Pop: stack_ptr += 1; return *stack_ptr;
+        stack_ptr: [*]WordType,
 
         // Tracer for assertions (optional for initialization compatibility)
         tracer: ?*anyopaque,
@@ -60,41 +61,32 @@ pub fn Stack(config: StackConfig) type {
             const memory = allocator.alignedAlloc(WordType, @enumFromInt(6), stack_capacity) catch return Error.AllocationError;
             errdefer allocator.free(memory);
 
-            return initBorrowed(memory.ptr, tracer);
-        }
+            const base_ptr: [*]align(64) WordType = memory.ptr;
 
-        /// Initializes an empty stack over at least stack_capacity caller-owned words.
-        /// The caller retains ownership and is responsible for releasing the buffer.
-        pub fn initBorrowed(buf: [*]align(64) WordType, tracer: ?*anyopaque) Self {
-            return .{
-                .buf_ptr = buf,
-                .stack_ptr = buf + stack_capacity,
+            return Self{
+                .buf_ptr = base_ptr,
+                .stack_ptr = base_ptr + stack_capacity,
                 .tracer = tracer,
             };
         }
 
-        /// Discards the stack contents while retaining the buffer and tracer.
-        pub fn reset(self: *Self) void {
-            self.stack_ptr = self.stack_base();
-        }
-
-        /// Releases the buffer allocated by init or initWithTracer.
+        /// Deallocates the stack's aligned memory.
+        /// Must be called when the stack is no longer needed.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             const memory_slice = self.buf_ptr[0..stack_capacity];
             allocator.free(memory_slice);
         }
 
-        inline fn stack_base(self: *const Self) [*]align(ptr_align) WordType {
+        inline fn stack_base(self: *const Self) [*]WordType {
             return self.buf_ptr + stack_capacity;
         }
 
-        inline fn stack_limit(self: *const Self) [*]align(ptr_align) WordType {
+        inline fn stack_limit(self: *const Self) [*]WordType {
             return self.buf_ptr;
         }
 
         /// Assert helper that calls tracer.assert if tracer is available
         inline fn assert(self: *const Self, condition: bool, comptime message: []const u8) void {
-            if (comptime builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) return;
             if (self.tracer) |tracer_ptr| {
                 const tracer: *@import("../tracer/tracer.zig").Tracer = @ptrCast(@alignCast(tracer_ptr));
                 tracer.assert(condition, message);
@@ -325,23 +317,6 @@ pub fn Stack(config: StackConfig) type {
             return self.stack_ptr[0..count];
         }
     };
-}
-
-test "Borrowed stack reset retains its aligned buffer for reuse" {
-    const StackType = Stack(.{ .stack_size = 3 });
-    var buffer: [StackType.stack_capacity]u256 align(64) = undefined;
-    var stack = StackType.initBorrowed(&buffer, null);
-    const base = stack.stack_ptr;
-
-    try stack.push(42);
-    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(stack.stack_ptr) % StackType.ptr_align);
-    stack.reset();
-
-    try std.testing.expectEqual(base, stack.stack_ptr);
-    try std.testing.expectError(error.StackUnderflow, stack.pop());
-    try std.testing.expectEqual(@as(u256, 42), buffer[2]);
-    try stack.push(99);
-    try std.testing.expectEqual(@as(u256, 99), try stack.pop());
 }
 
 test "Stack push and push_unsafe" {

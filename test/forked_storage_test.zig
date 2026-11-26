@@ -80,7 +80,7 @@ test "ForkedStorage - fetch USDC contract storage" {
     std.debug.print("Nonce: {d}\n", .{account.nonce});
     
     // USDC is a contract, so code_hash should not be empty
-    const empty_hash = [_]u8{0} ** 32;
+    const empty_hash = @as([32]u8, @splat(0));
     try testing.expect(!std.mem.eql(u8, &account.code_hash, &empty_hash));
     
     // Get USDC total supply (slot 0 in many ERC20 contracts)
@@ -134,7 +134,7 @@ test "ForkedStorage - fork at specific block" {
     defer storage.deinit();
     
     // Test address
-    const test_address = [_]u8{0x00} ** 20;
+    const test_address = @as([20]u8, @splat(0x00));
     
     // This should fetch data from block 18 million
     const account = try storage.get_account(test_address);
@@ -155,7 +155,7 @@ test "Storage union with ForkedStorage" {
     defer storage.deinit();
     
     // Use through the union interface (zero overhead!)
-    const test_address = [_]u8{0xFF} ** 20;
+    const test_address = @as([20]u8, @splat(0xFF));
     const balance = try storage.get_balance(test_address);
     
     std.debug.print("\n=== Union Interface ===\n", .{});

@@ -51,7 +51,7 @@
 		"format": "biome format . --write",
 		"lint": "biome check .",
 		"lint:package": "publint --strict && attw --pack --profile esm-only",
-		"prepublishOnly": "(test \"${GUILLOTINE_SKIP_NATIVE_BUILD:-}\" = \"1\" || bun run build:native) && bun run build && bun run typecheck && bun test && bun run lint:package",
+		"prepublishOnly": "bun run build:native && bun run build && bun run typecheck && bun test && bun run lint:package",
 		"test": "bun test",
 		"test:coverage": "bun test --coverage",
 		"test:fuzz": "bun test test/fuzz/",
@@ -68,5 +68,8 @@
 	},
 	"publishConfig": {
 		"access": "public"
+	},
+	"dependencies": {
+		"@noble/hashes": "1.8.0"
 	}
 }

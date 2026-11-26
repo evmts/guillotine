@@ -5,9 +5,9 @@ const evm = @import("evm");
 const primitives = @import("voltaire");
 
 const gas_limit: u64 = 1_000_000;
-const outer = primitives.Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
-const inner = primitives.Address{ .bytes = [_]u8{0x43} ++ [_]u8{0} ** 19 };
-const caller = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 19 };
+const outer = primitives.Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
+const inner = primitives.Address{ .bytes = [_]u8{0x43} ++ @as([19]u8, @splat(0)) };
+const caller = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([19]u8, @splat(0)) };
 
 // CALLDATASIZE; PUSH0; PUSH0; CALLDATACOPY; CALLDATASIZE; PUSH0; RETURN
 const echo = [_]u8{ 0x36, 0x5f, 0x5f, 0x37, 0x36, 0x5f, 0xf3 };
@@ -22,7 +22,7 @@ fn deploy(db: *evm.Database, address: primitives.Address, code: []const u8) !voi
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 }
 
@@ -34,7 +34,7 @@ const block_info = evm.BlockInfo{
     .gas_limit = 30_000_000,
     .coinbase = primitives.ZERO_ADDRESS,
     .base_fee = 0,
-    .prev_randao = [_]u8{0} ** 32,
+    .prev_randao = @as([32]u8, @splat(0)),
 };
 const context = evm.TransactionContext{
     .gas_limit = gas_limit,
@@ -64,7 +64,7 @@ test "CALLDATACOPY: top-level call after memory growth echoes its input" {
     try deploy(&db, outer, &grow_then_echo);
     var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
     defer vm.deinit();
-    const input = [_]u8{0xab} ** 68;
+    const input = @as([68]u8, @splat(0xab));
     var result = vm.call(.{ .call = .{ .caller = caller, .to = outer, .value = 0, .input = &input, .gas = gas_limit } });
     defer result.deinit(allocator);
     try std.testing.expect(result.success);
@@ -85,7 +85,7 @@ test "CALLDATACOPY: nested CALL input reaches the callee" {
     try deploy(&db, outer, &outer_code);
     var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
     defer vm.deinit();
-    const input = [_]u8{ 0x11, 0x22, 0x33, 0x44 } ++ [_]u8{0x55} ** 32;
+    const input = [_]u8{ 0x11, 0x22, 0x33, 0x44 } ++ @as([32]u8, @splat(0x55));
     var result = vm.call(.{ .call = .{ .caller = caller, .to = outer, .value = 0, .input = &input, .gas = gas_limit } });
     defer result.deinit(allocator);
     try std.testing.expect(result.success);
@@ -97,7 +97,7 @@ test "CALLDATACOPY: source offset beyond calldata and beyond usize copies zeros"
     var db = evm.Database.init(allocator);
     defer db.deinit();
     // PUSH1 4 (len) PUSH32 2^256-1 (offset) PUSH0 (dest) CALLDATACOPY PUSH1 4 PUSH0 RETURN
-    const code = [_]u8{ 0x60, 0x04, 0x7f } ++ [_]u8{0xff} ** 32 ++ [_]u8{ 0x5f, 0x37, 0x60, 0x04, 0x5f, 0xf3 };
+    const code = [_]u8{ 0x60, 0x04, 0x7f } ++ @as([32]u8, @splat(0xff)) ++ [_]u8{ 0x5f, 0x37, 0x60, 0x04, 0x5f, 0xf3 };
     try deploy(&db, outer, &code);
     var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
     defer vm.deinit();
@@ -113,7 +113,7 @@ test "CALLDATACOPY: zero length with huge offsets is a no-op" {
     var db = evm.Database.init(allocator);
     defer db.deinit();
     // PUSH0 (len) PUSH32 max (offset) PUSH32 max (dest) CALLDATACOPY STOP
-    const code = [_]u8{ 0x5f, 0x7f } ++ [_]u8{0xff} ** 32 ++ [_]u8{0x7f} ++ [_]u8{0xff} ** 32 ++ [_]u8{ 0x37, 0x00 };
+    const code = [_]u8{ 0x5f, 0x7f } ++ @as([32]u8, @splat(0xff)) ++ [_]u8{0x7f} ++ @as([32]u8, @splat(0xff)) ++ [_]u8{ 0x37, 0x00 };
     try deploy(&db, outer, &code);
     var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
     defer vm.deinit();
@@ -137,7 +137,7 @@ test "CALLDATACOPY: memory grows in whole words (MSIZE after a 1-byte copy is 32
     var result = vm.call(.{ .call = .{ .caller = caller, .to = outer, .value = 0, .input = &input, .gas = gas_limit } });
     defer result.deinit(allocator);
     try std.testing.expect(result.success);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 31 ++ [_]u8{0x20}), result.output);
+    try std.testing.expectEqualSlices(u8, &(@as([31]u8, @splat(0)) ++ [_]u8{0x20}), result.output);
 }
 
 test "EXTCODECOPY: copies another account's code with address on top of the stack" {
@@ -160,11 +160,76 @@ test "CALL: value-free call to a nonexistent account succeeds" {
     const allocator = std.testing.allocator;
     var db = evm.Database.init(allocator);
     defer db.deinit();
-    const nobody = primitives.Address{ .bytes = [_]u8{0x77} ++ [_]u8{0} ** 19 };
+    const nobody = primitives.Address{ .bytes = [_]u8{0x77} ++ @as([19]u8, @splat(0)) };
     var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
     defer vm.deinit();
     var result = vm.call(.{ .call = .{ .caller = caller, .to = nobody, .value = 0, .input = &.{}, .gas = gas_limit } });
     defer result.deinit(allocator);
     try std.testing.expect(result.success);
     try std.testing.expectEqual(gas_limit - 21_000, result.gas_left);
+}
+
+// ---- Bulk copy semantics: CALLDATACOPY, CODECOPY and EXTCODECOPY copy the bytes the
+// source has and zero-fill the rest of the range, without touching bytes around it.
+
+const ff32 = @as([32]u8, @splat(0xff));
+// PUSH32 ff..ff PUSH0 MSTORE: memory[0..32] = 0xff, so a missing zero-fill is visible.
+const dirty = [_]u8{0x7f} ++ ff32 ++ [_]u8{ 0x5f, 0x52 };
+
+/// Deploy `code` at `outer` (and `echo` at `inner`), call it with `input`, and expect
+/// success with `expected` as output.
+fn expectOutput(code: []const u8, input: []const u8, expected: []const u8) !void {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+    try deploy(&db, inner, &echo);
+    try deploy(&db, outer, code);
+    var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
+    defer vm.deinit();
+    var result = vm.call(.{ .call = .{ .caller = caller, .to = outer, .value = 0, .input = input, .gas = gas_limit } });
+    defer result.deinit(allocator);
+    try std.testing.expect(result.success);
+    try std.testing.expectEqualSlices(u8, expected, result.output);
+}
+
+test "CALLDATACOPY partial tail zero-fills over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x08, 0x60, 0x02, 0x60, 0x01, 0x37, 0x60, 0x0a, 0x5f, 0xf3 };
+    try expectOutput(&code, &[_]u8{ 1, 2, 3, 4 }, &[_]u8{ 0xff, 3, 4, 0, 0, 0, 0, 0, 0, 0xff });
+}
+
+test "CALLDATACOPY multi-word partial copy" {
+    const code = dirty ++ [_]u8{0x7f} ++ ff32 ++ [_]u8{ 0x60, 0x60, 0x52, 0x60, 100, 0x5f, 0x5f, 0x37, 0x60, 0x80, 0x5f, 0xf3 };
+    var input: [64]u8 = undefined;
+    for (&input, 0..) |*b, i| b.* = @intCast(i + 1);
+    try expectOutput(&code, &input, &(input ++ @as([36]u8, @splat(0)) ++ @as([28]u8, @splat(0xff))));
+}
+
+test "CODECOPY full copy" {
+    const code = [_]u8{ 0x38, 0x5f, 0x5f, 0x39, 0x38, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &code);
+}
+
+test "CODECOPY partial tail zero-fills over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x08, 0x60, 0x02, 0x38, 0x03, 0x60, 0x01, 0x39, 0x60, 0x0a, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0x5f, 0xf3, 0, 0, 0, 0, 0, 0, 0xff });
+}
+
+test "CODECOPY offset beyond usize copies zeros over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x04, 0x7f } ++ ff32 ++ [_]u8{ 0x60, 0x01, 0x39, 0x60, 0x06, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0, 0, 0, 0, 0xff });
+}
+
+test "EXTCODECOPY partial tail zero-fills over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x08, 0x60, 0x05, 0x60, 0x01, 0x73 } ++ inner.bytes ++ [_]u8{ 0x3c, 0x60, 0x0a, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0x5f, 0xf3, 0, 0, 0, 0, 0, 0, 0xff });
+}
+
+test "EXTCODECOPY offset beyond usize copies zeros over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x04, 0x7f } ++ ff32 ++ [_]u8{ 0x60, 0x01, 0x73 } ++ inner.bytes ++ [_]u8{ 0x3c, 0x60, 0x06, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0, 0, 0, 0, 0xff });
+}
+
+test "EXTCODECOPY zero length with huge offsets leaves memory empty" {
+    const code = [_]u8{ 0x5f, 0x7f } ++ ff32 ++ [_]u8{0x7f} ++ ff32 ++ [_]u8{0x73} ++ inner.bytes ++ [_]u8{ 0x3c, 0x59, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &@as([32]u8, @splat(0)));
 }

@@ -51,17 +51,7 @@ theorem alignUp32_no_overflow (n : BitVec 32) (hn : n.toNat ≤ 0xFFFFFF) :
     n.toNat + 31 < 2^32 := by omega
 
 private theorem clearLowFive (x : BitVec 32) :
-    x &&& ~~~(31 : BitVec 32) = (x >>> 5) <<< 5 := by
-  apply BitVec.eq_of_getLsbD_eq
-  intro i hi
-  rw [BitVec.getLsbD_and, BitVec.getLsbD_not, BitVec.getLsbD_shiftLeft, BitVec.getLsbD_ushiftRight]
-  have mask : (31 : BitVec 32).getLsbD i = decide (i < 5) :=
-    Nat.testBit_two_pow_sub_one 5 i
-  rw [mask]
-  by_cases low : i < 5
-  · simp only [hi, low, decide_true, Bool.not_true, Bool.and_false, Bool.false_and]
-  · simp only [hi, low, decide_true, decide_false, Bool.not_false, Bool.true_and, Bool.and_true,
-      show 5 + (i - 5) = i by omega]
+    x &&& ~~~(31 : BitVec 32) = (x >>> 5) <<< 5 := by bv_decide
 
 theorem alignUp32_eq_ceil_mult32 (n : BitVec 32) (hn : n.toNat ≤ 0xFFFFFF) :
     (alignUp32 n).toNat = ceilWords n.toNat * 32 := by
@@ -104,11 +94,16 @@ theorem memoryGasCostU64_eq (w : BitVec 64) (h : w.toNat ≤ 524288) :
   have square : w.toNat * w.toNat < 2^64 :=
     Nat.lt_of_le_of_lt (Nat.mul_le_mul h h) (by decide)
   have total := memoryGasCost_no_overflow w.toNat h
-  simp only [memoryGasCostU64, BitVec.toNat_add, BitVec.toNat_mul, BitVec.toNat_ushiftRight,
-    Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt square]
-  change (w.toNat * 3 % 2^64 + w.toNat * w.toNat / 512) % 2^64 = _
-  rw [Nat.mod_eq_of_lt linear]
-  change memoryGasCost w.toNat % 2^64 = _
-  exact Nat.mod_eq_of_lt (by omega)
+  unfold memoryGasCost at total
+  -- Stated for any multiplier whose value is 3, so the proof does not depend on how
+  -- the literal in `memoryGasCostU64` elaborates.
+  have key : ∀ c : BitVec 64, c.toNat = 3 →
+      (w * c + (w * w) >>> 9).toNat = w.toNat * 3 + w.toNat * w.toNat / 512 := by
+    intro c hc
+    rw [BitVec.toNat_add, BitVec.toNat_mul, hc, Nat.mod_eq_of_lt linear, BitVec.toNat_ushiftRight,
+      BitVec.toNat_mul, Nat.mod_eq_of_lt square, Nat.shiftRight_eq_div_pow]
+    omega
+  unfold memoryGasCostU64 memoryGasCost
+  exact key _ (by decide)
 
 end GuillotineVerify.Memory

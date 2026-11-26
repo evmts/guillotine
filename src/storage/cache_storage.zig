@@ -582,12 +582,12 @@ test "HotStorage - basic operations" {
     var storage = HotStorage.init(testing.allocator);
     defer storage.deinit();
     
-    const addr = [_]u8{0x12} ** 20;
+    const addr = @as([20]u8, @splat(0x12));
     const account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0xAB} ** 32,
-        .storage_root = [_]u8{0xCD} ** 32,
+        .code_hash = @as([32]u8, @splat(0xAB)),
+        .storage_root = @as([32]u8, @splat(0xCD)),
     };
     
     // Test account operations
@@ -608,7 +608,7 @@ test "HotStorage - storage operations" {
     var storage = HotStorage.init(testing.allocator);
     defer storage.deinit();
     
-    const addr = [_]u8{0x34} ** 20;
+    const addr = @as([20]u8, @splat(0x34));
     const slot: u256 = 0x123456789;
     const value: u256 = 0xFEDCBA987;
     
@@ -627,7 +627,7 @@ test "HotStorage - code operations" {
     var storage = HotStorage.init(testing.allocator);
     defer storage.deinit();
     
-    const code_hash = [_]u8{0x56} ** 32;
+    const code_hash = @as([32]u8, @splat(0x56));
     const code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 };
     
     // Test code operations
@@ -649,12 +649,12 @@ test "HotStorage - clear and stats" {
     defer storage.deinit();
     
     // Add some data
-    const addr = [_]u8{0x78} ** 20;
+    const addr = @as([20]u8, @splat(0x78));
     const account = Account.zero();
     try storage.putAccount(addr, account);
     try storage.putStorage(addr, 1, 100);
     
-    const code_hash = [_]u8{0x9A} ** 32;
+    const code_hash = @as([32]u8, @splat(0x9A));
     const code = [_]u8{0x60};
     try storage.putCode(code_hash, &code);
     
@@ -679,12 +679,12 @@ test "CacheStorage - union operations" {
     
     var cache = CacheStorage{ .hot = hot };
     
-    const addr = [_]u8{0xBC} ** 20;
+    const addr = @as([20]u8, @splat(0xBC));
     const account = Account{
         .balance = 2000,
         .nonce = 10,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     // Test through union
@@ -709,14 +709,14 @@ test "HotStorage - multiple accounts and storage" {
     
     // Add multiple accounts
     for (0..10) |i| {
-        var addr = [_]u8{0} ** 20;
+        var addr = @as([20]u8, @splat(0));
         addr[19] = @intCast(i);
         
         const account = Account{
             .balance = i * 100,
             .nonce = i,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         
         try storage.putAccount(addr, account);
@@ -729,7 +729,7 @@ test "HotStorage - multiple accounts and storage" {
     
     // Verify all data
     for (0..10) |i| {
-        var addr = [_]u8{0} ** 20;
+        var addr = @as([20]u8, @splat(0));
         addr[19] = @intCast(i);
         
         const account = storage.getAccount(addr).?;
@@ -751,12 +751,12 @@ test "WarmStorage - basic operations with LRU" {
     defer warm.deinit();
     
     // Test basic account operations
-    const addr = [_]u8{0xDE} ** 20;
+    const addr = @as([20]u8, @splat(0xDE));
     const account = Account{
         .balance = 3000,
         .nonce = 15,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     try testing.expect(warm.getAccount(addr) == null);
@@ -773,17 +773,17 @@ test "WarmStorage - basic operations with LRU" {
 
 test "StorageKey - hash and equality" {
     const key1 = StorageKey{
-        .address = [_]u8{0x01} ** 20,
+        .address = @as([20]u8, @splat(0x01)),
         .slot = 42,
     };
 
     const key2 = StorageKey{
-        .address = [_]u8{0x01} ** 20,
+        .address = @as([20]u8, @splat(0x01)),
         .slot = 42,
     };
 
     const key3 = StorageKey{
-        .address = [_]u8{0x02} ** 20,
+        .address = @as([20]u8, @splat(0x02)),
         .slot = 42,
     };
 
@@ -803,7 +803,7 @@ test "WarmStorage - storage operations with backing" {
     var warm = try WarmStorage.init(testing.allocator, &cold);
     defer warm.deinit();
 
-    const addr = [_]u8{0xEF} ** 20;
+    const addr = @as([20]u8, @splat(0xEF));
     const slot: u256 = 123;
     const value: u256 = 456;
 
@@ -822,7 +822,7 @@ test "WarmStorage - code operations" {
     var warm = try WarmStorage.init(testing.allocator, null);
     defer warm.deinit();
 
-    const code_hash = [_]u8{0xAA} ** 32;
+    const code_hash = @as([32]u8, @splat(0xAA));
     const code = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 };
 
     // Test code operations
@@ -842,12 +842,12 @@ test "WarmStorage - clear and stats" {
     var warm = try WarmStorage.init(testing.allocator, null);
     defer warm.deinit();
 
-    const addr = [_]u8{0xBB} ** 20;
+    const addr = @as([20]u8, @splat(0xBB));
     const account = Account.zero();
     try warm.putAccount(addr, account);
     try warm.putStorage(addr, 1, 100);
 
-    const code_hash = [_]u8{0xCC} ** 32;
+    const code_hash = @as([32]u8, @splat(0xCC));
     const code = [_]u8{0x60};
     try warm.putCode(code_hash, &code);
 
@@ -869,12 +869,12 @@ test "ColdStorage - basic operations" {
     var storage = ColdStorage.init(testing.allocator);
     defer storage.deinit();
 
-    const addr = [_]u8{0xDD} ** 20;
+    const addr = @as([20]u8, @splat(0xDD));
     const account = Account{
         .balance = 5000,
         .nonce = 25,
-        .code_hash = [_]u8{0xEE} ** 32,
-        .storage_root = [_]u8{0xFF} ** 32,
+        .code_hash = @as([32]u8, @splat(0xEE)),
+        .storage_root = @as([32]u8, @splat(0xFF)),
     };
 
     // Test account operations
@@ -895,7 +895,7 @@ test "ColdStorage - storage operations" {
     var storage = ColdStorage.init(testing.allocator);
     defer storage.deinit();
 
-    const addr = [_]u8{0x11} ** 20;
+    const addr = @as([20]u8, @splat(0x11));
     const slot: u256 = 999;
     const value: u256 = 777;
 
@@ -912,7 +912,7 @@ test "ColdStorage - code operations" {
     var storage = ColdStorage.init(testing.allocator);
     defer storage.deinit();
 
-    const code_hash = [_]u8{0x22} ** 32;
+    const code_hash = @as([32]u8, @splat(0x22));
     const code = [_]u8{ 0x60, 0xFF, 0x60, 0xEE, 0x01, 0x00 };
 
     try testing.expect(storage.getCode(code_hash) == null);
@@ -931,12 +931,12 @@ test "ColdStorage - clear and stats" {
     var storage = ColdStorage.init(testing.allocator);
     defer storage.deinit();
 
-    const addr = [_]u8{0x33} ** 20;
+    const addr = @as([20]u8, @splat(0x33));
     const account = Account.zero();
     try storage.putAccount(addr, account);
     try storage.putStorage(addr, 1, 100);
 
-    const code_hash = [_]u8{0x44} ** 32;
+    const code_hash = @as([32]u8, @splat(0x44));
     const code = [_]u8{0x60};
     try storage.putCode(code_hash, &code);
 
@@ -959,7 +959,7 @@ test "CacheStorage - union code operations" {
 
     var cache = CacheStorage{ .hot = hot };
 
-    const code_hash = [_]u8{0x55} ** 32;
+    const code_hash = @as([32]u8, @splat(0x55));
     const code = [_]u8{ 0x60, 0x01, 0x60, 0x02 };
 
     try testing.expect(cache.getCode(code_hash) == null);
@@ -980,7 +980,7 @@ test "CacheStorage - union removal operations" {
 
     var cache = CacheStorage{ .hot = hot };
 
-    const addr = [_]u8{0x66} ** 20;
+    const addr = @as([20]u8, @splat(0x66));
     const account = Account.zero();
 
     try cache.putAccount(addr, account);
@@ -997,7 +997,7 @@ test "CacheStorage - union clear" {
 
     var cache = CacheStorage{ .hot = hot };
 
-    const addr = [_]u8{0x77} ** 20;
+    const addr = @as([20]u8, @splat(0x77));
     try cache.putAccount(addr, Account.zero());
     try cache.putStorage(addr, 1, 100);
 
@@ -1016,15 +1016,15 @@ test "WarmStorage - LRU eviction to backing" {
 
     // Fill warm cache beyond capacity to trigger eviction
     for (0..1025) |i| {
-        var addr = [_]u8{0} ** 20;
+        var addr = @as([20]u8, @splat(0));
         addr[19] = @intCast(i & 0xFF);
         addr[18] = @intCast((i >> 8) & 0xFF);
 
         const account = Account{
             .balance = i,
             .nonce = i,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
 
         try warm.putAccount(addr, account);
@@ -1039,7 +1039,7 @@ test "WarmStorage - account removal" {
     var warm = try WarmStorage.init(testing.allocator, null);
     defer warm.deinit();
 
-    const addr = [_]u8{0x88} ** 20;
+    const addr = @as([20]u8, @splat(0x88));
     const account = Account.zero();
 
     try warm.putAccount(addr, account);
@@ -1056,14 +1056,14 @@ test "ColdStorage - multiple operations" {
 
     // Add multiple items
     for (0..20) |i| {
-        var addr = [_]u8{0} ** 20;
+        var addr = @as([20]u8, @splat(0));
         addr[19] = @intCast(i);
 
         const account = Account{
             .balance = i * 50,
             .nonce = i,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
 
         try storage.putAccount(addr, account);
@@ -1075,7 +1075,7 @@ test "ColdStorage - multiple operations" {
 
     // Verify all data
     for (0..20) |i| {
-        var addr = [_]u8{0} ** 20;
+        var addr = @as([20]u8, @splat(0));
         addr[19] = @intCast(i);
 
         const account = storage.getAccount(addr).?;

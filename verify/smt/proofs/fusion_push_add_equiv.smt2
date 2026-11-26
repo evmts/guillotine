@@ -11,23 +11,22 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:26 (push_add_inline)
-;;   |         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             @branchHint(.likely);
-;;   |             self.beforeInstruction(.PUSH_ADD_INLINE, cursor);
-;;   |             validate_stack(self);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:20 (push_add_inline)
+;;   |         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_ADD_INLINE, cursor, s.sp, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
-;;   |             self.stack.set_top_unsafe(op_data.metadata.value +% self.stack.peek_unsafe());
-;;   |             return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_INLINE);
+;;   |             s.set_top_unsafe(op_data.metadata.value +% s.peek_unsafe());
+;;   |             return N.next(self, .PUSH_ADD_INLINE, cursor, s.sp, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:37 (push_add_pointer)
-;;   |         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_ADD_POINTER, cursor);
-;;   |             validate_stack(self);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:30 (push_add_pointer)
+;;   |         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_ADD_POINTER, cursor, s.sp, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
-;;   |             const top = self.stack.peek_unsafe();
-;;   |             self.stack.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
-;;   |             return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_POINTER);
+;;   |             const top = s.peek_unsafe();
+;;   |             s.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
+;;   |             return N.next(self, .PUSH_ADD_POINTER, cursor, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

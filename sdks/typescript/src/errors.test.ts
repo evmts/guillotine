@@ -30,6 +30,14 @@ describe('GuillotineError', () => {
       expect(error.message).toBe('Init failed');
     });
 
+    it('should create invalid UTF-8 error with cause', () => {
+      const cause = new TypeError('The encoded data was not valid for encoding utf-8');
+      const error = GuillotineError.invalidUtf8('native error message is not valid UTF-8', cause);
+      expect(error.type).toBe('InvalidUtf8');
+      expect(error.message).toBe('native error message is not valid UTF-8');
+      expect(error.cause).toBe(cause);
+    });
+
     it('should create unsupported operation error', () => {
       const error = GuillotineError.unsupportedOperation('getStorage is not available on a tracing EVM');
       expect(error.type).toBe('UnsupportedOperation');

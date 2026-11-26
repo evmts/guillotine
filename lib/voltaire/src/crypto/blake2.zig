@@ -42,7 +42,10 @@ pub fn unauditedBlake2bG(v: *[16]u64, a: usize, b: usize, c: usize, d: usize, x:
 /// This function implements BLAKE2b compression rounds without security review.
 /// Use at your own risk in production systems.
 pub fn unauditedBlake2bRound(v: *[16]u64, message: *const [16]u64, round: u32) void {
-    const s = &BLAKE2B_SIGMA[round % 12];
+    // BLAKE2b has 10 distinct permutations; EIP-152 allows any round count, so round r
+    // uses sigma[r mod 10]. Rows 10 and 11 of the table repeat rows 0 and 1 for the
+    // standard 12-round hash and are never indexed here.
+    const s = &BLAKE2B_SIGMA[round % 10];
 
     // Column mixing
     unauditedBlake2bG(v, 0, 4, 8, 12, message[s[0]], message[s[1]]);
@@ -117,7 +120,7 @@ test "blake2b compression - empty input" {
     };
 
     const initial_h = h; // Save initial state
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 0, 0 };
 
     unauditedBlake2fCompress(&h, &m, t, true, 12);
@@ -152,7 +155,7 @@ test "blake2b compression - abc test vector" {
     const initial_h = h;
 
     // "abc" = 0x616263 padded to 128 bytes
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     m[0] = 0x0000000000636261; // "abc" in little-endian
 
     const t = [2]u64{ 3, 0 }; // 3 bytes processed
@@ -166,7 +169,7 @@ test "blake2b compression - abc test vector" {
 
     // Verify different from empty input
     var h_empty = initial_h;
-    const m_empty = [_]u64{0} ** 16;
+    const m_empty = @as([16]u64, @splat(0));
     const t_empty = [2]u64{ 0, 0 };
     unauditedBlake2fCompress(&h_empty, &m_empty, t_empty, true, 12);
 
@@ -188,7 +191,7 @@ test "blake2b compression - single byte input" {
         0x5be0cd19137e2179,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     m[0] = 0x00; // Single byte 0x00
 
     const t = [2]u64{ 1, 0 }; // 1 byte processed
@@ -214,7 +217,7 @@ test "blake2b compression - two byte input" {
         0x5be0cd19137e2179,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     m[0] = 0x0100; // Two bytes 0x00 0x01 in little-endian
 
     const t = [2]u64{ 2, 0 }; // 2 bytes processed
@@ -280,7 +283,7 @@ test "blake2b compression - edge case with max rounds" {
         0x5be0cd19137e2179,
     };
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 0, 0 };
 
     // Test with 12 rounds (standard)
@@ -303,7 +306,7 @@ test "blake2b compression - non-final block" {
         0x5be0cd19137e2179,
     };
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 128, 0 }; // 128 bytes processed so far
 
     // Non-final block (final_block = false)
@@ -326,7 +329,7 @@ test "blake2b compression - counter overflow" {
         0x5be0cd19137e2179,
     };
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 0xFFFFFFFFFFFFFF80, 0 }; // Large counter value
 
     unauditedBlake2fCompress(&h, &m, t, true, 12);
@@ -408,7 +411,7 @@ test "blake2b compression - known test vector with 32 bytes" {
         0x5be0cd19137e2179,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     // Fill first 32 bytes with sequential values
     m[0] = 0x0706050403020100;
     m[1] = 0x0f0e0d0c0b0a0908;
@@ -439,12 +442,12 @@ test "blake2b compression - all zeros vs all ones" {
     var h2 = h1; // Copy initial state
 
     // First compression with all zeros
-    const m1 = [_]u64{0} ** 16;
+    const m1 = @as([16]u64, @splat(0));
     const t = [2]u64{ 128, 0 };
     unauditedBlake2fCompress(&h1, &m1, t, true, 12);
 
     // Second compression with all ones
-    const m2 = [_]u64{0xFFFFFFFFFFFFFFFF} ** 16;
+    const m2 = @as([16]u64, @splat(0xFFFFFFFFFFFFFFFF));
     unauditedBlake2fCompress(&h2, &m2, t, true, 12);
 
     // Verify different inputs produced different outputs
@@ -468,7 +471,7 @@ test "blake2b compression - variable rounds" {
 
     var h12 = h10; // Copy initial state
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 0, 0 };
 
     // Compress with 10 rounds
@@ -523,7 +526,7 @@ test "EIP-152 test vector 4 - zero rounds" {
         0x79217e1319cde05b,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     // "abc" message: 0x616263
     m[0] = 0x0000000000636261;
 
@@ -562,7 +565,7 @@ test "EIP-152 test vector 5 - RFC 7693 Appendix A 'abc' with 12 rounds" {
         0x79217e1319cde05b,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     // "abc" message: 0x616263
     m[0] = 0x0000000000636261;
 
@@ -600,7 +603,7 @@ test "EIP-152 test vector 6 - non-final block" {
         0x79217e1319cde05b,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     // "abc" message: 0x616263
     m[0] = 0x0000000000636261;
 
@@ -638,7 +641,7 @@ test "EIP-152 test vector 7 - single round" {
         0x79217e1319cde05b,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     // "abc" message: 0x616263
     m[0] = 0x0000000000636261;
 
@@ -676,7 +679,7 @@ test "EIP-152 test vector 8 - maximum rounds" {
         0x79217e1319cde05b,
     };
 
-    var m = [_]u64{0} ** 16;
+    var m = @as([16]u64, @splat(0));
     // "abc" message: 0x616263
     m[0] = 0x0000000000636261;
 
@@ -726,7 +729,7 @@ test "RFC 7693 - parameter block variations" {
         0x5be0cd19137e2179,
     };
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 0, 0 };
 
     unauditedBlake2fCompress(&h1, &m, t, true, 12);
@@ -752,7 +755,7 @@ test "blake2b compression - offset counter combinations" {
     var h2 = h1;
     var h3 = h1;
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
 
     // Different offset values
     const t1 = [2]u64{ 0, 0 };
@@ -805,8 +808,8 @@ pub const Blake2 = struct {
         const t1_bytes: *const [8]u8 = @ptrCast(input[204..212].ptr);
         t[1] = std.mem.readInt(u64, t1_bytes, .little);
 
-        // Parse f (1 byte, EIP-152 strictly requires 0x00 or 0x01)
-        if (input[212] != 0 and input[212] != 1) return error.InvalidInput;
+        // Parse f: EIP-152 accepts only 0 or 1; any other byte is invalid input.
+        if (input[212] > 1) return error.InvalidInput;
         const f = input[212] == 1;
 
         // Perform compression
@@ -948,7 +951,7 @@ test "blake2b compression - all bits set patterns" {
         0xFFFFFFFFFFFFFFFF,
     };
 
-    const m = [_]u64{0xFFFFFFFFFFFFFFFF} ** 16;
+    const m = @as([16]u64, @splat(0xFFFFFFFFFFFFFFFF));
     const t = [2]u64{ 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF };
 
     const h_original = h;
@@ -974,7 +977,7 @@ test "blake2b compression - alternating bit patterns" {
     };
 
     // Alternating pattern: 0xAAAAAAAAAAAAAAAA
-    const m = [_]u64{0xAAAAAAAAAAAAAAAA} ** 16;
+    const m = @as([16]u64, @splat(0xAAAAAAAAAAAAAAAA));
     const t = [2]u64{ 128, 0 };
 
     unauditedBlake2fCompress(&h, &m, t, true, 12);
@@ -1001,7 +1004,7 @@ test "blake2b compression - specific rounds edge cases" {
             0x5be0cd19137e2179,
         };
 
-        const m = [_]u64{0} ** 16;
+        const m = @as([16]u64, @splat(0));
         const t = [2]u64{ 0, 0 };
 
         unauditedBlake2fCompress(&h, &m, t, true, rounds);
@@ -1032,7 +1035,7 @@ test "blake2b compression - final vs non-final with same input" {
 
     var h_non_final = h_final;
 
-    const m = [_]u64{0} ** 16;
+    const m = @as([16]u64, @splat(0));
     const t = [2]u64{ 128, 0 };
 
     unauditedBlake2fCompress(&h_final, &m, t, true, 12);
@@ -1125,8 +1128,8 @@ test "blake2b compression - security property avalanche effect" {
 
     var h2 = h1;
 
-    var m1 = [_]u64{0} ** 16;
-    var m2 = [_]u64{0} ** 16;
+    var m1 = @as([16]u64, @splat(0));
+    var m2 = @as([16]u64, @splat(0));
     m2[0] = 1; // Single bit difference
 
     const t = [2]u64{ 128, 0 };

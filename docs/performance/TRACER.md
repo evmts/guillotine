@@ -44,109 +44,110 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
     // Execute operation
     self.stack.binary_op_unsafe(addOp);
 
-    // Continue to next (calls afterInstruction, then tail-calls)
-    return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+    // Continue to next
+    return @call(.always_tail, next_handler, .{self, next_cursor});
 }
 ```
 
 ### beforeInstruction()
 
-`Frame.beforeInstruction` compiles to nothing outside Debug and ReleaseSafe. In
-those modes it forwards to `Tracer.before_instruction`:
-
 ```zig
-// src/frame/frame.zig:430
-pub inline fn beforeInstruction(self: *Self, comptime opcode: Dispatch.UnifiedOpcode, cursor: [*]const Dispatch.Item) void {
-    if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
-    (&self.getEvm().tracer).before_instruction(self, opcode, cursor);
-    self.validateOpcodeHandler(opcode, cursor);
-}
-
-// src/tracer/tracer.zig:238 (condensed)
-pub fn before_instruction(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode,
-    cursor: [*]const @TypeOf(frame.*).Dispatch.Item) void {
-    if (!self.config.enabled) return;
-    // 1. Record the opcode in the recent-opcodes ring buffer (and steps, if enabled)
-    // 2. Panic if cursor[0] is not the expected handler for a regular opcode
-    self.instruction_count += 1;
-    // 3. Increment the safety counter (panics at 300M)
-    self.instruction_safety.inc();
-    // 4. Run the reference implementation
-    if (self.minimal_evm) |evm| {
-        minimal_evm_sync.executeMinimalEvmForOpcode(self, evm, opcode, frame, cursor);
+// src/tracer/tracer.zig
+pub fn beforeInstruction(
+    self: *Tracer,
+    opcode: UnifiedOpcode,
+    cursor: [*]const Dispatch.Item,
+) void {
+    // 1. Increment safety counter
+    self.instruction_counter += 1;
+    if (self.instruction_counter > LOOP_QUOTA) {
+        return error.InfiniteLoop;
     }
+
+    // 2. Execute reference implementation
+    self.executeMinimalEvmForOpcode(opcode);
+
+    // 3. Validate state matches (debug builds only)
+    self.validateState();
 }
 ```
-
-State validation runs afterwards, in `Tracer.after_instruction` and
-`Tracer.after_complete`.
 
 ## Synthetic Opcode Handling
 
 Synthetic opcodes represent multiple bytecode operations. The tracer executes the corresponding number of reference steps:
 
 ```zig
-// src/tracer/minimal_evm_sync.zig
-const SyntheticOpcodeSteps = struct {
-    // 2-operation fusions
-    const PUSH_ADD_INLINE = 2;
-    const PUSH_MSTORE_INLINE = 2;
-    const PUSH_MLOAD_INLINE = 2;
-    // ... every PUSH_*_INLINE / PUSH_*_POINTER pair, MULTI_PUSH_2, MULTI_POP_2
+// src/tracer/tracer.zig
+fn executeMinimalEvmForOpcode(self: *Tracer, opcode: UnifiedOpcode) void {
+    const steps: usize = switch (opcode.toSynthetic()) {
+        // 2-operation fusions
+        .PUSH_ADD_INLINE, .PUSH_ADD_POINTER,
+        .PUSH_SUB_INLINE, .PUSH_SUB_POINTER,
+        .PUSH_MUL_INLINE, .PUSH_MUL_POINTER,
+        .PUSH_DIV_INLINE, .PUSH_DIV_POINTER,
+        .PUSH_MSTORE_INLINE, .PUSH_MSTORE_POINTER,
+        .PUSH_MLOAD_INLINE, .PUSH_MLOAD_POINTER => 2,
 
-    // 3-operation fusions
-    const MULTI_PUSH_3 = 3;
-    const MULTI_POP_3 = 3;
-    const DUP3_ADD_MSTORE = 3;
-    const SWAP1_DUP2_ADD = 3;
-    const ISZERO_JUMPI = 3;
+        // 3-operation fusions
+        .ISZERO_JUMPI,
+        .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => 3,
 
-    // 4-operation fusions
-    const FUNCTION_DISPATCH = 4; // PUSH4 + EQ + PUSH + JUMPI
-};
+        // Regular opcodes
+        else => 1,
+    };
 
-// getMaxStepsForOpcode() maps each synthetic opcode to its constant
-// (regular opcodes => 1). executeMinimalEvmForOpcode() runs that many
-// MinimalEvm steps.
+    for (0..steps) |_| {
+        self.minimal_evm.step();
+    }
+}
 ```
 
 ## State Validation
 
-When a MinimalEvm sidecar exists, `after_instruction` and `after_complete`
-call `validateMinimalEvmState` to compare it with the Frame:
+In Debug and ReleaseSafe builds, the tracer validates Frame and MinimalEvm match:
 
 ```zig
-// src/tracer/tracer.zig:570 (condensed)
-fn validateMinimalEvmState(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode) void {
-    if (self.minimal_evm) |evm| {
-        if (self.nested_depth > 0) return; // Skip nested calls
+// src/tracer/tracer.zig
+fn validateState(self: *Tracer) void {
+    const frame = self.frame;
+    const minimal = self.minimal_evm;
 
-        // Stack size: mismatch logs "[EVM2] [DIVERGENCE] Stack size mismatch after <op>"
-        // and panics ("Stack divergence"); CALL-like opcodes only log
-        // Stack contents: mismatch logs both stacks and panics ("Stack content divergence")
-        // Memory size: mismatch is a debug log only
-        // Gas: compared only after JUMP, JUMPI, STOP, RETURN, REVERT, SELFDESTRUCT,
-        //      because Frame charges gas per block; mismatch is a debug log only
+    // Validate stack
+    if (frame.stack.size() != minimal.stack.len) {
+        self.reportDivergence("Stack size mismatch");
     }
+
+    for (0..frame.stack.size()) |i| {
+        if (frame.stack.peek(i) != minimal.stack.items[minimal.stack.len - 1 - i]) {
+            self.reportDivergence("Stack value mismatch at index {}", .{i});
+        }
+    }
+
+    // Validate gas
+    if (frame.gas_remaining != minimal.gas_remaining) {
+        self.reportDivergence("Gas mismatch: {} vs {}", .{
+            frame.gas_remaining, minimal.gas_remaining
+        });
+    }
+
+    // Validate memory (sampling for performance)
+    // ...
 }
 ```
 
 ## PC Tracking
 
-The tracer keeps `current_pc` in step with the bytecode. With a MinimalEvm
-sidecar it copies the sidecar's PC after each instruction; otherwise, with
-`enable_pc_tracking`, it advances the PC by each opcode's size.
-`src/tracer/pc_tracker.zig` holds an independent tracker:
+The tracer maps between dispatch cursor and bytecode PC:
 
 ```zig
 // src/tracer/pc_tracker.zig
 pub const PcTracker = struct {
-    pc: u32,                 // Current program counter
-    bytecode: []const u8,    // The bytecode being executed
-    valid: bool,             // Track if we're in a valid state
-    last_opcode: ?u8,        // Track last opcode for validation
+    /// Maps schedule index → bytecode PC
+    cursor_to_pc: []const u32,
 
-    pub fn getPc(self: *const PcTracker) u32 { ... }
+    pub fn getPc(self: *PcTracker, cursor_index: usize) u32 {
+        return self.cursor_to_pc[cursor_index];
+    }
 };
 ```
 
@@ -171,37 +172,42 @@ Prevents infinite loops:
 
 ```zig
 // src/tracer/tracer.zig
-instruction_safety: SafetyCounter(u64, .enabled),
-// Tracer.init: .instruction_safety = SafetyCounter(u64, .enabled).init(300_000_000)
+const LOOP_QUOTA: u64 = 300_000_000;  // 300M instructions
 
-// before_instruction
-self.instruction_safety.inc();
-
-// src/internal/safety_counter.zig: inc() logs and panics at the limit
-// ("EVM instruction limit exceeded - possible infinite loop ...")
+pub fn beforeInstruction(self: *Tracer, opcode: UnifiedOpcode, cursor: anytype) Error!void {
+    self.instruction_counter += 1;
+    if (self.instruction_counter > LOOP_QUOTA) {
+        return Error.InfiniteLoop;
+    }
+    // ...
+}
 ```
 
 ## MinimalEvm Reference Implementation
 
-The MinimalEvm is a traditional interpreter used for validation. `MinimalEvm`
-(`src/tracer/minimal_evm.zig`) holds a stack of `MinimalFrame`s, and
-`MinimalEvm.step()` steps the current frame:
+The MinimalEvm is a traditional interpreter used for validation:
 
 ```zig
-// src/tracer/minimal_frame.zig
-pub const MinimalFrame = struct {
-    stack: std.ArrayList(u256),
-    memory: std.AutoHashMap(u32, u8),
-    memory_size: u32,
+// src/tracer/minimal_evm.zig
+pub const MinimalEvm = struct {
+    stack: ArrayList(u256),
+    memory: AutoHashMap(u32, u8),
     pc: u32,
     gas_remaining: i64,
     bytecode: []const u8,
     // ...
 
-    pub fn step(self: *Self) MinimalEvmError!void {
-        if (self.stopped or self.reverted or self.pc >= self.bytecode.len) return;
-        const opcode = self.getCurrentOpcode() orelse return;
-        try self.executeOpcode(opcode); // switch (opcode) { ... 256 cases }
+    pub fn step(self: *MinimalEvm) !void {
+        const opcode = self.bytecode[self.pc];
+        switch (opcode) {
+            0x01 => { // ADD
+                const a = self.popStack();
+                const b = self.popStack();
+                self.pushStack(a +% b);
+                self.pc += 1;
+            },
+            // ... 256 cases
+        }
     }
 };
 ```
@@ -211,61 +217,59 @@ pub const MinimalFrame = struct {
 Custom assertions that use the tracer's reporting:
 
 ```zig
-// Usage in handlers (src/instructions/handlers_advanced_synthetic.zig)
-(&self.getEvm().tracer).assert(self.stack.size() >= 1, "FUNCTION_DISPATCH: Stack underflow (need 1 item for EQ)");
+// Usage in handlers
+self.getTracer().assert(
+    self.stack.size() >= 2,
+    "ADD requires 2 stack items"
+);
 
-// Implementation (src/tracer/tracer.zig:714)
-pub fn assert(self: *Tracer, condition: bool, comptime message: []const u8) void {
+// Implementation
+pub fn assert(self: *Tracer, condition: bool, message: []const u8) void {
     if (!condition) {
-        log.err("ASSERTION FAILED: {s}", .{message});
-        // Print the recent-opcodes ring buffer when the tracer is enabled,
-        // then @panic(message) (unreachable on wasm32-freestanding)
+        self.reportError(message);
+        // In debug: trigger debugger breakpoint
+        // In release: return error
     }
 }
 ```
 
 ## Divergence Reporting
 
-When Frame and MinimalEvm diverge, `validateMinimalEvmState` logs the
-mismatch with an `[EVM2] [DIVERGENCE]` prefix, prints up to 10 top stack items
-from each side for content mismatches, and panics. `Tracer.panic` logs its
-message and prints the recent-opcodes ring buffer before stopping:
+When Frame and MinimalEvm diverge:
 
 ```zig
-// src/tracer/tracer.zig:681
-pub fn panic(self: *Tracer, comptime format: []const u8, args: anytype) noreturn {
-    log.err(format, args);
-    // Pretty print the ring buffer on error for debugging
-    if (self.config.enabled) { ... self.recent_opcodes.prettyPrint(self.allocator) ... }
-    // @panic on wasm32-freestanding, unreachable elsewhere
+fn reportDivergence(self: *Tracer, comptime fmt: []const u8, args: anytype) void {
+    std.log.err("Execution divergence at step {}: " ++ fmt, .{
+        self.instruction_counter
+    } ++ args);
+
+    // Dump state for debugging
+    self.dumpFrameState();
+    self.dumpMinimalEvmState();
+
+    // In debug builds, trigger breakpoint
+    if (@import("builtin").mode == .Debug) {
+        @breakpoint();
+    }
 }
 ```
 
 ## Build Mode Behavior
 
-Build mode decides whether the hooks exist; `EvmConfig.tracer_config`
-decides whether they do anything. The default is `TracerConfig.disabled`
-(`src/evm_config.zig`).
-
-| Mode | Hooks compiled in | Tracer runs | MinimalEvm validation |
-|------|-------------------|-------------|-----------------------|
-| Debug | Yes | When `tracer_config.enabled` | When `enable_validation` is also set |
-| ReleaseSafe | Yes | When `tracer_config.enabled` | When `enable_validation` is also set |
-| ReleaseFast | No | No | No |
-| ReleaseSmall | No | No | No |
+| Mode | Tracer Active | Validation | Performance |
+|------|---------------|------------|-------------|
+| Debug | Yes | Full state | Slowest |
+| ReleaseSafe | Yes | Sampling | Medium |
+| ReleaseFast | No | None | Fastest |
+| ReleaseSmall | No | None | Fast |
 
 ```zig
-// src/frame/frame.zig: every hook starts with
-if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
-
-// src/tracer/tracer_config.zig presets
-TracerConfig.disabled // default
-TracerConfig.debug    // enabled + validation + PC/gas tracking + debug logging
-TracerConfig.full     // debug + step capture + advanced trace
+// Conditional compilation
+const builtin = @import("builtin");
+if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+    self.validateState();
+}
 ```
-
-`src/root.zig` defines `MainnetEvmWithTracer` and `TestEvm`, both with
-validation enabled.
 
 ## Common Divergence Causes
 
@@ -278,15 +282,14 @@ validation enabled.
 ## Debugging Workflow
 
 ```bash
-# 1. Use an EVM type with tracer_config = TracerConfig.debug (or another
-#    config with enabled and enable_validation), then run a Debug build
+# 1. Run with tracer enabled (Debug build)
 zig build test -Doptimize=Debug
 
 # 2. Find divergence point
-# Output: "[EVM2] [DIVERGENCE] Stack size mismatch after ADD:"
+# Output: "Execution divergence at step 1234: Stack size mismatch"
 
 # 3. Identify opcode
-# Output names the opcode; content mismatches also print the MinimalEvm PC
+# Output shows cursor position → map to bytecode
 
 # 4. Compare implementations
 # Check handler vs MinimalEvm switch case

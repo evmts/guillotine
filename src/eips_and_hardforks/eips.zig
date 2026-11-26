@@ -1,4 +1,3 @@
-const limits = @import("evm_limits");
 const primitives = @import("voltaire");
 const AccessList = @import("../storage/access_list.zig").AccessList;
 const GasConstants = primitives.GasConstants;
@@ -18,6 +17,16 @@ pub const BlobValidationError = error{
     InvalidVersionedHash,
     BlobContractCreation,
 };
+
+// ============================================================================
+// EIP-7702 (Prague): delegation designator
+// Source: https://eips.ethereum.org/EIPS/eip-7702
+// ============================================================================
+
+/// First three bytes of a delegated EOA's code; the delegate address follows.
+pub const DELEGATION_PREFIX = [3]u8{ 0xef, 0x01, 0x00 };
+/// Length of the code `0xef0100 || delegate` that EXTCODE* see on a delegated EOA.
+pub const DELEGATION_DESIGNATOR_LENGTH: usize = DELEGATION_PREFIX.len + 20;
 
 // ============================================================================
 // EIP-7825 (Osaka): transaction gas limit cap
@@ -341,25 +350,25 @@ pub const Eips = struct {
     /// Berlin hardfork introduced access lists and changed gas costs
     pub fn eip_2929_cold_sload_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 200;
-        return GasConstants.ColdSloadCost;
+        return 2100;
     }
 
     /// EIP-2929: Warm storage access cost
     pub fn eip_2929_warm_storage_read_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 200;
-        return GasConstants.WarmStorageReadCost;
+        return 100;
     }
 
     /// EIP-2929: Cold account access cost
     pub fn eip_2929_cold_account_access_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 700;
-        return GasConstants.ColdAccountAccessCost;
+        return 2600;
     }
 
     /// EIP-2929: Warm account access cost
     pub fn eip_2929_warm_account_access_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 700;
-        return GasConstants.WarmStorageReadCost;
+        return 100;
     }
 
     /// EIP-1559: Fee market change for ETH 1.0 chain
@@ -403,8 +412,8 @@ pub const Eips = struct {
     // Pre-Shanghai: 24KB limit (EIP-170)
     // Post-Shanghai: 48KB limit
     pub fn size_limit(self: Self) u64 {
-        if (self.is_eip_active(3860)) return limits.max_initcode_size;
-        return limits.max_code_size;
+        if (self.is_eip_active(3860)) return 0xC000;
+        return 0x6000;
     }
 
     /// EIP-3860: Initcode gas cost per word
@@ -419,14 +428,14 @@ pub const Eips = struct {
     /// Prague hardfork introduced authorization lists
     pub fn eip_7702_per_auth_base_cost(self: Self) i64 {
         if (!self.hardfork.isAtLeast(.PRAGUE)) return 0;
-        return primitives.Authorization.PER_AUTH_BASE_COST;
+        return 12500;
     }
 
     /// EIP-7702: Additional gas cost for empty account
     /// Prague hardfork introduced authorization lists
     pub fn eip_7702_per_empty_account_cost(self: Self) i64 {
         if (!self.hardfork.isAtLeast(.PRAGUE)) return 0;
-        return primitives.Authorization.PER_EMPTY_ACCOUNT_COST;
+        return 25000;
     }
 
     /// Get all active EIPs for the current hardfork
@@ -458,40 +467,22 @@ pub const Eips = struct {
 
     /// Check if a specific EIP is active
     pub fn is_eip_active(self: Self, eip: u16) bool {
-        // First check overrides (almost always empty in production)
-        if (self.overrides.len > 0) {
-            for (self.overrides) |override| {
-                if (override.eip == eip) return override.enabled;
-            }
+        // First check overrides
+        for (self.overrides) |override| {
+            if (override.eip == eip) return override.enabled;
         }
 
-        // O(1) hardfork lookup matching get_active_eips() exactly
-        return switch (eip) {
-            2, 7, 8 => self.hardfork.isAtLeast(.HOMESTEAD),
-            150 => self.hardfork.isAtLeast(.TANGERINE_WHISTLE),
-            155, 160, 161, 170 => self.hardfork.isAtLeast(.SPURIOUS_DRAGON),
-            100, 140, 196, 197, 198, 211, 214, 649, 658 => self.hardfork.isAtLeast(.BYZANTIUM),
-            145, 1014, 1052, 1283 => self.hardfork.isAtLeast(.CONSTANTINOPLE),
-            152, 1108, 1344, 1884, 2028, 2200 => self.hardfork.isAtLeast(.ISTANBUL),
-            2565, 2718, 2929, 2930 => self.hardfork.isAtLeast(.BERLIN),
-            1559, 3198, 3529, 3541 => self.hardfork.isAtLeast(.LONDON),
-            4345 => self.hardfork.isAtLeast(.ARROW_GLACIER),
-            5133 => self.hardfork.isAtLeast(.GRAY_GLACIER),
-            3675, 4399 => self.hardfork.isAtLeast(.MERGE),
-            3651, 3855, 3860, 4895 => self.hardfork.isAtLeast(.SHANGHAI),
-            1153, 4788, 4844, 5656, 6780, 7516 => self.hardfork.isAtLeast(.CANCUN),
-            2537, 2935, 6110, 7002, 7623, 7702 => self.hardfork.isAtLeast(.PRAGUE),
-            3074 => self.hardfork == .PRAGUE,
-            7883, 7823, 7825, 7934, 7939 => self.hardfork.isAtLeast(.OSAKA),
-            else => false,
-        };
+        // Then check base hardfork
+        const active_eips = self.get_active_eips();
+        for (active_eips) |active_eip| if (active_eip == eip) return true;
+        return false;
     }
 
     /// EIP-170: Get maximum contract code size based on hardfork
     pub fn eip_170_max_code_size(self: Self) u32 {
         // EIP-170: Contract code size limit (Spurious Dragon)
         if (!self.is_eip_active(170)) return 0xFFFFFF; // No limit
-        return limits.max_code_size; // 24KB limit
+        return 0x6000; // 24KB limit
     }
 
     /// EIP-3541: Check if bytecode starting with 0xEF should be rejected
@@ -556,7 +547,7 @@ pub const Eips = struct {
     /// Get SSTORE gas costs based on hardfork and state
     ///
     /// Implements:
-    /// - Pre-Constantinople: Simple gas model (Frontier-Byzantium)
+    /// - Frontier-Byzantium and Petersburg: Simple gas model
     /// - EIP-1283 (Constantinople): Net gas metering for SSTORE
     /// - EIP-2200 (Istanbul): Reentrancy protection (2300 gas minimum)
     /// - EIP-2929 (Berlin): Cold storage access costs
@@ -568,85 +559,12 @@ pub const Eips = struct {
     /// - original: Original value at start of transaction
     /// - is_cold: Whether this is a cold storage access (EIP-2929)
     ///
-    /// Returns: SstoreGasCost with gas cost and refund amount
+    /// Returns: SstoreGasCost with gas cost and signed change to the refund counter
     pub fn sstore_gas_cost(self: Self, current: u256, new: u256, original: u256, is_cold: bool) SstoreGasCost {
-        // Pre-Constantinople (Frontier through Byzantium): Simple model
-        if (self.hardfork.isBefore(.CONSTANTINOPLE)) {
-            if (current == 0 and new != 0) {
-                // Setting from zero to non-zero (storage expansion)
-                return .{ .gas = 20000, .refund = 0 };
-            }
-            if (current != 0 and new == 0) {
-                // Clearing storage (non-zero to zero)
-                return .{ .gas = 5000, .refund = 15000 };
-            }
-            // Modifying existing non-zero value
-            return .{ .gas = 5000, .refund = 0 };
-        }
-
-        // EIP-1283/EIP-2200 (Constantinople/Istanbul+): Net gas metering
-        var gas: u64 = 0;
-        var refund: i64 = 0;
-
-        // EIP-2929 (Berlin+): Add cold access cost if applicable
-        if (self.hardfork.isAtLeast(.BERLIN) and is_cold) {
-            gas += GasConstants.ColdSloadCost;
-        }
-
-        // EIP-1283/EIP-2200: Net gas metering based on state transitions
-        if (current == new) {
-            // No-op: storing same value
-            gas += if (self.hardfork.isAtLeast(.BERLIN)) GasConstants.WarmStorageReadCost else 200;
-        } else if (original == current) {
-            // First time writing to this slot in the current transaction
-            if (original == 0) {
-                // Setting a previously empty slot (most expensive)
-                gas += 20000;
-            } else {
-                // Modifying an existing non-zero value
-                gas += 5000;
-
-                // Refund if clearing the slot
-                if (new == 0) {
-                    // EIP-3529 (London+): Reduced refund
-                    refund = if (self.hardfork.isAtLeast(.LONDON)) 4800 else 15000;
-                }
-            }
-        } else {
-            // Slot was already modified in this transaction (dirty write)
-            gas += if (self.hardfork.isAtLeast(.BERLIN)) GasConstants.WarmStorageReadCost else 200;
-
-            // EIP-1283/EIP-2200: Complex refund logic for reverting changes
-            if (original != 0) {
-                if (current == 0) {
-                    // Previously cleared in this tx, now setting again
-                    // Remove the refund we gave earlier
-                    refund += if (self.hardfork.isAtLeast(.LONDON)) @as(i64, -4800) else @as(i64, -15000);
-                } else if (new == 0) {
-                    // Clearing slot that was modified but not cleared before
-                    refund += if (self.hardfork.isAtLeast(.LONDON)) 4800 else 15000;
-                }
-            }
-
-            if (original == new) {
-                // Reverting to original value
-                if (original == 0) {
-                    // Reverting to original zero - refund the set cost
-                    refund += if (self.hardfork.isAtLeast(.ISTANBUL)) 19900 else 19800;
-                } else {
-                    // Reverting to original non-zero - refund the reset cost
-                    refund += if (self.hardfork.isAtLeast(.ISTANBUL)) 4900 else 4800;
-                }
-            }
-        }
-
-        return .{ .gas = gas, .refund = @bitCast(refund) };
+        return @import("../frame/fork_gas.zig").sstoreCost(self.hardfork, original, current, new, is_cold);
     }
 
-    pub const SstoreGasCost = struct {
-        gas: u64,
-        refund: u64,
-    };
+    pub const SstoreGasCost = @import("../frame/fork_gas.zig").SstoreCost;
 
     /// EIP-4788: Check if address is the beacon roots contract
     pub fn eip_4788_is_beacon_roots_address(self: Self, address: primitives.Address) bool {
@@ -696,10 +614,7 @@ pub const Eips = struct {
         return !is_static;
     }
 
-    /// EIP-6780: Handle SELFDESTRUCT based on creation in same transaction.
-    /// Balance is always transferred immediately during execution (both pre-Cancun
-    /// and Cancun+). When destroying (pre-Cancun or created in same tx), sending to
-    /// self burns the balance to 0 and schedules account deletion at end of tx.
+    /// EIP-6780: Handle SELFDESTRUCT based on creation in same transaction
     pub fn handle_selfdestruct(
         self: Self,
         created_in_tx: bool,
@@ -710,37 +625,39 @@ pub const Eips = struct {
         journal: anytype,
         snapshot_id: anytype,
     ) !void {
-        const will_destroy = !self.hardfork.isAtLeast(.CANCUN) or created_in_tx;
-        const Account = @import("../storage/database_interface_account.zig").Account;
-        const same_address = std.mem.eql(u8, &contract_address.bytes, &recipient.bytes);
-
-        if (try database.get_account(contract_address.bytes)) |account| {
-            if (account.balance > 0) {
-                if (!same_address) {
-                    const existing_recipient = try database.get_account(recipient.bytes);
-                    const prev_recipient_balance: u256 = if (existing_recipient) |r| r.balance else 0;
-                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
-                    try journal.record_balance_change(snapshot_id, recipient, prev_recipient_balance);
-
-                    var sender_account = account;
-                    sender_account.balance = 0;
-                    try database.set_account(contract_address.bytes, sender_account);
-
-                    var recipient_account = existing_recipient orelse Account.zero();
-                    recipient_account.balance +%= account.balance;
-                    try database.set_account(recipient.bytes, recipient_account);
-                } else if (will_destroy) {
-                    // Self-destructing to self when the contract will be destroyed burns its balance.
-                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
-                    var sender_account = account;
-                    sender_account.balance = 0;
-                    try database.set_account(contract_address.bytes, sender_account);
-                }
-            }
+        if (!self.hardfork.isAtLeast(.CANCUN)) {
+            // Pre-Cancun: always mark for full destruction
+            try self_destruct.mark_for_destruction(contract_address, recipient);
+            return;
         }
 
-        if (will_destroy) {
+        // EIP-6780: Only destroy if created in same transaction
+        if (created_in_tx) {
+            // Full destruction: transfer balance and mark for deletion
             try self_destruct.mark_for_destruction(contract_address, recipient);
+        } else {
+            // Only transfer balance, don't destroy the contract
+            const contract_account = try database.get_account(contract_address.bytes);
+            if (contract_account) |account| {
+                // A contract that names itself keeps its balance: nothing moves.
+                if (account.balance > 0 and !contract_address.equals(recipient)) {
+                    const Account = @import("../storage/database_interface_account.zig").Account;
+                    var recipient_account = (try database.get_account(recipient.bytes)) orelse Account.zero();
+                    // A balance above 2^256 - 1 cannot exist. The SELFDESTRUCT halts
+                    // its frame before it changes anything.
+                    const credited = std.math.add(u256, recipient_account.balance, account.balance) catch return error.BalanceOverflow;
+
+                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
+                    try journal.record_balance_change(snapshot_id, recipient, recipient_account.balance);
+
+                    var sender_account = account;
+                    sender_account.balance = 0;
+                    try database.set_account(contract_address.bytes, sender_account);
+
+                    recipient_account.balance = credited;
+                    try database.set_account(recipient.bytes, recipient_account);
+                }
+            }
         }
     }
 
@@ -846,12 +763,12 @@ pub const Eips = struct {
         return std.math.cast(u64, parent_total - target_blob_gas_value) orelse std.math.maxInt(u64);
     }
 
-    /// Count zero bytes using 32-byte SIMD chunks for high calldata throughput.
+    /// Count zero bytes in 32-byte SIMD chunks, then the scalar tail.
     fn countZeroBytes(input: []const u8) usize {
-        var count: usize = 0;
-        var i: usize = 0;
         const Vec = @Vector(32, u8);
         const zeroes: Vec = @splat(0);
+        var count: usize = 0;
+        var i: usize = 0;
         while (i + 32 <= input.len) : (i += 32) {
             const chunk: Vec = input[i..][0..32].*;
             const mask: u32 = @bitCast(chunk == zeroes);
@@ -891,6 +808,14 @@ pub const Eips = struct {
     pub fn floor_gas_cost(self: Self, calldata_tokens: u64) u64 {
         if (!self.is_eip_active(7623)) return 0;
         return GasConstants.TxGas + calldata_tokens * GasConstants.TxDataFloorTokenGas;
+    }
+
+    /// Check the fee caps of a transaction against the block base fee (EIP-1559).
+    /// Before London there are no caps to check.
+    pub fn validate_fee_caps(self: Self, base_fee_per_gas: u256, max_fee_per_gas: u256, max_priority_fee_per_gas: u256) error{ MaxFeeBelowBaseFee, PriorityFeeAboveMaxFee }!void {
+        if (!self.is_eip_active(1559)) return;
+        if (max_fee_per_gas < base_fee_per_gas) return error.MaxFeeBelowBaseFee;
+        if (max_priority_fee_per_gas > max_fee_per_gas) return error.PriorityFeeAboveMaxFee;
     }
 
     /// Calculate the effective gas price and miner tip for a transaction.
@@ -958,7 +883,7 @@ test "eip_3651_warm_coinbase_address" {
     var access_list = AccessList.init(allocator);
     defer access_list.deinit();
 
-    const coinbase = primitives.Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const coinbase = primitives.Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
 
     // Pre-Shanghai: should not warm coinbase (no-op)
     try pre_shanghai.eip_3651_warm_coinbase_address(&access_list, coinbase);
@@ -1317,17 +1242,17 @@ test "sstore gas costs - pre-Constantinople" {
     // Set from zero to non-zero
     var cost = frontier.sstore_gas_cost(0, 1, 0, false);
     try std.testing.expectEqual(@as(u64, 20000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    try std.testing.expectEqual(@as(i64, 0), cost.refund);
 
     // Clear from non-zero to zero (refund differs by hardfork)
     cost = byzantium.sstore_gas_cost(1, 0, 1, false);
     try std.testing.expectEqual(@as(u64, 5000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 15000), cost.refund);
+    try std.testing.expectEqual(@as(i64, 15000), cost.refund);
 
     // Modify non-zero value
     cost = frontier.sstore_gas_cost(1, 2, 1, false);
     try std.testing.expectEqual(@as(u64, 5000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    try std.testing.expectEqual(@as(i64, 0), cost.refund);
 }
 
 test "sstore gas costs - Constantinople EIP-1283" {
@@ -1336,17 +1261,17 @@ test "sstore gas costs - Constantinople EIP-1283" {
     // No-op: storing same value
     var cost = constantinople.sstore_gas_cost(42, 42, 42, false);
     try std.testing.expectEqual(@as(u64, 200), cost.gas);
-    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    try std.testing.expectEqual(@as(i64, 0), cost.refund);
 
     // Set from zero to non-zero (first time in tx)
     cost = constantinople.sstore_gas_cost(0, 1, 0, false);
     try std.testing.expectEqual(@as(u64, 20000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    try std.testing.expectEqual(@as(i64, 0), cost.refund);
 
     // Clear non-zero to zero (first time in tx)
     cost = constantinople.sstore_gas_cost(42, 0, 42, false);
     try std.testing.expectEqual(@as(u64, 5000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 15000), cost.refund);
+    try std.testing.expectEqual(@as(i64, 15000), cost.refund);
 
     // Dirty write (already modified in tx)
     cost = constantinople.sstore_gas_cost(1, 2, 0, false);
@@ -1354,7 +1279,8 @@ test "sstore gas costs - Constantinople EIP-1283" {
 
     // Revert to original value
     cost = constantinople.sstore_gas_cost(2, 0, 0, false);
-    try std.testing.expectEqual(@as(u64, 200 + 19800), cost.gas + cost.refund);
+    try std.testing.expectEqual(@as(u64, 200), cost.gas);
+    try std.testing.expectEqual(@as(i64, 19800), cost.refund);
 }
 
 test "sstore gas costs - Berlin EIP-2929 cold/warm" {
@@ -1374,7 +1300,7 @@ test "sstore gas costs - Berlin EIP-2929 cold/warm" {
 
     // Warm access + modify
     cost = berlin.sstore_gas_cost(1, 2, 1, false);
-    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
+    try std.testing.expectEqual(@as(u64, 2900), cost.gas);
 }
 
 test "sstore gas costs - London EIP-3529 reduced refunds" {
@@ -1383,11 +1309,11 @@ test "sstore gas costs - London EIP-3529 reduced refunds" {
 
     // Clear storage - Istanbul gives 15000 refund
     var cost = istanbul.sstore_gas_cost(42, 0, 42, false);
-    try std.testing.expectEqual(@as(u64, 15000), cost.refund);
+    try std.testing.expectEqual(@as(i64, 15000), cost.refund);
 
     // Clear storage - London gives 4800 refund (EIP-3529)
     cost = london.sstore_gas_cost(42, 0, 42, false);
-    try std.testing.expectEqual(@as(u64, 4800), cost.refund);
+    try std.testing.expectEqual(@as(i64, 4800), cost.refund);
 }
 
 test "sstore gas costs - complex state transitions" {
@@ -1397,7 +1323,7 @@ test "sstore gas costs - complex state transitions" {
     // First write: 0 -> 1 (original=0, current=0, new=1)
     var cost = london.sstore_gas_cost(0, 1, 0, false);
     try std.testing.expectEqual(@as(u64, 20000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    try std.testing.expectEqual(@as(i64, 0), cost.refund);
 
     // Second write: 1 -> 2 (original=0, current=1, new=2)
     cost = london.sstore_gas_cost(1, 2, 0, false);
@@ -1406,25 +1332,25 @@ test "sstore gas costs - complex state transitions" {
     // Scenario: 42 -> 0 -> 10 in same transaction
     // First write: 42 -> 0 (original=42, current=42, new=0)
     cost = london.sstore_gas_cost(42, 0, 42, false);
-    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 4800), cost.refund);
+    try std.testing.expectEqual(@as(u64, 2900), cost.gas);
+    try std.testing.expectEqual(@as(i64, 4800), cost.refund);
 
     // Second write: 0 -> 10 (original=42, current=0, new=10)
     // This removes the refund we gave earlier
     cost = london.sstore_gas_cost(0, 10, 42, false);
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
     // Refund should be negative (removing previous refund)
-    try std.testing.expect(cost.refund > 0); // Implementation uses overflow for negative
+    try std.testing.expectEqual(@as(i64, -4800), cost.refund);
 
     // Scenario: 42 -> 10 -> 42 in same transaction (revert to original)
     // First write: 42 -> 10 (original=42, current=42, new=10)
     cost = london.sstore_gas_cost(42, 10, 42, false);
-    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
+    try std.testing.expectEqual(@as(u64, 2900), cost.gas);
 
     // Second write: 10 -> 42 (original=42, current=10, new=42) - reverting!
     cost = london.sstore_gas_cost(10, 42, 42, false);
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
-    try std.testing.expectEqual(@as(u64, 4900), cost.refund); // Refund for reverting
+    try std.testing.expectEqual(@as(i64, 2800), cost.refund); // Refund for reverting
 }
 
 test "sstore gas costs - all hardfork transitions" {
@@ -1459,15 +1385,15 @@ test "sstore gas costs - all hardfork transitions" {
     // Frontier: 5000 gas, 15000 refund
     cost = frontier.sstore_gas_cost(42, 0, 42, false);
     try std.testing.expectEqual(@as(u64, 5000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 15000), cost.refund);
+    try std.testing.expectEqual(@as(i64, 15000), cost.refund);
 
     // Istanbul: 5000 gas, 15000 refund (unchanged)
     cost = istanbul.sstore_gas_cost(42, 0, 42, false);
-    try std.testing.expectEqual(@as(u64, 15000), cost.refund);
+    try std.testing.expectEqual(@as(i64, 15000), cost.refund);
 
-    // London: 5000 gas, 4800 refund (EIP-3529)
+    // London: 2900 gas, 4800 refund (EIP-3529)
     cost = london.sstore_gas_cost(42, 0, 42, false);
-    try std.testing.expectEqual(@as(u64, 4800), cost.refund);
+    try std.testing.expectEqual(@as(i64, 4800), cost.refund);
 }
 
 test "sstore gas costs - edge cases" {
@@ -1476,7 +1402,7 @@ test "sstore gas costs - edge cases" {
     // Edge case: Writing zero to zero (no-op)
     var cost = london.sstore_gas_cost(0, 0, 0, false);
     try std.testing.expectEqual(@as(u64, 100), cost.gas);
-    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    try std.testing.expectEqual(@as(i64, 0), cost.refund);
 
     // Edge case: Maximum u256 values
     const max = std.math.maxInt(u256);
@@ -1484,8 +1410,8 @@ test "sstore gas costs - edge cases" {
     try std.testing.expectEqual(@as(u64, 20000), cost.gas);
 
     cost = london.sstore_gas_cost(max, 0, max, false);
-    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
-    try std.testing.expectEqual(@as(u64, 4800), cost.refund);
+    try std.testing.expectEqual(@as(u64, 2900), cost.gas);
+    try std.testing.expectEqual(@as(i64, 4800), cost.refund);
 
     // Edge case: Cold access adds exactly 2100 gas
     cost = london.sstore_gas_cost(42, 42, 42, true);
@@ -1499,20 +1425,20 @@ test "sstore gas costs - EIP-1283 refund scenarios" {
     // Scenario 1: Revert to original zero
     // original=0, current=10, new=0 (reverting to original)
     var cost = istanbul.sstore_gas_cost(10, 0, 0, false);
-    try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
-    try std.testing.expectEqual(@as(u64, 19900), cost.refund); // Refund for reverting
+    try std.testing.expectEqual(@as(u64, 800), cost.gas); // Dirty write
+    try std.testing.expectEqual(@as(i64, 19200), cost.refund); // Refund for reverting
 
     // Scenario 2: Revert to original non-zero
     // original=42, current=10, new=42 (reverting to original)
     cost = istanbul.sstore_gas_cost(10, 42, 42, false);
-    try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
-    try std.testing.expectEqual(@as(u64, 4900), cost.refund); // Refund for reverting
+    try std.testing.expectEqual(@as(u64, 800), cost.gas); // Dirty write
+    try std.testing.expectEqual(@as(i64, 4200), cost.refund); // Refund for reverting
 
     // Scenario 3: Clear then set (remove refund)
     // original=42, current=0, new=10 (was cleared, now setting)
     cost = istanbul.sstore_gas_cost(0, 10, 42, false);
-    try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
-    // Refund calculation is complex here - it removes the previous clear refund
+    try std.testing.expectEqual(@as(u64, 800), cost.gas); // Dirty write
+    try std.testing.expectEqual(@as(i64, -15000), cost.refund);
 }
 
 test "sstore gas costs - comprehensive state matrix" {
@@ -1530,7 +1456,7 @@ test "sstore gas costs - comprehensive state matrix" {
 
     cost = london.sstore_gas_cost(1, 0, 0, false); // 0->1->0
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty revert
-    try std.testing.expectEqual(@as(u64, 19900), cost.refund); // Refund
+    try std.testing.expectEqual(@as(i64, 19900), cost.refund); // Refund
 
     cost = london.sstore_gas_cost(1, 2, 0, false); // 0->1->2
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
@@ -1540,18 +1466,18 @@ test "sstore gas costs - comprehensive state matrix" {
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // No-op
 
     cost = london.sstore_gas_cost(42, 0, 42, false); // 42->42->0
-    try std.testing.expectEqual(@as(u64, 5000), cost.gas); // Clear
-    try std.testing.expectEqual(@as(u64, 4800), cost.refund); // Refund
+    try std.testing.expectEqual(@as(u64, 2900), cost.gas); // Clear
+    try std.testing.expectEqual(@as(i64, 4800), cost.refund); // Refund
 
     cost = london.sstore_gas_cost(42, 10, 42, false); // 42->42->10
-    try std.testing.expectEqual(@as(u64, 5000), cost.gas); // Reset
+    try std.testing.expectEqual(@as(u64, 2900), cost.gas); // Reset
 
     cost = london.sstore_gas_cost(0, 42, 42, false); // 42->0->42
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty revert
 
     cost = london.sstore_gas_cost(10, 42, 42, false); // 42->10->42
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty revert
-    try std.testing.expectEqual(@as(u64, 4900), cost.refund); // Refund
+    try std.testing.expectEqual(@as(i64, 2800), cost.refund); // Refund
 
     cost = london.sstore_gas_cost(10, 20, 42, false); // 42->10->20
     try std.testing.expectEqual(@as(u64, 100), cost.gas); // Dirty write
@@ -1573,7 +1499,7 @@ test "sstore gas costs - Berlin cold access combinations" {
 
     // Clear with cold access
     cost = berlin.sstore_gas_cost(42, 0, 42, true);
-    try std.testing.expectEqual(@as(u64, 7100), cost.gas); // 2100 + 5000
+    try std.testing.expectEqual(@as(u64, 5000), cost.gas); // 2100 + 2900
 
     // Dirty write with cold access
     cost = berlin.sstore_gas_cost(1, 2, 0, true);
@@ -1738,16 +1664,31 @@ test "tokens_in_calldata - empty" {
 }
 
 test "tokens_in_calldata - all zeros" {
-    try std.testing.expectEqual(@as(u64, 10), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&([_]u8{0x00} ** 10)));
+    try std.testing.expectEqual(@as(u64, 10), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&(@as([10]u8, @splat(0x00)))));
 }
 
 test "tokens_in_calldata - all non-zeros" {
-    try std.testing.expectEqual(@as(u64, 40), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&([_]u8{0xff} ** 10)));
+    try std.testing.expectEqual(@as(u64, 40), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&(@as([10]u8, @splat(0xff)))));
 }
 
 test "tokens_in_calldata - mixed data" {
     const input = [_]u8{ 0x00, 0xff, 0x00, 0x12, 0x00, 0x00, 0xab, 0xcd, 0x00, 0xef };
     try std.testing.expectEqual(@as(u64, 25), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&input));
+}
+
+test "tokens_in_calldata - SIMD chunks and tail match a scalar count" {
+    var prng = std.Random.DefaultPrng.init(0x7a65726f);
+    const random = prng.random();
+    var buf: [200]u8 = undefined;
+    for ([_]usize{ 0, 1, 31, 32, 33, 63, 64, 65, 96, 127, 200 }) |len| {
+        for (0..8) |_| {
+            for (buf[0..len]) |*byte| byte.* = if (random.boolean()) 0 else random.intRangeAtMost(u8, 1, 255);
+            var zeros: u64 = 0;
+            for (buf[0..len]) |byte| zeros += @intFromBool(byte == 0);
+            const expected = zeros + (len - zeros) * 4;
+            try std.testing.expectEqual(expected, (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(buf[0..len]));
+        }
+    }
 }
 
 test "tokens_in_calldata - pre vs post Istanbul" {

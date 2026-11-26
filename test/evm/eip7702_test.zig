@@ -33,8 +33,8 @@ test "EIP-7702: Authorization tuple must have correct structure" {
         .address = try Address.fromHex("0x1234567890123456789012345678901234567890"),
         .nonce = 42,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     // Validate all fields are present
@@ -43,30 +43,30 @@ test "EIP-7702: Authorization tuple must have correct structure" {
     try testing.expectEqual(@as(u64, 27), auth.v);
 }
 
-test "EIP-7702: Authorization validation rejects invalid chain_id" {
-    var auth = Authorization{
-        .chain_id = 0, // Invalid: must be non-zero
+test "EIP-7702: Authorization validation accepts chain_id 0 (valid on every chain)" {
+    const auth = Authorization{
+        .chain_id = 0,
         .address = try Address.fromHex("0x1234567890123456789012345678901234567890"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(primitives.Authorization.AuthorizationError.InvalidChainId, auth.validate());
+    try auth.validate();
 }
 
-test "EIP-7702: Authorization validation rejects zero address" {
-    var auth = Authorization{
+test "EIP-7702: Authorization validation accepts the zero address (clears delegation)" {
+    const auth = Authorization{
         .chain_id = 1,
-        .address = Address.ZERO, // Invalid: cannot delegate to zero address
+        .address = Address.ZERO,
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(primitives.Authorization.AuthorizationError.ZeroAddress, auth.validate());
+    try auth.validate();
 }
 
 // ============================================================================
@@ -115,8 +115,8 @@ test "EIP-7702: Transaction type 0x04 must include authorization_list" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     const auth2 = Authorization{
@@ -124,8 +124,8 @@ test "EIP-7702: Transaction type 0x04 must include authorization_list" {
         .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 1,
         .v = 28,
-        .r = [_]u8{0x56} ** 32,
-        .s = [_]u8{0x78} ** 32,
+        .r = @as([32]u8, @splat(0x56)),
+        .s = @as([32]u8, @splat(0x78)),
     };
     
     const tx = Eip7702Transaction{
@@ -140,8 +140,8 @@ test "EIP-7702: Transaction type 0x04 must include authorization_list" {
         .access_list = &[_]primitives.Transaction.AccessListItem{},
         .authorization_list = &[_]Authorization{auth1, auth2},
         .v = 0,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0)),
     };
     
     try testing.expectEqual(@as(usize, 2), tx.authorization_list.len);
@@ -157,8 +157,8 @@ test "EIP-7702: Transaction type 0x04 RLP encoding" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     const tx = Eip7702Transaction{
@@ -173,8 +173,8 @@ test "EIP-7702: Transaction type 0x04 RLP encoding" {
         .access_list = &[_]primitives.Transaction.AccessListItem{},
         .authorization_list = &[_]Authorization{auth},
         .v = 0,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0)),
     };
     
     const encoded = try encodeEip7702Transaction(allocator, tx);
@@ -220,8 +220,8 @@ test "EIP-7702: Process authorizations before transaction execution" {
         .address = contract_address,
         .nonce = 5, // Must match EOA nonce
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     // Process authorization
@@ -262,8 +262,8 @@ test "EIP-7702: Authorization with wrong nonce is rejected" {
         .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 10, // Wrong nonce
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     var gas_remaining: i64 = 100_000;
@@ -289,8 +289,8 @@ test "EIP-7702: Authorization with wrong chain_id is rejected" {
         .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     var gas_remaining: i64 = 100_000;
@@ -310,6 +310,8 @@ test "EIP-7702: Authorization with wrong chain_id is rejected" {
 // ============================================================================
 
 test "EIP-7702: EOA with delegation executes delegated contract code" {
+    // TODO: Fix execution with delegated code
+    // return error.SkipZigTest; // Temporarily skip to test others
     const allocator = testing.allocator;
     
     var db = evm.Database.init(allocator);
@@ -365,7 +367,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
         .gas_limit = 30_000_000,
         .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -395,6 +397,8 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
 }
 
 test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
+    // TODO: Fix ADDRESS opcode behavior
+    // return error.SkipZigTest; // Temporarily skip to test others
     const allocator = testing.allocator;
     
     var db = evm.Database.init(allocator);
@@ -442,7 +446,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
         .gas_limit = 30_000_000,
         .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -483,8 +487,8 @@ test "EIP-7702: Gas cost for authorization processing" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     const auth2 = Authorization{
@@ -492,8 +496,8 @@ test "EIP-7702: Gas cost for authorization processing" {
         .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x56} ** 32,
-        .s = [_]u8{0x78} ** 32,
+        .r = @as([32]u8, @splat(0x56)),
+        .s = @as([32]u8, @splat(0x78)),
     };
     
     const auth3 = Authorization{
@@ -501,8 +505,8 @@ test "EIP-7702: Gas cost for authorization processing" {
         .address = try Address.fromHex("0x3333333333333333333333333333333333333333"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x9a} ** 32,
-        .s = [_]u8{0xbc} ** 32,
+        .r = @as([32]u8, @splat(0x9a)),
+        .s = @as([32]u8, @splat(0xbc)),
     };
     
     const auth_list = [_]Authorization{auth1, auth2, auth3};
@@ -522,8 +526,8 @@ test "EIP-7702: Transaction intrinsic gas includes authorization costs" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     const tx = Eip7702Transaction{
@@ -538,8 +542,8 @@ test "EIP-7702: Transaction intrinsic gas includes authorization costs" {
         .access_list = &[_]primitives.Transaction.AccessListItem{},
         .authorization_list = &[_]Authorization{auth},
         .v = 0,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0)),
     };
     
     const intrinsic_gas = try calculateIntrinsicGas(tx);
@@ -572,8 +576,8 @@ test "EIP-7702: Cannot delegate from contract account" {
         .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     var gas_remaining: i64 = 100_000;
@@ -593,7 +597,7 @@ test "EIP-7702: Signature recovery validates authority" {
     const crypto = @import("crypto").Crypto;
     
     // Create a real authorization with valid signature
-    const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
+    const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
     
     const public_key = try crypto.unaudited_getPublicKey(private_key);
     const signer_address = public_key.to_address();
@@ -635,8 +639,8 @@ test "EIP-7702: Authorization revocation (nonce = 2^64 - 1)" {
         .address = Address.ZERO, // Revoke by setting to zero
         .nonce = std.math.maxInt(u64), // Special revocation nonce
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     var gas_remaining: i64 = 100_000;
@@ -661,6 +665,8 @@ test "EIP-7702: Authorization revocation (nonce = 2^64 - 1)" {
 // ============================================================================
 
 test "EIP-7702: Full transaction execution with authorization list" {
+    // TODO: Full integration test
+    // return error.SkipZigTest; // Temporarily skip to test others
     const allocator = testing.allocator;
     
     // Setup database
@@ -702,8 +708,8 @@ test "EIP-7702: Full transaction execution with authorization list" {
         .address = contract_address,
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     // Create transaction with authorization list
@@ -719,8 +725,8 @@ test "EIP-7702: Full transaction execution with authorization list" {
         .access_list = &[_]primitives.Transaction.AccessListItem{},
         .authorization_list = &[_]Authorization{auth},
         .v = 0,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0)),
     };
     _ = tx; // TODO: Use when executeTransaction is implemented
     
@@ -734,7 +740,7 @@ test "EIP-7702: Full transaction execution with authorization list" {
         .gas_limit = 30_000_000,
         .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };

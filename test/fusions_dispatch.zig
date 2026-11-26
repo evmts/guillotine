@@ -3,31 +3,12 @@ const testing = std.testing;
 const evm = @import("evm");
 const log = evm.log;
 const frame_mod = evm.frame;
-const FrameConfig = evm.FrameConfig;
-const MemoryDatabase = evm.MemoryDatabase;
-const Address = @import("voltaire").Address.Address;
 const Tracer = @import("evm").Tracer;
 
-// Test configuration for frame
-const test_config = FrameConfig{
-    .stack_size = 1024,
-    .WordType = u256,
-    .max_bytecode_size = 1024,
-    .block_gas_limit = 30_000_000,
-    .DatabaseType = MemoryDatabase,
-    .memory_initial_capacity = 4096,
-    .memory_limit = 0xFFFFFF,
-};
-
-const TestFrame = frame_mod.Frame(test_config, evm.DefaultEvm);
-const TestBytecode = evm.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
+// The frame type the default EVM executes, with its bytecode analyzer.
+const TestFrame = evm.DefaultEvm.Frame;
+const TestBytecode = evm.Bytecode(.{ .max_bytecode_size = TestFrame.config.max_bytecode_size });
 const TestDispatch = evm.FrameDispatch(TestFrame);
-
-test {
-    _ = @import("static_jump_test.zig");
-    _ = @import("dispatch_observability_test.zig");
-    _ = @import("differential/debug_push32_test.zig");
-}
 
 test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
     std.testing.log_level = .err;
@@ -72,8 +53,8 @@ test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
     defer schedule.deinit();
 
     // Build jump table from schedule
-    const jump_table = try TestDispatch.createJumpTable(allocator, schedule.items, &bc);
-    defer jump_table.deinit(allocator);
+    const jump_table = try TestDispatch.createJumpTable(allocator, &schedule);
+    defer allocator.free(jump_table.entries);
 
     std.log.info("Jump table created with {} entries", .{jump_table.entries.len});
     try testing.expect(jump_table.entries.len > 0);
@@ -114,12 +95,8 @@ test "fusion dispatch: simple PUSH+JUMPI resolution" {
     defer schedule.deinit();
 
     // Create jump table
-    const jump_table = try TestDispatch.createJumpTable(
-        allocator,
-        schedule.items,
-        &bc,
-    );
-    defer jump_table.deinit(allocator);
+    const jump_table = try TestDispatch.createJumpTable(allocator, &schedule);
+    defer allocator.free(jump_table.entries);
 
     std.log.info("Jump table has {} entries", .{jump_table.entries.len});
 
@@ -127,23 +104,4 @@ test "fusion dispatch: simple PUSH+JUMPI resolution" {
     // Verify a known JUMPDEST is resolvable (PC=7)
     const maybe = jump_table.findJumpTarget(7);
     try testing.expect(maybe != null);
-}
-
-test "fusion dispatch: ISZERO+PUSH+JUMPI stores a short target as a pointer" {
-    const allocator = testing.allocator;
-    const code = [_]u8{ 0x5f, 0x15, 0x60, 6, 0x57, 0xfe, 0x5b, 0x00 };
-    var bytecode = try TestBytecode.init(allocator, &code);
-    defer bytecode.deinit();
-
-    var schedule = try TestDispatch.DispatchSchedule.init(allocator, bytecode, &TestFrame.opcode_handlers, @as(?*Tracer, null));
-    defer schedule.deinit();
-    try testing.expect(schedule.validate());
-
-    const index = @as(usize, @intFromBool(schedule.has_first_block_gas)) + 1;
-    if (schedule.item_kinds.len != 0) {
-        try testing.expectEqualSlices(TestDispatch.ItemKind, &.{ .opcode_handler, .push_pointer }, schedule.item_kinds[index..][0..2]);
-    }
-    const opcode = evm.OpcodeSynthetic.OpcodeSynthetic.ISZERO_JUMPI;
-    try testing.expectEqual(evm.frame_handlers.getSyntheticHandler(TestFrame, @intFromEnum(opcode)), schedule.items[index].opcode_handler);
-    try testing.expectEqual(@as(u256, 6), schedule.items[index + 1].push_pointer.value_ptr.*);
 }

@@ -21,19 +21,19 @@ pub fn createBlstLibrary(
         }),
     });
 
-    lib.linkLibC();
+    lib.root_module.link_libc = true;
     lib.step.dependOn(&blst_build_cmd.step);
 
     // Add blst source files
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .files = &.{
             "lib/c-kzg-4844/blst/src/server.c",
         },
         .flags = &.{"-std=c99", "-D__BLST_PORTABLE__", "-fno-sanitize=undefined"},
     });
 
-    lib.addAssemblyFile(b.path("lib/c-kzg-4844/blst/build/assembly.S"));
-    lib.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
+    lib.root_module.addAssemblyFile(b.path("lib/c-kzg-4844/blst/build/assembly.S"));
+    lib.root_module.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
 
     return lib;
 }

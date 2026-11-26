@@ -1,7 +1,7 @@
-# Exclude test fixtures and development files from GitHub archives
+# Exclude test fixtures and development files from GitHub archives.
+# build.zig imports bench/bench_step.zig, so bench/ must stay in the archive.
 test/ export-ignore
 specs/ export-ignore
-bench/ export-ignore
 fixtures/ export-ignore
 target/ export-ignore
 node_modules/ export-ignore

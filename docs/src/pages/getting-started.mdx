@@ -11,15 +11,11 @@ example below was compiled and run. See [Running it](#running-it).
 
 ## Where to put the code
 
-Build inside a checkout of the repository. The root `build.zig` does not export
-`evm` as a public named module: `src/modules.build.zig` calls `b.addModule`
-only for `evm_limits` and creates `evm_mod` with `b.createModule`, so a project
-that adds Guillotine with `zig fetch --save` cannot yet call
-`dependency("Guillotine", .{}).module("evm")`. See
-[Publishing and releases](/guides/publishing#zig-package) for Zig package
-consumption status.
+In your own project, add Guillotine as a Zig package and import
+`guillotine.module("evm")` (see [Use it from a Zig project](/installation#use-it-from-a-zig-project)).
+The package also exports `voltaire` and `layer2`.
 
-Inside the checkout, `zig build test-integration` compiles `test/root.zig` with
+Inside a checkout of the repository, `zig build test-integration` compiles `test/root.zig` with
 the `evm` and `voltaire` imports already wired (`build.zig`). Put the examples
 below in a file under `test/` and register it in `test/root.zig`:
 
@@ -65,13 +61,13 @@ test "deploy runtime code and call it" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const contract_address = Address{ .bytes = [_]u8{0xC0} ** 20 };
+    const contract_address = Address{ .bytes = @as([20]u8, @splat(0xC0)) };
     const code_hash = try db.set_code(&runtime_code);
     try db.set_account(contract_address.bytes, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const block_info = BlockInfo{
@@ -82,7 +78,7 @@ test "deploy runtime code and call it" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -127,7 +123,7 @@ single `bytes: [20]u8` field, so `Address{ .bytes = … }` is the constructor an
 will fail the test with `memory leak detected`.
 
 **`evm.call()` does not return an error union for revert.** A revert is
-`result.success == false` with the revert data in `result.output` — not a Zig
+`result.success == false` with the revert data in `result.output`, not a Zig
 error. Errors are reserved for conditions that prevent execution from being
 attempted at all.
 
@@ -143,13 +139,13 @@ test "revert is reported as failure, not a Zig error" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const contract_address = Address{ .bytes = [_]u8{0xC1} ** 20 };
+    const contract_address = Address{ .bytes = @as([20]u8, @splat(0xC1)) };
     const code_hash = try db.set_code(&runtime_code);
     try db.set_account(contract_address.bytes, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const block_info = BlockInfo{
@@ -160,7 +156,7 @@ test "revert is reported as failure, not a Zig error" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const tx_context = TransactionContext{
         .gas_limit = 1_000_000,
@@ -206,7 +202,7 @@ test "hardfork is a comptime config knob" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const tx_context = TransactionContext{
         .gas_limit = 1_000_000,
@@ -224,7 +220,7 @@ test "hardfork is a comptime config knob" {
 
 ## Inspecting bytecode without executing it
 
-`Bytecode(config)` is the analysis pass on its own. It is useful for tooling —
+`Bytecode(config)` is the analysis pass on its own. It is useful for tooling:
 jump-destination validation, statistics, pretty-printing a dispatch schedule:
 
 ```zig
@@ -245,7 +241,7 @@ test "bytecode analysis" {
 }
 ```
 
-Note `Bytecode` is a *type constructor* — `Bytecode(.{})` — and `init` takes
+Note `Bytecode` is a *type constructor* (`Bytecode(.{})`), and `init` takes
 `(allocator, code)` with no config argument, because the config is already baked
 into the type.
 
@@ -283,5 +279,4 @@ pass; it is not a permanent test.
 - [Concepts: Architecture](/concepts/architecture): how the pieces fit
 - [Guides: Configuring the EVM](/guides/configuration): every comptime knob
 - [Guides: Tracing and debugging](/guides/tracing): the differential tracer
-- [Guides: Benchmarks and native JIT](/guides/benchmarks-and-jit): benchmark suite and opt-in ARM64 JIT
 - [Reference: `Evm`](/reference/evm): the public surface

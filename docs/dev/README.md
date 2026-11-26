@@ -7,12 +7,12 @@ Deep dive documentation for understanding and contributing to Guillotine. These 
     ┌─────────────────────────────────────────────────────────┐
     │                                                         │
     │   ┌─────────────┐              ┌─────────────────────┐  │
-    │   │  Mini EVM   │              │  Performance EVM    │  │
+    │   │ MinimalEvm  │              │  Performance EVM    │  │
     │   │  (Clarity)  │              │  (Speed)            │  │
     │   │             │              │                     │  │
     │   │  PC-based   │              │  Dispatch-based     │  │
-    │   │  46 files   │              │  187 files          │  │
-    │   │  (.zig)     │              │  (.zig)             │  │
+    │   │  3 files in │              │  whole src/ tree    │  │
+    │   │ src/tracer/ │              │                     │  │
     │   └─────────────┘              └─────────────────────┘  │
     │          │                              │               │
     │          └──────────────┬───────────────┘               │
@@ -26,13 +26,18 @@ Deep dive documentation for understanding and contributing to Guillotine. These 
 
 ### 1. Understand the Two EVMs
 
-| Aspect | Mini EVM | Performance EVM |
-|--------|----------|-----------------|
-| **Location** | `mini/src/` | `src/` |
+| Aspect | MinimalEvm | Performance EVM |
+|--------|------------|-----------------|
+| **Location** | `src/tracer/minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` | `src/` |
 | **Philosophy** | Clarity first | Speed first |
 | **Execution** | Sequential PC loop | Tail-call dispatch |
-| **Use case** | Learning, testing | Production |
-| **Start here** | `mini/src/frame.zig` | `src/frame/frame.zig` |
+| **Use case** | Differential testing reference | Production |
+| **Start here** | `src/tracer/minimal_frame.zig` | `src/frame/frame.zig` |
+
+MinimalEvm is the in-repo reference interpreter: the tracer and the differential
+tests in `test/differential` run it beside the performance EVM and compare state.
+The standalone, readable reference EVM lives in its own repository,
+[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ### 2. Read in This Order
 
@@ -49,7 +54,7 @@ START HERE
     ▼
 ┌─────────────────────────────────┐
 │ 2. EXECUTION-MODELS.md          │  ← See both EVMs side-by-side
-│    - Mini: while loop           │
+│    - MinimalEvm: while loop     │
 │    - Performance: tail calls    │
 └─────────────────────────────────┘
     │
@@ -81,27 +86,21 @@ START HERE
 # Build the project
 zig build
 
-# Run unit tests from src/ (CI runs this)
-zig build test-unit
+# Run all tests (should pass with no output)
+zig build test
 
-# Run the per-opcode differential tests (CI runs this)
-zig build test-opcodes
-
-# Run only tests whose names contain "ADD"
+# Run a specific opcode test
 zig build test-opcodes -Dtest-filter='ADD'
 
 # No output = success!
 ```
-
-`zig build test` also runs the legacy `specs` suite, which does not pass yet.
-Pass `-Dtest-filter` once; Zig rejects a repeated `-D` option.
 
 ## Documentation Index
 
 | Document | Description | Read When... |
 |----------|-------------|--------------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Unified architecture with code excerpts | Understanding codebase structure |
-| [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Side-by-side Mini vs Performance | Comparing implementations |
+| [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Side-by-side MinimalEvm vs Performance | Comparing implementations |
 | [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md) | Storage, journal, warm/cold tracking | Working with storage |
 | [GAS-METERING.md](./GAS-METERING.md) | Gas calculation patterns and costs | Debugging gas issues |
 | [TESTING.md](./TESTING.md) | Test organization and debugging | Running/writing tests |
@@ -128,8 +127,8 @@ Pass `-Dtest-filter` once; Zig rejects a repeated `-D` option.
 
 | Task | Document | Section |
 |------|----------|---------|
-| Run tests? | [TESTING.md](./TESTING.md#test-commands) | Test Commands |
-| Debug a failing test? | [TESTING.md](./TESTING.md#debugging-failures) | Debugging Failures |
+| Run tests? | [TESTING.md](./TESTING.md#running-tests) | Running Tests |
+| Debug a failing test? | [TESTING.md](./TESTING.md#debugging-tests) | Debugging Tests |
 | Add a new opcode? | [CONTRIBUTING.md](./CONTRIBUTING.md#adding-a-new-opcode) | Adding a New Opcode |
 | Add hardfork support? | [HARDFORKS.md](./HARDFORKS.md#implementation-checklist) | Implementation Checklist |
 | Write a handler? | [CONTRIBUTING.md](./CONTRIBUTING.md#handler-patterns) | Handler Patterns |
@@ -137,31 +136,27 @@ Pass `-Dtest-filter` once; Zig rejects a repeated `-D` option.
 ## Key File Map
 
 ```
-src/                              mini/src/
-├── evm.zig (340KB)               ├── evm.zig (97KB)
-│   └── Orchestrates execution    │   └── Complete EVM
-│                                 │
-├── frame/                        ├── frame.zig (26KB)
-│   └── frame.zig (31KB)          │   └── Execution loop
-│       └── Dispatch execution    │
-│                                 │
-├── instructions/                 ├── instructions/
-│   ├── handlers_arithmetic.zig   │   ├── handlers_arithmetic.zig
-│   ├── handlers_storage.zig      │   ├── handlers_storage.zig
-│   ├── handlers_system.zig       │   ├── handlers_system.zig
-│   └── handlers_*_synthetic.zig  │   └── (no synthetics)
-│                                 │
-├── preprocessor/                 └── (no preprocessor)
-│   └── dispatch.zig (63KB)
-│       └── Schedule builder
-│
+src/
+├── evm.zig                       Orchestrates execution
+├── frame/
+│   └── frame.zig                 Dispatch execution
+├── instructions/
+│   ├── handlers_arithmetic.zig
+│   ├── handlers_storage.zig
+│   ├── handlers_system.zig
+│   └── handlers_*_synthetic.zig  Fused opcodes
+├── preprocessor/
+│   └── dispatch.zig              Schedule builder
 ├── storage/
-│   ├── database.zig (120KB)
-│   ├── journal.zig (53KB)
+│   ├── database.zig
+│   ├── journal.zig
 │   └── access_list.zig
-│
 └── tracer/
-    └── tracer.zig (42KB)
+    ├── tracer.zig                Frame/MinimalEvm synchronization
+    ├── minimal_evm.zig           MinimalEvm: state, accounts, calls
+    ├── minimal_frame.zig         MinimalFrame: PC loop, one switch over opcodes
+    ├── minimal_host.zig          Host interface for MinimalEvm
+    └── minimal_evm_sync.zig      Maps Frame handlers to MinimalEvm steps
 ```
 
 ## Core Concepts at a Glance
@@ -169,8 +164,8 @@ src/                              mini/src/
 ### Execution Flow
 
 ```
-                    MINI EVM                           PERFORMANCE EVM
-                    ────────                           ───────────────
+                   MINIMALEVM                          PERFORMANCE EVM
+                   ──────────                          ───────────────
                         │                                    │
               ┌─────────▼──────────┐              ┌─────────▼──────────┐
               │  Read bytecode[PC] │              │  Preprocess once   │
@@ -215,8 +210,8 @@ LIFO Stack (both implementations)
 ### Gas Metering
 
 ```
-MINI: Per-operation                PERFORMANCE: Per-block
-─────────────────                  ────────────────────
+MINIMALEVM: Per-operation          PERFORMANCE: Per-block
+───────────────────────            ────────────────────
 
   ADD: check 3 gas                  Block entry:
   SUB: check 3 gas                    check 9 gas (3+3+3)
@@ -237,8 +232,8 @@ MINI: Per-operation                PERFORMANCE: Per-block
 const log = @import("log.zig");
 log.debug("Op: {}", .{opcode});
 
-// Assertions (in a handler)
-(&self.getEvm().tracer).assert(cond, "message");
+// Assertions
+self.getTracer().assert(cond, "message");
 
 // Error handling
 try operation();  // Always propagate
@@ -267,10 +262,8 @@ operation() catch {};  // Propagate or handle!
 ## Related Documentation
 
 - **[CLAUDE.md](../../CLAUDE.md)** - Project-level instructions and rules
-- **[mini/CLAUDE.md](../../mini/CLAUDE.md)** - Mini EVM specific instructions
 - **[Performance EVM](../performance/)** - Performance-specific deep dives
-- **[Mini EVM](../mini/)** - Mini-specific documentation
-- **[TypeScript Port](../mini/typescript/)** - TypeScript implementation docs
+- **[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini)** - Standalone reference EVM (separate repository)
 
 ## Building Mental Models
 

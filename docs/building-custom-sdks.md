@@ -1,463 +1,557 @@
 # Building custom Guillotine SDKs
 
-Guillotine ships Zig native bindings, C FFI bindings, and the
-`@tevm/guillotine` TypeScript/WASM package. Build other language integrations
-on the native C ABI, or use Zig directly when you need compile-time EVM
-configuration. Python, Go, Rust, Swift, Kotlin/JNI, and native Bun examples
-below are patterns for custom bindings, not separately shipped SDKs.
+Guillotine exposes one native C ABI: `src/evm_c_api.zig`, declared in
+[`sdks/c/include/guillotine.h`](../sdks/c/include/guillotine.h). Every language
+binding, including the `@tevm/guillotine` TypeScript package, loads the same
+library, `libguillotine_ffi`. This guide covers the build artifacts, every
+exported function, struct layouts, ownership, errors, threading, and binding
+templates for Python, Go, Rust, Swift, Kotlin/JNI, and Bun.
 
-## Choose the correct interface
+The conformance reference is
+[`sdks/c/tests/safety_test.c`](../sdks/c/tests/safety_test.c). Port its checks
+to your language before you ship a binding.
 
-| Interface | Source of truth | Role |
+## Interfaces
+
+| Interface | Source of truth | Use |
 | --- | --- | --- |
-| Zig native | `src/root.zig`, `src/evm.zig`, `src/evm_config.zig` | EVM types, allocator ownership, compile-time configuration. Follow the repository module graph. |
-| Native C ABI | `src/evm_c_api.zig`, [guillotine.h](../sdks/c/include/guillotine.h) | Stateful EVM calls, account state, results, traces, bytecode analysis. Built by `shared` and `static`. |
-| Component C API | `src/root_c.zig` | Separate frame/component entry point; not the root of `shared` or `static`, and no root `zig build` step compiles it. |
-| TypeScript/WASM | `sdks/typescript`, `sdks/wasm`, `src/evm_c.zig` | Browser/runtime loader and WASM memory ABI. Native pointer offsets do not apply. |
+| Zig | `src/root.zig`, `src/evm.zig` | Import the EVM directly and configure it at compile time. |
+| C ABI | `src/evm_c_api.zig`, `sdks/c/include/guillotine.h` | Embed the EVM from any language with a C FFI. |
+| TypeScript | `sdks/typescript` (`@tevm/guillotine`) | Bun native FFI (`bun:ffi`) binding over `libguillotine_ffi`. |
 
-`src/root_c.zig` explicitly re-exports `evm_frame_create`,
-`evm_frame_destroy`, `evm_frame_reset`, and `evm_frame_execute`. It also defines
-`evm_version`, `evm_build_info`, `evm_init`, `evm_cleanup`,
-`evm_test_simple_execution`, `evm_test_stack_operations`, and
-`evm_test_integration`. Its imported component modules have their own APIs;
-imports alone are not a promise that every function is exported. In particular,
-`evm_init` is not `guillotine_init`, and `evm_frame_create` is not a stateful
-`guillotine_evm_create`. Do not bind component functions against a library built
-from `src/evm_c_api.zig` without checking its symbol table. Its test block
-also references `src/precompiles/precompiles_c.zig`, which does not exist in
-this revision.
+`src/root_c.zig` only re-exports `src/evm_c_api.zig`; it is not a separate API.
+`src/bytecode/bytecode_c.zig` implements the `evm_bytecode_*` functions that
+`src/evm_c_api.zig` exports. There is no WASM build of this ABI.
 
-## Build and link from the repository root
+## Build artifacts
 
-Use Zig 0.15.x (CI uses 0.15.2; `build.zig.zon` sets 0.15.1 as the minimum;
-Zig 0.16 and later are not supported), Cargo, and the native C/crypto
-dependencies used by the root build.
+Run from the repository root with the Zig version pinned in `build.zig.zon`:
 
 ```sh
-zig build shared
-zig build static
+zig build shared -Doptimize=ReleaseFast   # shared library
+zig build static -Doptimize=ReleaseFast   # static archive
 ```
 
-| Build step | Artifact under `zig-out/lib/` |
-| --- | --- |
-| `shared` on macOS | `libguillotine_ffi.dylib` |
-| `shared` on Linux | `libguillotine_ffi.so` |
-| `shared` on Windows | Target DLL/import-library naming; inspect installed output. |
-| `static` on Unix | `libguillotine_ffi_static.a` |
+| Artifact | macOS | Linux |
+| --- | --- | --- |
+| Shared | `zig-out/lib/libguillotine_ffi.dylib` | `zig-out/lib/libguillotine_ffi.so` |
+| Static | `zig-out/lib/libguillotine_ffi_static.a` | `zig-out/lib/libguillotine_ffi_static.a` |
 
-The header lives at `sdks/c/include/guillotine.h`; the build does not install it
-automatically. Bundle it with the library from the same revision. Link shared
-consumers with `-Isdks/c/include -Lzig-out/lib -lguillotine_ffi`. Use
-`-lguillotine_ffi_static` for static linking, together with the target's native
-crypto archives and system libraries; the static archive is not a promise of a
-self-contained link. Inspect `build.zig`, `src/modules.build.zig`, and the
-Voltaire dependency when resolving link dependencies.
+Windows is not built or tested by the repository.
 
-For Unix-like systems, inspect exports using `nm -g` on the installed library
-(or `nm -D --defined-only` on Linux). macOS symbol listings can have a leading
-underscore. Use `dumpbin /exports` for Windows DLLs. Export checks must match
-the target library, not just a copied header.
+Compile against the header with `-Isdks/c/include` and link the shared library
+with `-Lzig-out/lib -lguillotine_ffi`. Set a runtime search path (`-Wl,-rpath`,
+`LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH`) or ship the library beside your binary.
+The shared library is the supported artifact. A static link must also supply
+libc, libunwind on Linux, and any native crypto archives the build links in.
 
-If the root build reports missing
-`lib/voltaire/target/release/libcrypto_wrappers.a`, the vendored native crypto
-artifact has not been prepared by the dependency build. Resolve that prerequisite
-using the dependency's declared build/toolchain; do not replace crypto symbols
-with stubs or claim that a wrapper's compilation proves the EVM library works.
-
-For Zig-only consumers, use `src/root.zig` through the repository module graph
-(`src/modules.build.zig`); a standalone `zig build-lib src/root_c.zig` omits
-required module imports. Native Zig integration owns its allocator/database
-lifetimes directly; C integration must use the exported destructors below.
-
-## Native ABI layouts
-
-The complete C declarations are in [guillotine.h](../sdks/c/include/guillotine.h).
-Its structs mirror Zig `extern struct` declarations with natural C alignment.
-Do not use packed structs, replace inline byte arrays with pointers, or assume
-that all integers are 32-bit. `usize` maps to `size_t`, `u64` to `uint64_t`, and
-Zig `bool` to C `bool`. `EvmConfiguration` and `CFusionType` are **uint8_t**,
-not ordinary C enums. Scalars use the target's native byte order. Addresses
-are 20 raw bytes; balances, values, storage keys/values, and CREATE2 salts are
-32-byte **big-endian** unsigned integers.
-
-The following sizes/offsets describe a 64-bit ABI with 8-byte pointer, size_t,
-and uint64_t alignment. Measure `sizeof`, `_Alignof`, and `offsetof` on every
-target, especially 32-bit platforms; these are not WASM layouts.
-
-| Struct | Size | Fields in declaration order (`field: type @ offset`) |
-| --- | ---: | --- |
-| `BlockInfoFFI` | 104 | number: u64 @0; timestamp: u64 @8; gas_limit: u64 @16; coinbase: u8[20] @24; base_fee: u64 @48; chain_id: u64 @56; difficulty: u64 @64; prev_randao: u8[32] @72 |
-| `CallParams` | 136 | caller: u8[20] @0; to: u8[20] @20; value: u8[32] @40; input: const u8* @72; input_len: size_t @80; gas: u64 @88; call_type: u8 @96; salt: u8[32] @97 |
-| `LogEntry` | 56 | address: u8[20] @0; topics: const u8(*)[32] @24; topics_len: size_t @32; data: const u8* @40; data_len: size_t @48 |
-| `SelfDestructRecord` | 40 | contract: u8[20] @0; beneficiary: u8[20] @20 |
-| `StorageAccessRecord` | 52 | address: u8[20] @0; slot: u8[32] @20 |
-| `EvmResult` | 144 | success: bool @0; gas_left: u64 @8; output: const u8* @16; output_len: size_t @24; error_message: const char* @32; logs: const LogEntry* @40; logs_len: size_t @48; selfdestructs: const SelfDestructRecord* @56; selfdestructs_len: size_t @64; accessed_addresses: const u8(*)[20] @72; accessed_addresses_len: size_t @80; accessed_storage: const StorageAccessRecord* @88; accessed_storage_len: size_t @96; created_address: u8[20] @104; has_created_address: bool @124; trace_json: const u8* @128; trace_json_len: size_t @136 |
-| `AccountStateFFI` | 104 | address: u8[20] @0; balance: u8[32] @20; nonce: u64 @56; code: const u8* @64; code_len: size_t @72; storage_keys: const u8(*)[32] @80; storage_values: const u8(*)[32] @88; storage_count: size_t @96 |
-| `StateDumpFFI` | 16 | accounts: const AccountStateFFI* @0; accounts_count: size_t @8 |
-| `CBasicBlock` | 8 | start: u32 @0; end: u32 @4 |
-| `CFusionInfo` | 48 | fusion_type: u8 @0; original_length: u32 @4; folded_value_low: u64 @8; folded_value_high: u64 @16; folded_value_extra_high: u64 @24; folded_value_top: u64 @32; count: u8 @40 |
-| `CJumpFusion` | 8 | source_pc: u32 @0; target_pc: u32 @4 |
-| `CAdvancedFusion` | 56 | pc: u32 @0; info: CFusionInfo @8 |
-| `CBytecodeAnalysis` | 80 | push_pcs: u32* @0; push_pcs_count: u32 @8; jumpdests: u32* @16; jumpdests_count: u32 @24; basic_blocks: CBasicBlock* @32; basic_blocks_count: u32 @40; jump_fusions: CJumpFusion* @48; jump_fusions_count: u32 @56; advanced_fusions: CAdvancedFusion* @64; advanced_fusions_count: u32 @72 |
-| `COpcodeInfo` | 4 | gas_cost: u16 @0; stack_inputs: u8 @2; stack_outputs: u8 @3 |
-
-`CFusionType` values are constant_fold=0, multi_push=1, multi_pop=2,
-iszero_jumpi=3, dup2_mstore_push=4. Folded words contain four numeric 64-bit
-limbs from least to most significant; they are not a big-endian byte buffer.
-
-Call types are CALL=0, CALLCODE=1, DELEGATECALL=2, STATICCALL=3, CREATE=4,
-CREATE2=5. `input` holds calldata for calls and init code for deployment.
-`guillotine_simulate` currently supports **CALL only**. Configuration values
-are mainnet=0, mainnet_with_tracer=1, test_mode=2.
-
-## Exported native symbols
-
-These are the 42 functions explicitly exported by `src/evm_c_api.zig` in this
-revision. The header contains exact prototypes; helper `pub fn` declarations
-in other Zig modules are not automatically this library's exports.
-
-| Category | Symbols |
-| --- | --- |
-| Library lifecycle | `guillotine_init`, `guillotine_cleanup`, `guillotine_get_last_error` |
-| EVM lifecycle | `guillotine_evm_create`, `guillotine_evm_create_mainnet`, `guillotine_evm_create_with_config`, `guillotine_evm_create_tracing`, `guillotine_evm_create_test`, `guillotine_evm_destroy`, `guillotine_evm_destroy_tracing` |
-| State setters | `guillotine_set_balance`, `guillotine_set_nonce`, `guillotine_set_code`, `guillotine_set_storage` |
-| Tracing setters | `guillotine_set_balance_tracing`, `guillotine_set_nonce_tracing`, `guillotine_set_code_tracing` |
-| State reads/buffers | `guillotine_get_balance`, `guillotine_get_code`, `guillotine_get_storage`, `guillotine_free_code` |
-| Execution/results | `guillotine_call`, `guillotine_call_tracing`, `guillotine_simulate`, `guillotine_free_result`, `guillotine_free_output` |
-| State dumps | `guillotine_dump_state`, `guillotine_dump_state_test`, `guillotine_free_state_dump` |
-| Bytecode lifecycle/inspection | `evm_bytecode_create`, `evm_bytecode_destroy`, `evm_bytecode_get_length`, `evm_bytecode_get_runtime_data`, `evm_bytecode_get_opcode_at` |
-| Bytecode analysis | `evm_bytecode_analyze`, `evm_bytecode_free_analysis`, `evm_bytecode_opcode_name`, `evm_bytecode_opcode_info`, `evm_bytecode_is_valid_opcode`, `evm_bytecode_error_string` |
-| Formatting | `evm_bytecode_pretty_print`, `evm_dispatch_pretty_print` |
-
-For example, `evm_bytecode_get_data`, `evm_bytecode_get_full_length`,
-`evm_bytecode_find_jump_dests`, and `evm_bytecode_is_jump_dest` exist as
-component helpers but are not explicitly exported by `src/evm_c_api.zig`.
-Do not invent `guillotine_get_nonce` or a tracing storage getter/setter.
-
-## Ownership, errors, and execution constraints
-
-1. Call `guillotine_init()` before EVM operations. The allocator and error
-   buffer are thread-local, but pools/maps are global. Serialize **all** native
-   operations on one dedicated OS thread, including creation, getters/setters,
-   destructors and cleanup. A mutex or async executor alone does not provide
-   thread affinity. Do not create independently cleaned-up runtimes in multiple
-   wrappers within the same process.
-2. Create a mainnet handle with `guillotine_evm_create` (alias of
-   `guillotine_evm_create_mainnet`). NULL indicates an FFI failure. Block data is
-   copied; caller-owned argument structs/buffers need to remain valid only for
-   the synchronous call. Reject invalid lengths, integers outside their declared
-   unsigned range, and unsupported call/config tags before entering native code.
-   The current transaction-context conversion narrows `chain_id` to `u16`; validate it
-   against 0–65535 in this revision. Non-optional Zig pointer parameters require
-   valid storage even when the corresponding byte count is zero; use a sentinel
-   byte for empty input/code. Never pass arbitrary or already-closed handles.
-3. Check every boolean setter/getter and nullable result. On failure, immediately
-   copy `guillotine_get_last_error()` on that same thread. It is borrowed,
-   NUL-terminated storage that subsequent calls may overwrite; it is not a
-   nullable error object or a reliable success indicator. `init`/`cleanup` have
-   no return status. The buffer is not guaranteed initialized before an error;
-   do not read it speculatively after a successful operation.
-4. A non-NULL `EvmResult` can have `success=false`: EVM failure/revert is distinct
-   from an FFI failure. Preserve output/revert bytes and `gas_left` in either
-   case. Gas used is requested gas minus gas left, rather than a native result
-   field. Copy `error_message` immediately: it can alias the last-error buffer,
-   and failure text may be stale when no detailed error was produced.
-5. Copy output, nested log topics/data, access records, created address, and
-   trace JSON into language-owned memory before `guillotine_free_result(result)`.
-   That destructor owns every nested allocation and the result. Never free a
-   result's output separately with `guillotine_free_output`: that would double
-   free it. The latter is a low-level raw-buffer deallocator, not the normal
-   result cleanup path. Empty arrays can contain sentinel pointers: use lengths,
-   and never read/free them independently. Trace JSON is length-delimited bytes,
-   not a guaranteed C string. Check `has_created_address` before using its bytes.
-6. `guillotine_get_code` writes an allocated buffer and length through out
-   parameters on success. Copy it, then call `guillotine_free_code(ptr, len)`
-   (empty length is handled by that function). Never free this pointer through
-   Python/Rust/Go/system allocators. Account code is copied by `set_code`.
-7. `guillotine_dump_state` / `_test` return a dump owning account code and both
-   storage arrays. Copy everything, then call `guillotine_free_state_dump` once.
-   Storage keys/values are parallel arrays of `storage_count` 32-byte words.
-8. Use `evm_bytecode_destroy` for bytecode handles. Allocate a zeroed
-   `CBytecodeAnalysis` in caller storage, check `evm_bytecode_analyze`'s integer
-   status (0 success), and call `evm_bytecode_free_analysis` after success to
-   release nested arrays, not the caller-owned struct. Opcode names/error
-   strings are borrowed static strings. Bytecode status codes are 0 and -1
-   through -6 as declared in the header. Inspection functions also have sentinel
-   returns (length 0, opcode 0xff); consult their implementation before treating
-   a value as an error.
-9. Mainnet destruction returns an instance to a pool; it is still invalid to
-   reuse that handle. Tracing handles need `_tracing` setters/call/destructor.
-   There are no tracing counterparts for general state reads, simulation, or
-   storage setters. Test handles have their own type and `_test` dump function;
-   generic mainnet setters/calls cast to `DefaultEvm` and must not be assumed
-   compatible. A custom wrapper should default to mainnet and expose other
-   configurations only with a verified set of compatible operations.
-10. Release results, code buffers, dumps and bytecode handles, destroy all EVMs,
-    then call `guillotine_cleanup()` once. Unload a dynamic library only after
-    those operations complete. Do not rely on GC/finalizers on arbitrary threads
-    for cleanup; expose explicit close/context-manager/RAII scopes that dispatch
-    to the owning thread.
-
-## A native C call
-
-Save this as `custom_sdk.c` in a consumer project. Run compiler commands from
-the repository root with paths adjusted to that consumer file. The contract
-returns a 32-byte word ending in 42. Inputs use stack storage; the result is
-copied before it is freed.
-
-```c
-#include "guillotine.h"
-#include <stdio.h>
-#include <string.h>
-
-int main(void) {
-    int status = 1;
-    guillotine_init();
-    BlockInfoFFI block = {0};
-    block.gas_limit = 30000000;
-    block.chain_id = 1;
-    EvmHandle *evm = guillotine_evm_create(&block);
-    if (!evm) {
-        fprintf(stderr, "%s\n", guillotine_get_last_error());
-        guillotine_cleanup();
-        return status;
-    }
-    uint8_t address[20] = {0};
-    address[19] = 0x42;
-    const uint8_t code[] = {0x60,0x2a,0x60,0,0x52,0x60,0x20,0x60,0,0xf3};
-    if (!guillotine_set_code(evm, address, code, sizeof code)) {
-        fprintf(stderr, "%s\n", guillotine_get_last_error());
-        goto done;
-    }
-    const uint8_t empty = 0;
-    CallParams params = {0};
-    memcpy(params.to, address, sizeof address);
-    params.caller[19] = 0x43;
-    params.gas = 100000;
-    params.call_type = GUILLOTINE_CALL;
-    params.input = &empty;
-    EvmResult *result = guillotine_call(evm, &params);
-    if (!result) {
-        fprintf(stderr, "%s\n", guillotine_get_last_error());
-        goto done;
-    }
-    uint8_t output[32] = {0};
-    if (result->success && result->output_len == sizeof output) {
-        memcpy(output, result->output, sizeof output);
-        status = output[31] == 42 ? 0 : 1;
-    } else {
-        fprintf(stderr, "EVM execution failed or returned an unexpected length\n");
-    }
-    guillotine_free_result(result);
-done:
-    guillotine_evm_destroy(evm);
-    guillotine_cleanup();
-    return status;
-}
-```
+Pin the header and the library to the same revision. Confirm the exports on
+your target before generating bindings:
 
 ```sh
-cc -std=c99 -Isdks/c/include custom_sdk.c -Lzig-out/lib \
-  -lguillotine_ffi -Wl,-rpath,"$PWD/zig-out/lib" -o /tmp/custom_sdk
-/tmp/custom_sdk
+nm -gU zig-out/lib/libguillotine_ffi.dylib | grep -E ' _(guillotine|evm)_'   # macOS
+nm -D --defined-only zig-out/lib/libguillotine_ffi.so | grep -E ' (guillotine|evm)_'  # Linux
 ```
 
-## Python ctypes and cffi
+## Exported functions
 
-For ctypes, declare **every** function's `argtypes` and `restype`: pointer
-returns must not use ctypes' default integer return type. Use native alignment
-and `c_size_t`, with inline `c_uint8 * N` fields. This complete mainnet lifecycle
-example is the starting point; add all result fields from the header before
-reading execution results.
+This is the complete list of `export fn` declarations in `src/evm_c_api.zig`.
+No other symbols are part of the ABI. There is no nonce getter; read nonces
+through `guillotine_dump_state`.
+
+### Lifecycle and handles
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `guillotine_init(void)` | `void` | Enables handle creation. Idempotent. Call once before creating handles. |
+| `guillotine_cleanup(void)` | `void` | Destroys every live handle and disables creation until the next `guillotine_init`. |
+| `guillotine_evm_create_with_config(const BlockInfoFFI*, uint8_t config)` | `EvmHandle*` or NULL | `config` is 0 (mainnet), 1 (mainnet with tracer), or 2 (test mode). Any other byte returns NULL. |
+| `guillotine_evm_create(const BlockInfoFFI*)` | `EvmHandle*` or NULL | Config 0. |
+| `guillotine_evm_create_mainnet(const BlockInfoFFI*)` | `EvmHandle*` or NULL | Config 0. |
+| `guillotine_evm_create_tracing(const BlockInfoFFI*)` | `EvmHandle*` or NULL | Config 1. Results carry `trace_json`. |
+| `guillotine_evm_create_test(const BlockInfoFFI*)` | `EvmHandle*` or NULL | Config 2. |
+| `guillotine_evm_destroy(EvmHandle*)` | `void` | NULL is a no-op. A destroyed or unknown handle records an error and is ignored. |
+| `guillotine_evm_destroy_tracing(EvmHandle*)` | `void` | Alias of `guillotine_evm_destroy`. |
+
+### State
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `guillotine_set_balance(h, const uint8_t addr[20], const uint8_t bal[32])` | `bool` | Balance is a big-endian u256. |
+| `guillotine_set_nonce(h, const uint8_t addr[20], uint64_t nonce)` | `bool` | |
+| `guillotine_set_code(h, const uint8_t addr[20], const uint8_t *code, size_t len)` | `bool` | `code` may be NULL only when `len` is 0. |
+| `guillotine_set_storage(h, addr[20], const uint8_t key[32], const uint8_t value[32])` | `bool` | Big-endian words. |
+| `guillotine_get_balance(h, addr[20], uint8_t out[32])` | `bool` | Writes a big-endian u256. |
+| `guillotine_get_storage(h, addr[20], key[32], uint8_t out[32])` | `bool` | Writes a big-endian word. |
+| `guillotine_get_code(h, addr[20], uint8_t **code_out, size_t *len_out)` | `bool` | Writes an owned copy. Missing accounts have empty code. Free with `guillotine_free_code`. |
+| `guillotine_free_code(uint8_t *code, size_t len)` | `void` | No-op for NULL or `len` 0. |
+| `guillotine_set_balance_tracing`, `guillotine_set_nonce_tracing`, `guillotine_set_code_tracing` | `bool` | Aliases of the functions without the suffix. |
+
+### Execution
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `guillotine_call(h, const CallParams*)` | `EvmResult*` or NULL | Executes and commits state. ORIGIN is `params->caller`. |
+| `guillotine_call_tracing(h, const CallParams*)` | `EvmResult*` or NULL | Alias of `guillotine_call`. |
+| `guillotine_simulate(h, const CallParams*)` | `EvmResult*` or NULL | Executes without committing database changes. Supports `call_type` 0 (CALL) only; other types return NULL. ORIGIN is `params->caller`. |
+| `guillotine_free_result(EvmResult*)` | `void` | Frees the result and every array it owns. NULL is a no-op. |
+| `guillotine_free_output(uint8_t *buf, size_t len)` | `void` | Frees a library-allocated byte buffer; same behavior as `guillotine_free_code`. Never call it on `EvmResult.output`. |
+| `guillotine_get_last_error(void)` | `const char*` | Thread-local message; never NULL; `""` when none was recorded on this thread. |
+
+`call_type` values: 0 CALL, 1 CALLCODE, 2 DELEGATECALL, 3 STATICCALL, 4 CREATE,
+5 CREATE2. Any other value returns NULL with `Invalid call type`. CREATE and
+CREATE2 use `input` as init code; CREATE2 reads `salt`; `to` is ignored for
+both, and DELEGATECALL and STATICCALL ignore `value`.
+
+### State dump
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `guillotine_dump_state(h)` | `StateDumpFFI*` or NULL | Every non-empty account touched through this handle, by setters or execution. |
+| `guillotine_dump_state_test(h)` | `StateDumpFFI*` or NULL | Alias of `guillotine_dump_state`. |
+| `guillotine_free_state_dump(StateDumpFFI*)` | `void` | Frees the dump and all nested arrays. NULL is a no-op. |
+
+### Bytecode utilities
+
+These functions do not take an `EvmHandle` and do not need `guillotine_init`.
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `evm_bytecode_create(const uint8_t *data, size_t len)` | `BytecodeHandle*` or NULL | Copies and validates `data`. Invalid bytecode returns NULL and sets the last error. |
+| `evm_bytecode_destroy(BytecodeHandle*)` | `void` | NULL is a no-op. Bytecode handles are not registry-checked: destroy each exactly once. |
+| `evm_bytecode_get_length(const BytecodeHandle*)` | `size_t` | 0 for NULL. |
+| `evm_bytecode_get_runtime_data(h, uint8_t *buf, size_t len)` | `size_t` | Copies up to `len` bytes; returns bytes copied. 0 for NULL handle, NULL buffer, or `len` 0. |
+| `evm_bytecode_get_opcode_at(h, size_t pos)` | `uint8_t` | `0xFF` for NULL or out of range. `0xFF` is also SELFDESTRUCT, so bounds-check with `evm_bytecode_get_length` first. |
+| `evm_bytecode_analyze(h, CBytecodeAnalysis *out)` | `int` | `EVM_BYTECODE_SUCCESS` (0) or a negative `EVM_BYTECODE_ERROR_*` code. The caller owns `*out`; the library owns its arrays. |
+| `evm_bytecode_free_analysis(CBytecodeAnalysis*)` | `void` | Frees the arrays and zeroes the struct. Call after every successful analyze. |
+| `evm_bytecode_opcode_name(uint8_t)` | `const char*` | Static string; `"INVALID"` for undefined opcodes. Never free. |
+| `evm_bytecode_opcode_info(uint8_t)` | `COpcodeInfo` | Returned by value. |
+| `evm_bytecode_is_valid_opcode(uint8_t)` | `int` | 1 or 0. |
+| `evm_bytecode_error_string(int)` | `const char*` | Static string for an `EVM_BYTECODE_*` code. Never free. |
+| `evm_bytecode_pretty_print(data, len, buf, buf_len)` | `size_t` | Writes NUL-terminated text, truncated to fit. Returns bytes written including the NUL, the required size when `buf_len` is 0, or 0 on invalid input. |
+| `evm_dispatch_pretty_print(data, len, buf, buf_len)` | `size_t` | Same size contract. On failure the buffer receives an `Error: ...` line. |
+
+## Struct layouts
+
+All structs use natural C alignment in declaration order. `[20]u8` and
+`[32]u8` fields are inline arrays, not pointers. `usize` is `size_t`, `bool`
+is C `bool` (1 byte), and `EvmConfiguration` and `CFusionType` are `uint8_t`,
+not `int`-sized enums.
+
+Sizes and offsets below are for 64-bit targets (LP64). `sdks/c/tests/simple_test.c`
+asserts the sizes of `BlockInfoFFI`, `CallParams`, `EvmResult`, and
+`AccountStateFFI` plus two offsets. Re-measure on any other target.
+
+`BlockInfoFFI` (104 bytes, align 8)
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `number` | `uint64_t` |
+| 8 | `timestamp` | `uint64_t` |
+| 16 | `gas_limit` | `uint64_t` |
+| 24 | `coinbase` | `uint8_t[20]` |
+| 48 | `base_fee` | `uint64_t` |
+| 56 | `chain_id` | `uint64_t` |
+| 64 | `difficulty` | `uint64_t` |
+| 72 | `prev_randao` | `uint8_t[32]` |
+
+`CallParams` (136 bytes, align 8)
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `caller` | `uint8_t[20]` |
+| 20 | `to` | `uint8_t[20]` |
+| 40 | `value` | `uint8_t[32]`, big-endian u256 |
+| 72 | `input` | `const uint8_t*` |
+| 80 | `input_len` | `size_t` |
+| 88 | `gas` | `uint64_t` |
+| 96 | `call_type` | `uint8_t` |
+| 97 | `salt` | `uint8_t[32]`, big-endian u256 |
+
+`EvmResult` (144 bytes, align 8)
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `success` | `bool` |
+| 8 | `gas_left` | `uint64_t` |
+| 16 | `output` | `const uint8_t*` |
+| 24 | `output_len` | `size_t` |
+| 32 | `error_message` | `const char*`, NUL-terminated |
+| 40 | `logs` | `const LogEntry*` |
+| 48 | `logs_len` | `size_t` |
+| 56 | `selfdestructs` | `const SelfDestructRecord*` |
+| 64 | `selfdestructs_len` | `size_t` |
+| 72 | `accessed_addresses` | `const uint8_t (*)[20]` |
+| 80 | `accessed_addresses_len` | `size_t` |
+| 88 | `accessed_storage` | `const StorageAccessRecord*` |
+| 96 | `accessed_storage_len` | `size_t` |
+| 104 | `created_address` | `uint8_t[20]` |
+| 124 | `has_created_address` | `bool` |
+| 128 | `trace_json` | `const uint8_t*`, not NUL-terminated |
+| 136 | `trace_json_len` | `size_t` |
+
+`LogEntry` (56 bytes, align 8): `address` `uint8_t[20]` at 0, `topics`
+`const uint8_t (*)[32]` at 24, `topics_len` at 32, `data` at 40, `data_len` at
+48. Topics are big-endian words.
+
+`SelfDestructRecord` (40 bytes, align 1): `contract[20]`, `beneficiary[20]`.
+
+`StorageAccessRecord` (52 bytes, align 1): `address[20]`, `slot[32]`
+(big-endian).
+
+`AccountStateFFI` (104 bytes, align 8)
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `address` | `uint8_t[20]` |
+| 20 | `balance` | `uint8_t[32]`, big-endian u256 |
+| 56 | `nonce` | `uint64_t` |
+| 64 | `code` | `const uint8_t*` |
+| 72 | `code_len` | `size_t` |
+| 80 | `storage_keys` | `const uint8_t (*)[32]` |
+| 88 | `storage_values` | `const uint8_t (*)[32]` |
+| 96 | `storage_count` | `size_t` |
+
+`StateDumpFFI` (16 bytes): `accounts` pointer at 0, `accounts_count` at 8.
+
+Bytecode structs: `CBytecodeAnalysis` is 80 bytes, `CFusionInfo` 48,
+`CAdvancedFusion` 56, `COpcodeInfo` 4 (align 2). Take field order from the
+header.
+
+## Encoding
+
+- Addresses are 20 raw bytes.
+- u256 values (balances, `value`, `salt`, storage keys and values, log topics)
+  are 32-byte big-endian arrays.
+- Scalars (`uint64_t`, `size_t`) use the host byte order.
+- `trace_json` holds `{"structLogs":[...]}`. Each step has `pc`, `op`, `gas`,
+  `gasCost`, `depth`, `stack` (hex strings), and `memSize`. It is filled only
+  for handles created with config 1 and is empty otherwise.
+
+## Handle lifecycle
+
+```text
+guillotine_init()
+  h = guillotine_evm_create*(&block)      fresh EVM + fresh state database
+  guillotine_set_* / get_* / call / simulate / dump_state
+  guillotine_evm_destroy(h)
+guillotine_cleanup()                      optional; destroys handles still alive
+```
+
+- Each `guillotine_evm_create*` call allocates a new EVM and a new state
+  database. Nothing is pooled or shared, so no state crosses handles.
+- Creation fails before `guillotine_init` and after `guillotine_cleanup`.
+- The library keeps a registry of live handles. Every function looks the
+  handle up before using it and never dereferences an unknown pointer, so NULL,
+  foreign, destroyed, and cleaned-up handles return NULL or false with an
+  error.
+- A handle is a registry token, not an address. Tokens start at 1, only grow,
+  and are never reissued, even across `guillotine_cleanup` and
+  `guillotine_init`, so a destroyed handle never aliases a newer one and every
+  later call with it fails. Destroy only handles you own.
+- Any handle works with every function. The `*_tracing` and `*_test` functions
+  are aliases kept for existing callers; the handle's configuration decides
+  tracing, not the function name.
+- `guillotine_cleanup` is a process-shutdown step. Do not call it while
+  another thread is inside a library call.
+
+## Ownership
+
+Every buffer the library returns comes from the C allocator (`malloc` family)
+and must go back through the matching library function. Never free library
+memory with your language's allocator, and never free nested arrays yourself.
+
+| Owner | Release with |
+| --- | --- |
+| `EvmHandle*` | `guillotine_evm_destroy` (or `guillotine_cleanup`) |
+| `EvmResult*` from call or simulate | `guillotine_free_result` once; frees output, error message, logs, topics, data, access lists, and trace |
+| `*code_out` from `guillotine_get_code` | `guillotine_free_code(code, len)` |
+| `StateDumpFFI*` | `guillotine_free_state_dump` |
+| `BytecodeHandle*` | `evm_bytecode_destroy` |
+| Arrays inside a successful `CBytecodeAnalysis` | `evm_bytecode_free_analysis` |
+| `guillotine_get_last_error`, `evm_bytecode_opcode_name`, `evm_bytecode_error_string` | Never freed |
+
+Rules:
+
+- Copy everything you need out of a result before freeing it.
+- Zero-length arrays use non-NULL placeholder pointers. Treat the length as
+  authoritative and never free a placeholder. The free functions ignore
+  length 0.
+- Free functions are thread-safe and may run on any thread, including a
+  garbage-collector finalizer thread.
+- Input buffers (`code`, `input`, `data`) are borrowed only for the duration
+  of the call. The library copies what it keeps.
+- A NULL input pointer with a non-zero length is rejected. NULL with length 0
+  means empty.
+
+## Error model
+
+Two failure levels exist. Handle both.
+
+1. **ABI failure.** The function returns NULL or false. Causes include a bad
+   handle, a NULL required pointer, an invalid config or call type,
+   `guillotine_simulate` with a non-CALL type, an out-of-range chain id, and
+   allocation failure. Read `guillotine_get_last_error()` on the same thread
+   immediately and copy the string. The buffer is thread-local, holds at most
+   256 bytes (longer messages end in `...`), and is overwritten by the next
+   failing call on that thread. Successful calls do not clear it, so never
+   read it after a success.
+2. **Execution failure.** The call returns a non-NULL `EvmResult` with
+   `success == false`. `output` holds revert data, `gas_left` is valid, and
+   `error_message` holds the reason. `error_message` is an owned copy, `""`
+   when there is none, and lives until `guillotine_free_result`.
+
+`evm_bytecode_analyze` reports failure through its return code, not the last
+error. `evm_bytecode_create` sets the last error on failure, and
+`evm_dispatch_pretty_print` sets it when building the dispatch schedule fails.
+
+## Threading
+
+- Different handles may run on different threads at the same time.
+- A single handle must not be used by two threads at the same time. Serialize
+  access with a mutex or confine the handle to one thread.
+- Read the last error on the thread whose call failed, before that thread
+  makes another call. Runtimes that migrate tasks between OS threads (Go
+  goroutines, async executors) must pin the thread across the failing call
+  and the read.
+- Results, code buffers, and dumps may be freed on any thread.
+
+## Chain id
+
+`BlockInfoFFI.chain_id` is a `uint64_t`, and the EVM's CHAINID type
+(`TransactionContext.chain_id` in `src/block/transaction_context.zig`) is also
+`u64`, so every value is accepted and CHAINID returns it unchanged. Pass the
+full 64-bit value through your binding; do not hard-code a cap. A build that
+narrows `TransactionContext.chain_id` rejects wider values instead of
+truncating them: creation returns NULL and the last error reads
+`chain_id <n> exceeds the supported maximum <max>`. `safety_test.c` requires
+an exact CHAINID round-trip for 1, 8453, 84532, 11155111, and `UINT64_MAX`.
+
+## Binding templates
+
+Each template creates a handle, deploys code, calls it, copies the output, and
+frees everything. Error paths read the last error immediately. Adapt the
+structs from the layout tables; sizes must match the 64-bit values above.
+
+### Python (ctypes)
 
 ```python
-import ctypes as C
-import os
+import ctypes, os
 
-class Block(C.Structure):
-    _fields_ = [
-        ("number", C.c_uint64), ("timestamp", C.c_uint64),
-        ("gas_limit", C.c_uint64), ("coinbase", C.c_uint8 * 20),
-        ("base_fee", C.c_uint64), ("chain_id", C.c_uint64),
-        ("difficulty", C.c_uint64), ("prev_randao", C.c_uint8 * 32),
-    ]
+lib = ctypes.CDLL(os.environ["GUILLOTINE_LIB_PATH"])
+U8, U64, SZ = ctypes.c_uint8, ctypes.c_uint64, ctypes.c_size_t
 
-lib = C.CDLL(os.environ["GUILLOTINE_LIBRARY"])
+class BlockInfoFFI(ctypes.Structure):
+    _fields_ = [("number", U64), ("timestamp", U64), ("gas_limit", U64),
+                ("coinbase", U8 * 20), ("base_fee", U64), ("chain_id", U64),
+                ("difficulty", U64), ("prev_randao", U8 * 32)]
+
+class CallParams(ctypes.Structure):
+    _fields_ = [("caller", U8 * 20), ("to", U8 * 20), ("value", U8 * 32),
+                ("input", ctypes.POINTER(U8)), ("input_len", SZ), ("gas", U64),
+                ("call_type", U8), ("salt", U8 * 32)]
+
+class EvmResult(ctypes.Structure):
+    _fields_ = [("success", ctypes.c_bool), ("gas_left", U64),
+                ("output", ctypes.POINTER(U8)), ("output_len", SZ),
+                ("error_message", ctypes.c_char_p),
+                ("logs", ctypes.c_void_p), ("logs_len", SZ),
+                ("selfdestructs", ctypes.c_void_p), ("selfdestructs_len", SZ),
+                ("accessed_addresses", ctypes.c_void_p), ("accessed_addresses_len", SZ),
+                ("accessed_storage", ctypes.c_void_p), ("accessed_storage_len", SZ),
+                ("created_address", U8 * 20), ("has_created_address", ctypes.c_bool),
+                ("trace_json", ctypes.POINTER(U8)), ("trace_json_len", SZ)]
+
+assert ctypes.sizeof(BlockInfoFFI) == 104
+assert ctypes.sizeof(CallParams) == 136 and CallParams.salt.offset == 97
+assert ctypes.sizeof(EvmResult) == 144 and EvmResult.trace_json.offset == 128
+
 lib.guillotine_init.argtypes, lib.guillotine_init.restype = [], None
-lib.guillotine_cleanup.argtypes, lib.guillotine_cleanup.restype = [], None
-lib.guillotine_evm_create.argtypes = [C.POINTER(Block)]
-lib.guillotine_evm_create.restype = C.c_void_p
-lib.guillotine_evm_destroy.argtypes = [C.c_void_p]
-lib.guillotine_evm_destroy.restype = None
-lib.guillotine_get_last_error.argtypes = []
-lib.guillotine_get_last_error.restype = C.c_char_p
+lib.guillotine_get_last_error.argtypes, lib.guillotine_get_last_error.restype = [], ctypes.c_char_p
+lib.guillotine_evm_create.argtypes = [ctypes.POINTER(BlockInfoFFI)]
+lib.guillotine_evm_create.restype = ctypes.c_void_p
+lib.guillotine_evm_destroy.argtypes, lib.guillotine_evm_destroy.restype = [ctypes.c_void_p], None
+lib.guillotine_set_code.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, SZ]
+lib.guillotine_set_code.restype = ctypes.c_bool
+lib.guillotine_call.argtypes = [ctypes.c_void_p, ctypes.POINTER(CallParams)]
+lib.guillotine_call.restype = ctypes.POINTER(EvmResult)
+lib.guillotine_free_result.argtypes = [ctypes.POINTER(EvmResult)]
+lib.guillotine_free_result.restype = None
+
+def last_error() -> str:
+    return lib.guillotine_get_last_error().decode("utf-8", "replace")
 
 lib.guillotine_init()
+block = BlockInfoFFI(number=1, timestamp=1, gas_limit=30_000_000, chain_id=1)
+handle = lib.guillotine_evm_create(ctypes.byref(block))
+if not handle:
+    raise RuntimeError(last_error())
 try:
-    block = Block(gas_limit=30_000_000, chain_id=1)
-    handle = lib.guillotine_evm_create(C.byref(block))
-    if not handle:
-        raise RuntimeError(lib.guillotine_get_last_error().decode())
+    target = bytes(19) + b"\xc3"  # not a precompile address
+    code = bytes.fromhex("602a60005260206000f3")  # return 42 as a 32-byte word
+    if not lib.guillotine_set_code(handle, target, code, len(code)):
+        raise RuntimeError(last_error())
+    params = CallParams(gas=100_000, call_type=0)
+    params.caller[19] = 0xAA
+    ctypes.memmove(params.to, target, 20)
+    result = lib.guillotine_call(handle, ctypes.byref(params))
+    if not result:
+        raise RuntimeError(last_error())
     try:
-        print("Created mainnet EVM")
+        r = result.contents
+        output = ctypes.string_at(r.output, r.output_len)
+        if not r.success:
+            raise RuntimeError(r.error_message.decode("utf-8", "replace"), output)
     finally:
-        lib.guillotine_evm_destroy(handle)
+        lib.guillotine_free_result(result)
 finally:
-    lib.guillotine_cleanup()
+    lib.guillotine_evm_destroy(handle)
 ```
 
-Use `value.to_bytes(32, "big", signed=False)` after validating a u256 range.
-For an execution result pointer `result`, copy `C.string_at(result.contents.output,
-result.contents.output_len)` when length is nonzero inside a `try/finally` that
-calls `guillotine_free_result(result)`. Do not use `c_char_p` for binary outputs
-or for a buffer pointer that must later be freed by address.
+Python threads are OS threads, so reading the last error right after the
+failing call on the same thread is sufficient. For non-empty input, keep a
+`(U8 * n).from_buffer_copy(data)` object alive across the call and assign
+`ctypes.cast(buf, ctypes.POINTER(U8))` to `params.input`.
 
-With [cffi](https://cffi.readthedocs.io/en/stable/cdef.html), compile against the
-real header so C handles padding and bools. Save this generator as
-`custom_cffi_build.py`, then run it from the root:
-
-```python
-from cffi import FFI
-from pathlib import Path
-ffi = FFI()
-ffi.cdef("""
-    typedef struct EvmHandle EvmHandle;
-    typedef struct BlockInfoFFI {
-        uint64_t number, timestamp, gas_limit;
-        uint8_t coinbase[20];
-        uint64_t base_fee, chain_id, difficulty;
-        uint8_t prev_randao[32];
-    } BlockInfoFFI;
-    void guillotine_init(void);
-    void guillotine_cleanup(void);
-    EvmHandle *guillotine_evm_create(const BlockInfoFFI *);
-    void guillotine_evm_destroy(EvmHandle *);
-    const char *guillotine_get_last_error(void);
-""")
-ffi.set_source("_custom_guillotine", '#include "guillotine.h"',
-    include_dirs=[str(Path("sdks/c/include").resolve())],
-    library_dirs=[str(Path("zig-out/lib").resolve())],
-    libraries=["guillotine_ffi"])
-ffi.compile(tmpdir="/tmp/custom-guillotine-cffi", verbose=True)
-```
-
-Import the built module's `ffi, lib`; use `ffi.new("BlockInfoFFI *")` and
-check pointers against `ffi.NULL`. Copy binary data with
-`bytes(ffi.buffer(ptr, length))`, strings with `ffi.string`, and use the same
-explicit destructor scopes as ctypes. Configure the runtime library search
-path for the extension. `ffi.cdef` consumes C declarations, not an unprocessed
-header containing include guards, `#include`, or `extern "C"` directives.
-
-## Go cgo
-
-[Go's cgo documentation](https://pkg.go.dev/cmd/cgo) defines pointer-lifetime
-rules. Pin execution to an OS thread for the whole native lifecycle. The
-following file belongs in the consumer Go module; `CGO_CFLAGS` and
-`CGO_LDFLAGS` supply this checkout's absolute paths without changing cwd:
+### Go (cgo)
 
 ```go
-package main
+package guillotine
 
 /*
+#cgo CFLAGS: -I/abs/path/guillotine/sdks/c/include
+#cgo LDFLAGS: -L/abs/path/guillotine/zig-out/lib -lguillotine_ffi -Wl,-rpath,/abs/path/guillotine/zig-out/lib
+#include <stdlib.h>
 #include "guillotine.h"
 */
 import "C"
+
 import (
-    "fmt"
-    "runtime"
+	"errors"
+	"runtime"
+	"unsafe"
 )
 
-func run() error {
-    runtime.LockOSThread()
-    defer runtime.UnlockOSThread()
-    C.guillotine_init()
-    defer C.guillotine_cleanup()
-    var block C.BlockInfoFFI
-    block.gas_limit = 30000000
-    block.chain_id = 1
-    handle := C.guillotine_evm_create(&block)
-    if handle == nil {
-        return fmt.Errorf("create: %s", C.GoString(C.guillotine_get_last_error()))
-    }
-    defer C.guillotine_evm_destroy(handle)
-    return nil
+func init() { C.guillotine_init() }
+
+// lastError must run on the OS thread that saw the failure.
+func lastError() error { return errors.New(C.GoString(C.guillotine_get_last_error())) }
+
+type EVM struct{ h *C.EvmHandle }
+
+func New(chainID uint64) (*EVM, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	block := C.BlockInfoFFI{gas_limit: 30_000_000, chain_id: C.uint64_t(chainID)}
+	h := C.guillotine_evm_create(&block)
+	if h == nil {
+		return nil, lastError()
+	}
+	return &EVM{h: h}, nil
 }
 
-func main() {
-    if err := run(); err != nil { panic(err) }
+func (e *EVM) Close() { C.guillotine_evm_destroy(e.h); e.h = nil }
+
+func (e *EVM) Call(caller, to [20]byte, input []byte, gas uint64) ([]byte, bool, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var p C.CallParams
+	for i := 0; i < 20; i++ {
+		p.caller[i] = C.uint8_t(caller[i])
+		p.to[i] = C.uint8_t(to[i])
+	}
+	if len(input) > 0 {
+		// CallParams is passed by pointer, so input must be C memory (cgo pointer rules).
+		buf := C.CBytes(input)
+		defer C.free(buf)
+		p.input = (*C.uint8_t)(buf)
+		p.input_len = C.size_t(len(input))
+	}
+	p.gas = C.uint64_t(gas)
+	p.call_type = C.GUILLOTINE_CALL
+	r := C.guillotine_call(e.h, &p)
+	if r == nil {
+		return nil, false, lastError()
+	}
+	defer C.guillotine_free_result(r)
+	out := C.GoBytes(unsafe.Pointer(r.output), C.int(r.output_len)) // check output_len <= MaxInt32 first
+	return out, bool(r.success), nil
 }
 ```
 
-```sh
-CGO_CFLAGS="-I$PWD/sdks/c/include" \
-CGO_LDFLAGS="-L$PWD/zig-out/lib -lguillotine_ffi -Wl,-rpath,$PWD/zig-out/lib" \
-  go run /absolute/path/to/consumer/main.go
-```
+`runtime.LockOSThread` keeps the goroutine on one OS thread between the
+failing call and `guillotine_get_last_error`. Guard each `*EVM` with a mutex
+if goroutines share it.
 
-For structs containing an input pointer, prefer C-allocated input memory and
-C-allocated parameter storage. Pair `C.CBytes` with `C.free` (include
-`<stdlib.h>`), and set an explicit non-NULL sentinel for empty input. Do not
-let C retain Go pointers. Copy results before `guillotine_free_result` using
-`C.GoBytes` after checking that `size_t` fits its signed C-int length, or use a
-bounded `unsafe.Slice` and copy for larger buffers. Keep every operation on
-the same locked thread; a real service should queue work to one owning worker.
+### Rust
 
-## Rust bindgen / FFI
-
-Generate bindings from the header, keeping [bindgen's C layouts](https://rust-lang.github.io/rust-bindgen/introduction.html):
+Generate declarations with bindgen and wrap owners in RAII types:
 
 ```sh
-bindgen sdks/c/include/guillotine.h \
-  --allowlist-function 'guillotine_.*|evm_bytecode_.*|evm_dispatch_pretty_print' \
-  --allowlist-type 'Evm.*|CallParams|BlockInfoFFI|LogEntry|SelfDestructRecord|StorageAccessRecord|AccountStateFFI|StateDumpFFI|BytecodeHandle|C.*' \
-  --allowlist-var 'GUILLOTINE_.*|EVM_BYTECODE_.*' \
-  --output /tmp/guillotine_bindings.rs
+bindgen sdks/c/include/guillotine.h -o src/sys.rs
 ```
-
-In the consumer's `build.rs`, emit `cargo:rustc-link-search=native=...` for the
-absolute `zig-out/lib` path and `cargo:rustc-link-lib=dylib=guillotine_ffi`.
-Keep the generated bindings in the consumer crate and wrap the raw interface.
-A result guard can own native results without owning the runtime:
 
 ```rust
-use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
-mod raw { include!("/tmp/guillotine_bindings.rs"); }
-
-// The caller retains the initialized runtime and its owning OS thread.
-struct ResultGuard {
-    ptr: NonNull<raw::EvmResult>,
-    thread: PhantomData<Rc<()>>, // neither Send nor Sync
-}
-impl Drop for ResultGuard {
-    fn drop(&mut self) {
-        unsafe { raw::guillotine_free_result(self.ptr.as_ptr()) }
-    }
-}
-impl ResultGuard {
-    fn output(&self) -> Vec<u8> {
-        let result = unsafe { self.ptr.as_ref() };
-        if result.output_len == 0 { return Vec::new(); }
-        unsafe { std::slice::from_raw_parts(result.output, result.output_len).to_vec() }
-    }
+// build.rs
+fn main() {
+    println!("cargo:rustc-link-search=native=/abs/path/guillotine/zig-out/lib");
+    println!("cargo:rustc-link-lib=dylib=guillotine_ffi");
 }
 ```
 
-Construct the guard only after checking the call result for NULL. Copy the
-error string before other native calls; use `CStr` only for NUL-terminated
-strings. Validate lengths against Rust's slice constraints. Give EVM/runtime
-owners the same `!Send`/`!Sync` property, and tie result guards to the runtime
-lifetime in the safe wrapper. Cleanup must run after all guards and handles
-have been dropped. Do not use `Box::from_raw` or `Vec::from_raw_parts` for
-native allocations. Use `#[repr(C)]` if manually declaring structs; never
-use default Rust layout across FFI.
+```rust
+use std::{ffi::CStr, ptr::NonNull, sync::Once};
+mod sys { include!("sys.rs"); }
 
-## Swift C interop
+static INIT: Once = Once::new();
 
-Import the header through a SwiftPM system-library module or an Xcode
-bridging header. [Swift imports C structs directly](https://developer.apple.com/documentation/swift/using-imported-c-structs-and-unions-in-swift).
-For example, a consumer module map can contain:
+fn last_error() -> String {
+    unsafe { CStr::from_ptr(sys::guillotine_get_last_error()) }.to_string_lossy().into_owned()
+}
+
+pub struct Evm(NonNull<sys::EvmHandle>);
+// A handle may move between threads but must not be shared concurrently.
+unsafe impl Send for Evm {}
+
+impl Evm {
+    pub fn new(chain_id: u64) -> Result<Self, String> {
+        INIT.call_once(|| unsafe { sys::guillotine_init() });
+        let block = sys::BlockInfoFFI { gas_limit: 30_000_000, chain_id, ..unsafe { std::mem::zeroed() } };
+        NonNull::new(unsafe { sys::guillotine_evm_create(&block) }).map(Evm).ok_or_else(last_error)
+    }
+
+    pub fn call(&mut self, mut params: sys::CallParams, input: &[u8]) -> Result<(bool, Vec<u8>), String> {
+        params.input = if input.is_empty() { std::ptr::null() } else { input.as_ptr() };
+        params.input_len = input.len();
+        let r = unsafe { sys::guillotine_call(self.0.as_ptr(), &params) };
+        let r = NonNull::new(r).ok_or_else(last_error)?;
+        let res = unsafe { r.as_ref() };
+        let out = if res.output_len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(res.output, res.output_len) }.to_vec()
+        };
+        let ok = res.success;
+        unsafe { sys::guillotine_free_result(r.as_ptr()) };
+        Ok((ok, out))
+    }
+}
+
+impl Drop for Evm {
+    fn drop(&mut self) { unsafe { sys::guillotine_evm_destroy(self.0.as_ptr()) } }
+}
+```
+
+`Evm` is `Send` but not `Sync`, which matches the one-thread-per-handle rule.
+`&mut self` on `call` prevents concurrent use. Never pass library memory to
+`Vec::from_raw_parts` or `Box::from_raw`.
+
+### Swift
+
+Expose the header through a SwiftPM system library target:
 
 ```text
+// Sources/CGuillotine/module.modulemap
 module CGuillotine [system] {
     header "guillotine.h"
     link "guillotine_ffi"
@@ -465,179 +559,194 @@ module CGuillotine [system] {
 }
 ```
 
-Put that module map next to a copy of the matching header. Or compile a
-standalone `custom_sdk.swift` using the header directly:
-
-```sh
-swiftc -import-objc-header sdks/c/include/guillotine.h \
-  -Lzig-out/lib -lguillotine_ffi \
-  -Xlinker -rpath -Xlinker "$PWD/zig-out/lib" \
-  custom_sdk.swift -o /tmp/custom_sdk_swift
-```
+Copy `sdks/c/include/guillotine.h` next to the module map and pass
+`-Xlinker -L/abs/path/guillotine/zig-out/lib` to `swift build`.
 
 ```swift
+import CGuillotine
 import Foundation
 
-func createAndClose() throws {
-    guillotine_init()
-    defer { guillotine_cleanup() }
-    var block = BlockInfoFFI()
-    block.gas_limit = 30_000_000
-    block.chain_id = 1
-    guard let handle = guillotine_evm_create(&block) else {
-        throw NSError(domain: "Guillotine", code: 1,
-            userInfo: [NSLocalizedDescriptionKey: String(cString: guillotine_get_last_error())])
-    }
-    defer { guillotine_evm_destroy(handle) }
-    print("Created mainnet EVM")
+guillotine_init()
+var block = BlockInfoFFI()
+block.gas_limit = 30_000_000
+block.chain_id = 1
+guard let evm = guillotine_evm_create(&block) else {
+    fatalError(String(cString: guillotine_get_last_error()))
 }
-try createAndClose()
+defer { guillotine_evm_destroy(evm) }
+
+var params = CallParams()
+params.gas = 100_000
+params.call_type = UInt8(GUILLOTINE_CALL)
+withUnsafeMutableBytes(of: &params.to) { $0[19] = 0xc3 }
+let input: [UInt8] = []
+let output: Data = input.withUnsafeBufferPointer { buf in
+    params.input = buf.baseAddress
+    params.input_len = buf.count
+    guard let r = guillotine_call(evm, &params) else {
+        fatalError(String(cString: guillotine_get_last_error()))
+    }
+    defer { guillotine_free_result(r) }
+    return r.pointee.output_len == 0 ? Data() : Data(bytes: r.pointee.output, count: r.pointee.output_len)
+}
 ```
 
-Run this scope on a dedicated OS thread. An actor or serial Dispatch queue may
-move work between OS threads. Use `withUnsafeBytes` only while making a
-synchronous call and copy native output into `Data` before freeing its result.
-C fixed arrays import as tuples; use compiler-imported types or small C helper
-setters rather than assuming a Swift tuple's address is a serialized struct.
-Do not depend on `deinit` executing on the native owner thread.
+`EvmHandle` imports as `OpaquePointer` and fixed C arrays import as tuples;
+use `withUnsafeMutableBytes(of:)` to fill them. Swift actors and serial
+queues do not pin an OS thread, so read the last error in the same
+synchronous block as the failing call, as above.
 
-## Kotlin / JNI
+### Kotlin / JNI
 
-Use a C/C++ JNI bridge compiled for each target architecture and link it to
-`guillotine_ffi`. Pass addresses/words as `ByteArray` of exactly 20/32 bytes.
-Use opaque managed IDs for long-lived handles, or keep the complete native
-lifecycle within one synchronous JNI call. Do not accept unchecked `Long`
-values as native addresses.
-
-This one-call bridge gives a concrete zero-state balance read pattern while
-keeping initialization and cleanup on the calling OS thread. Serialize all
-calls globally; use a dedicated Java/Kotlin worker for a long-lived EVM.
+Write a small C bridge and declare it from Kotlin:
 
 ```kotlin
 package example
-class Guillotine {
-    external fun readFreshBalance(address: ByteArray): ByteArray
-    companion object { init { System.loadLibrary("custom_guillotine_jni") } }
+
+class Guillotine private constructor(private var handle: Long) : AutoCloseable {
+    companion object {
+        init { System.loadLibrary("guillotine_jni") }
+        @JvmStatic external fun create(chainId: Long): Long
+        @JvmStatic external fun destroy(handle: Long)
+        @JvmStatic external fun balance(handle: Long, address: ByteArray): ByteArray
+        fun open(chainId: Long) = Guillotine(create(chainId))
+    }
+    fun balance(address: ByteArray) = balance(handle, address)
+    override fun close() { destroy(handle); handle = 0 }
 }
 ```
 
 ```c
 #include <jni.h>
+#include <stdint.h>
 #include "guillotine.h"
 
-JNIEXPORT jbyteArray JNICALL
-Java_example_Guillotine_readFreshBalance(JNIEnv *env, jobject self, jbyteArray address) {
-    (void)self;
-    if (!address || (*env)->GetArrayLength(env, address) != 20) {
-        jclass cls = (*env)->FindClass(env, "java/lang/IllegalArgumentException");
-        if (cls) (*env)->ThrowNew(env, cls, "address must have 20 bytes");
+static void throw_last_error(JNIEnv *env) {
+    (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/IllegalStateException"),
+                     guillotine_get_last_error());
+}
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    (void)vm; (void)reserved;
+    guillotine_init();
+    return JNI_VERSION_1_8;
+}
+
+JNIEXPORT jlong JNICALL Java_example_Guillotine_create(JNIEnv *env, jclass cls, jlong chain_id) {
+    (void)cls;
+    BlockInfoFFI info = {0};
+    info.gas_limit = 30000000;
+    info.chain_id = (uint64_t)chain_id;
+    EvmHandle *h = guillotine_evm_create(&info);
+    if (h == NULL) throw_last_error(env);
+    return (jlong)(intptr_t)h;
+}
+
+JNIEXPORT void JNICALL Java_example_Guillotine_destroy(JNIEnv *env, jclass cls, jlong h) {
+    (void)env; (void)cls;
+    guillotine_evm_destroy((EvmHandle *)(intptr_t)h);
+}
+
+JNIEXPORT jbyteArray JNICALL Java_example_Guillotine_balance(JNIEnv *env, jclass cls, jlong h, jbyteArray address) {
+    (void)cls;
+    if ((*env)->GetArrayLength(env, address) != 20) {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/IllegalArgumentException"), "address must be 20 bytes");
         return NULL;
     }
-    uint8_t bytes[20], balance[32];
-    (*env)->GetByteArrayRegion(env, address, 0, 20, (jbyte *)bytes);
-    if ((*env)->ExceptionCheck(env)) return NULL;
-    guillotine_init();
-    BlockInfoFFI block = {0};
-    block.gas_limit = 30000000;
-    block.chain_id = 1;
-    EvmHandle *handle = guillotine_evm_create(&block);
-    jbyteArray output = NULL;
-    if (!handle || !guillotine_get_balance(handle, bytes, balance)) {
-        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
-        if (cls) (*env)->ThrowNew(env, cls, "native EVM operation failed");
-    } else {
-        output = (*env)->NewByteArray(env, 32);
-        if (output) (*env)->SetByteArrayRegion(env, output, 0, 32, (const jbyte *)balance);
+    uint8_t addr[20], out[32];
+    (*env)->GetByteArrayRegion(env, address, 0, 20, (jbyte *)addr);
+    if (!guillotine_get_balance((EvmHandle *)(intptr_t)h, addr, out)) {
+        throw_last_error(env);
+        return NULL;
     }
-    if (handle) guillotine_evm_destroy(handle);
-    guillotine_cleanup();
-    return output;
+    jbyteArray result = (*env)->NewByteArray(env, 32);
+    if (result != NULL) (*env)->SetByteArrayRegion(env, result, 0, 32, (const jbyte *)out);
+    return result;
 }
 ```
 
-Compile with `-Isdks/c/include`, the JDK's `include` and target-specific JNI
-include directory (or Android NDK sysroot), `-Lzig-out/lib -lguillotine_ffi`,
-and your platform's shared-library flags. Arrange loading of the dependent
-Guillotine library too. For execution buffers, check that native lengths fit
-`jsize` before allocating/copying and free native results even when JNI raises
-an exception. JNI region-copy functions avoid holding a JVM array pin while
-the EVM runs. See the [JNI function specification](https://docs.oracle.com/en/java/javase/25/docs/specs/jni/functions.html).
+Build the bridge against `sdks/c/include` and link `-lguillotine_ffi`. The
+registry rejects a forged or stale `Long` without dereferencing it, but
+Kotlin code must still not share one handle across concurrent threads.
 
-## Bun FFI
+### Bun (`bun:ffi`)
 
-Use the official TypeScript/WASM package for the maintained JavaScript SDK.
-For a custom native backend, [Bun FFI](https://bun.sh/docs/runtime/ffi) can load
-the shared C ABI. A minimal lifecycle template on native 64-bit little-endian
-Bun targets is:
+Prefer the maintained `@tevm/guillotine` package (`sdks/typescript`), which
+already binds this ABI. For a direct binding:
 
 ```typescript
-import { dlopen, FFIType, ptr, CString } from "bun:ffi";
-const path = process.env.GUILLOTINE_LIBRARY;
-if (!path) throw new Error("Set GUILLOTINE_LIBRARY to the shared library path");
-if (!["arm64", "x64"].includes(process.arch)) {
-  throw new Error("This layout example requires a native 64-bit target");
-}
-const lib = dlopen(path, {
+import { CString, dlopen, FFIType, type Pointer, read, suffix, toArrayBuffer } from 'bun:ffi'
+
+const path = process.env.GUILLOTINE_LIB_PATH ?? `zig-out/lib/libguillotine_ffi.${suffix}`
+const { symbols: g } = dlopen(path, {
   guillotine_init: { args: [], returns: FFIType.void },
-  guillotine_cleanup: { args: [], returns: FFIType.void },
+  guillotine_get_last_error: { args: [], returns: FFIType.ptr },
   guillotine_evm_create: { args: [FFIType.ptr], returns: FFIType.ptr },
   guillotine_evm_destroy: { args: [FFIType.ptr], returns: FFIType.void },
-  guillotine_get_last_error: { args: [], returns: FFIType.ptr },
-});
-lib.symbols.guillotine_init();
+  guillotine_set_code: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.bool },
+  guillotine_call: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+  guillotine_free_result: { args: [FFIType.ptr], returns: FFIType.void },
+})
+const lastError = () => new CString(g.guillotine_get_last_error()!).toString()
+
+g.guillotine_init()
+const block = new Uint8Array(104)
+const bv = new DataView(block.buffer)
+bv.setBigUint64(16, 30_000_000n, true) // gas_limit
+bv.setBigUint64(56, 1n, true) // chain_id
+const evm = g.guillotine_evm_create(block)
+if (!evm) throw new Error(lastError())
 try {
-  // Verify these sizeof/offsetof values against a C probe on the target.
-  const block = new Uint8Array(104);
-  const view = new DataView(block.buffer);
-  view.setBigUint64(16, 30_000_000n, true); // gas_limit
-  view.setBigUint64(56, 1n, true); // chain_id
-  const handle = lib.symbols.guillotine_evm_create(ptr(block));
-  if (!handle) {
-    throw new Error(new CString(lib.symbols.guillotine_get_last_error()).toString());
+  const target = new Uint8Array(20); target[19] = 0xc3 // low addresses are precompiles
+  const code = Uint8Array.from([0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3])
+  if (!g.guillotine_set_code(evm, target, code, BigInt(code.length))) throw new Error(lastError())
+
+  const params = new Uint8Array(136)
+  const pv = new DataView(params.buffer)
+  params.set(target, 20) // to; input stays NULL with input_len 0
+  pv.setBigUint64(88, 100_000n, true) // gas
+  params[96] = 0 // CALL
+  const r = g.guillotine_call(evm, params)
+  if (!r) throw new Error(lastError())
+  try {
+    const success = read.u8(r, 0) !== 0
+    const len = Number(read.u64(r, 24))
+    const output = len === 0 ? new Uint8Array(0) : new Uint8Array(toArrayBuffer(read.ptr(r, 16) as Pointer, 0, len)).slice()
+    console.log(success, output)
+  } finally {
+    g.guillotine_free_result(r)
   }
-  try { console.log("Created mainnet EVM"); }
-  finally { lib.symbols.guillotine_evm_destroy(handle); }
 } finally {
-  lib.symbols.guillotine_cleanup();
-  lib.close();
+  g.guillotine_evm_destroy(evm)
 }
 ```
 
-Use `FFIType.u64`/`bigint` for gas and nonce, and `FFIType.usize` for native
-lengths. For CALL/CREATE buffers, derive all offsets from a compiled C probe or
-use a C bridge that constructs structs and exposes result accessors. Keep
-`Uint8Array` input buffers strongly referenced through the synchronous call.
-`ptr(buffer)` is an address, not a copy. Copy result buffers before freeing;
-Bun views over native memory cannot outlive their native owner. Serialize this
-backend on one runtime/OS thread and provide explicit close behavior.
+The `DataView` writes use little-endian scalars, so this template runs only
+on little-endian hosts. `.slice()` copies native memory before the result is
+freed. For non-empty input, write `BigInt(ptr(input))` (import `ptr`) at offset 72 and the
+length at 80, and keep `input` referenced until the call returns.
 
-The old Bun prototype's useful native features were `guillotine_simulate`
-(CALL only) and `guillotine_dump_state`, plus state setters and native calls.
-The native ABI still offers them, but its old enum and handwritten result/state
-layouts were stale. They are not part of the TypeScript/WASM package backend.
+## Verify a binding
 
-## Verify a custom SDK
+Port these checks from `sdks/c/tests/safety_test.c`:
 
-Compile the wrapper against the matching header and inspect the library's
-exports. Compare `sizeof`/alignment/offsets against the actual Zig extern types
-on every target. Check empty/nonempty binary buffers, u256 byte order and range
-errors, maximum supported chain ID, and the CALL/CALLCODE distinction.
+- NULL, forged, destroyed, and cleaned-up handles return NULL or false with an
+  error and do not crash.
+- Configuration bytes other than 0, 1, and 2 are rejected.
+- Two handles never see each other's state.
+- ORIGIN equals `caller` for both `guillotine_call` and `guillotine_simulate`.
+- Test-mode and tracing handles work through the unsuffixed functions, and
+  only tracing handles return `trace_json`.
+- Repeated large calls and invalid bytecode do not grow memory.
+- Chain ids 1, 8453, 84532, and 11155111 either round-trip through CHAINID or
+  fail with `exceeds the supported maximum`.
+- Double destroy is reported, not a crash.
 
-Run a mainnet create/destroy scope, balance/storage/code round trips, a contract
-returning known bytes (the C example returns 42), a REVERT preserving its output,
-and an invalid call type producing NULL with a copied error. Repeat creation,
-execution, copying, and destruction to expose ownership bugs; include nested
-logs and state dumps when the wrapper supports them. Do not claim success from
-header-only compilation or mocked native execution.
-
-For repository changes run, from the root:
+Also test revert output, empty and non-empty buffers, u256 boundaries, and
+invalid call types. Run the C suites from the repository root:
 
 ```sh
-zig build
-zig build test-opcodes
-make -f sdks/c/Makefile test
+make -f sdks/c/Makefile test     # simple + basic + safety
 ```
 
-Report missing dependency or protected build configuration failures precisely.
-Keep custom wrapper code in its consumer project; do not restore separate
-language SDK directories merely to use these patterns.
+For repository changes also run `zig build && zig build test-opcodes`.

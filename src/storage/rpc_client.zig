@@ -89,7 +89,7 @@ pub const RpcClient = struct {
         var json_buf = std.ArrayList(u8).init(self.allocator);
         defer json_buf.deinit();
         
-        var writer = json_buf.writer();
+        const writer = json_buf.writer();
         try std.json.stringify(.{
             .jsonrpc = "2.0",
             .method = method,

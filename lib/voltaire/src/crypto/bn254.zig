@@ -496,7 +496,7 @@ test "BN254 EIP-196 ECADD - G1 + G1 = 2*G1" {
 }
 
 test "BN254 EIP-196 ECADD - add point to infinity" {
-    var input = [_]u8{0} ** 128;
+    var input = @as([128]u8, @splat(0));
     input[31] = 1;
     input[63] = 2;
     var output: [64]u8 = undefined;
@@ -505,10 +505,10 @@ test "BN254 EIP-196 ECADD - add point to infinity" {
 }
 
 test "BN254 EIP-196 ECADD - add two infinities" {
-    const input = [_]u8{0} ** 128;
-    var output = [_]u8{0xff} ** 64;
+    const input = @as([128]u8, @splat(0));
+    var output = @as([64]u8, @splat(0xff));
     try bn254Add(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 EIP-196 ECADD - add point and its negation" {
@@ -517,13 +517,13 @@ test "BN254 EIP-196 ECADD - add point and its negation" {
         "0000000000000000000000000000000000000000000000000000000000000002" ++
         "0000000000000000000000000000000000000000000000000000000000000001" ++
         "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd45");
-    var output = [_]u8{0xff} ** 64;
+    var output = @as([64]u8, @splat(0xff));
     try bn254Add(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 EIP-196 ECADD - invalid point returns error" {
-    var input = [_]u8{0} ** 128;
+    var input = @as([128]u8, @splat(0));
     input[31] = 1;
     input[63] = 3;
     var output: [64]u8 = undefined;
@@ -532,35 +532,35 @@ test "BN254 EIP-196 ECADD - invalid point returns error" {
 
 test "BN254 EIP-196 ECADD - non-canonical coordinate is rejected" {
     // x = p + 1 reduces to 1, which would decode as the generator (1, 2).
-    var input = [_]u8{0} ** 128;
+    var input = @as([128]u8, @splat(0));
     std.mem.writeInt(u256, input[0..32], FP_MOD + 1, .big);
     input[63] = 2;
     var output: [64]u8 = undefined;
     try std.testing.expectError(error.InvalidFieldElement, bn254Add(&input, &output));
 
     // (p, 0) reduces to (0, 0), which would decode as infinity.
-    var second = [_]u8{0} ** 128;
+    var second = @as([128]u8, @splat(0));
     std.mem.writeInt(u256, second[64..96], FP_MOD, .big);
     try std.testing.expectError(error.InvalidFieldElement, bn254Add(&second, &output));
 
     // y = p + 2 reduces to 2.
-    var third = [_]u8{0} ** 128;
+    var third = @as([128]u8, @splat(0));
     third[31] = 1;
     std.mem.writeInt(u256, third[32..64], FP_MOD + 2, .big);
     try std.testing.expectError(error.InvalidFieldElement, bn254Add(&third, &output));
 }
 
 test "BN254 EIP-196 ECMUL - multiply by zero" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     input[31] = 1;
     input[63] = 2;
-    var output = [_]u8{0xff} ** 64;
+    var output = @as([64]u8, @splat(0xff));
     try bn254Mul(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 EIP-196 ECMUL - multiply by one" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     input[31] = 1;
     input[63] = 2;
     input[95] = 1;
@@ -570,7 +570,7 @@ test "BN254 EIP-196 ECMUL - multiply by one" {
 }
 
 test "BN254 EIP-196 ECMUL - multiply by two equals ECADD doubling" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     input[31] = 1;
     input[63] = 2;
     input[95] = 2;
@@ -583,21 +583,21 @@ test "BN254 EIP-196 ECMUL - multiply by two equals ECADD doubling" {
 }
 
 test "BN254 EIP-196 ECMUL - multiply infinity by scalar" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     input[95] = 17;
-    var output = [_]u8{0xff} ** 64;
+    var output = @as([64]u8, @splat(0xff));
     try bn254Mul(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 EIP-196 ECMUL - multiply by curve order" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     input[31] = 1;
     input[63] = 2;
     std.mem.writeInt(u256, input[64..96], FR_MOD, .big);
-    var output = [_]u8{0xff} ** 64;
+    var output = @as([64]u8, @splat(0xff));
     try bn254Mul(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 EIP-196 ECMUL - scalar that drives GLV k2 negative" {
@@ -616,7 +616,7 @@ test "BN254 EIP-196 ECMUL - scalar that drives GLV k2 negative" {
 }
 
 test "BN254 EIP-196 ECMUL - maximum 256-bit scalar" {
-    var input = [_]u8{0xff} ** 96;
+    var input = @as([96]u8, @splat(0xff));
     @memset(input[0..64], 0);
     input[31] = 1;
     input[63] = 2;
@@ -629,7 +629,7 @@ test "BN254 EIP-196 ECMUL - maximum 256-bit scalar" {
 }
 
 test "BN254 EIP-196 ECMUL - non-canonical coordinate is rejected" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     std.mem.writeInt(u256, input[0..32], FP_MOD + 1, .big);
     input[63] = 2;
     input[95] = 3;
@@ -652,8 +652,8 @@ const eip197_two_g2 = "203e205db4f19b37b60121b83a7333706db86431c6d835849957ed8c3
     "27dc7234fd11d3e8c36c59277c3e6f149d5cd3cfa9a62aee49f8130962b4b3b9" ++
     "195e8aa5b7827463722b8c153931579d3505566b4edf48d498e185f0509de152" ++
     "04bb53b8977e5f92a0bc372742c4830944a59b4fe6b1c0466e2a6dad122b5d2e";
-const eip197_zero_g1 = "00" ** 64;
-const eip197_zero_g2 = "00" ** 128;
+const eip197_zero_g1 = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+const eip197_zero_g2 = "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 test "BN254 EIP-197 ECPAIRING - empty input" {
     const input: []const u8 = &[_]u8{};
@@ -661,7 +661,7 @@ test "BN254 EIP-197 ECPAIRING - empty input" {
 }
 
 test "BN254 EIP-197 ECPAIRING - invalid input length" {
-    const input = [_]u8{0} ** 100;
+    const input = @as([100]u8, @splat(0));
     try std.testing.expectError(error.InvalidInput, bn254Pairing(&input));
 }
 
@@ -781,7 +781,7 @@ test "BN254 EIP-197 ECPAIRING - more pairs than one Miller-loop chunk" {
     // 18 pairs = 9 cancelling (G1, G2), (-G1, G2) couples; crosses the 16-pair chunk.
     const couple = eip197_g1 ++ eip197_g2 ++ eip197_neg_g1 ++ eip197_g2;
     var input: [18 * 192]u8 = undefined;
-    _ = try std.fmt.hexToBytes(&input, couple ** 9);
+    for (0..9) |i| _ = try std.fmt.hexToBytes(input[i * 2 * 192 ..][0 .. 2 * 192], couple);
     try std.testing.expect(try bn254Pairing(&input));
 
     // Flip the last pair's G1 from -G1 to G1: product becomes e(G1, G2)^2.
@@ -808,9 +808,9 @@ test "BN254 point serialization - point at infinity" {
     try std.testing.expect(inf.x.equal(&FpMont.ZERO));
     try std.testing.expect(inf.y.equal(&FpMont.ONE));
     try std.testing.expect(inf.z.equal(&FpMont.ZERO));
-    var output = [_]u8{0xff} ** 64;
+    var output = @as([64]u8, @splat(0xff));
     try writeG1(&inf, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 point validation - generator has correct order" {
@@ -956,4 +956,64 @@ test "BN254 curve equation validation for random multiples" {
         const g2_point = G2.GENERATOR.mulByInt(scalar);
         try std.testing.expect(g2_point.isOnCurve());
     }
+}
+
+test "BN254 EIP-196 ECMUL - multiply by large scalar" {
+    const gen = (try G1.GENERATOR.toAffine());
+    const scalar: u256 = 123456789;
+
+    var input: [96]u8 = undefined;
+    @memset(&input, 0);
+
+    // Point (generator)
+    std.mem.writeInt(u256, input[0..32], gen.x.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[32..64], gen.y.toStandardRepresentation(), .big);
+
+    // Scalar
+    std.mem.writeInt(u256, input[64..96], scalar, .big);
+
+    var output: [64]u8 = undefined;
+    try bn254Mul(&input, &output);
+
+    // Verify result matches expected
+    const expected = (try (try G1.GENERATOR.mulByInt(scalar)).toAffine());
+    const result_x = std.mem.readInt(u256, output[0..32], .big);
+    const result_y = std.mem.readInt(u256, output[32..64], .big);
+
+    try std.testing.expectEqual(expected.x.toStandardRepresentation(), result_x);
+    try std.testing.expectEqual(expected.y.toStandardRepresentation(), result_y);
+}
+
+test "BN254 EIP-197 ECPAIRING - bilinearity check" {
+    // e(aG1, bG2) = e(G1, G2)^(ab)
+    // Verify: e(2G1, 3G2) * e(-6G1, G2) = 1
+    const g1 = G1.GENERATOR;
+    const g2 = G2.GENERATOR;
+
+    const p1 = (try (try g1.mulByInt(2)).toAffine());
+    const p2 = g2.mulByInt(3).toAffine();
+    const p3 = (try (try g1.mulByInt(6)).neg().toAffine());
+    const p4 = g2.toAffine();
+
+    var input: [384]u8 = undefined;
+    @memset(&input, 0);
+
+    // First pair: (2G1, 3G2)
+    std.mem.writeInt(u256, input[0..32], p1.x.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[32..64], p1.y.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[64..96], p2.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[96..128], p2.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[128..160], p2.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[160..192], p2.y.u0.toStandardRepresentation(), .big);
+
+    // Second pair: (-6G1, G2)
+    std.mem.writeInt(u256, input[192..224], p3.x.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[224..256], p3.y.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[256..288], p4.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[288..320], p4.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[320..352], p4.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[352..384], p4.y.u0.toStandardRepresentation(), .big);
+
+    const result = try bn254Pairing(&input);
+    try std.testing.expect(result); // Product should equal 1
 }

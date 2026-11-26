@@ -107,6 +107,11 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
         }
     }
     
+    // set_storage records each slot's pre-write value as its original value
+    // (EIP-2200), which for pre-state is 0. Pre-state is the original value,
+    // so drop those records before the transaction runs.
+    evm.original_storage.clearRetainingCapacity();
+
     // Set contract code
     try evm.setCode(contract_addr, bytecode);
     
@@ -188,10 +193,7 @@ test "MinimalEvm vs revm differential tests" {
     const allocator = std.testing.allocator;
     
     // Load test cases from JSON from test directory
-    const json_file = try std.fs.cwd().openFile("test/minimal_evm_revm_differential_test.json", .{});
-    defer json_file.close();
-    
-    const json_content = try json_file.readToEndAlloc(allocator, 10 * 1024 * 1024); // 10MB max
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/minimal_evm_revm_differential_test.json", allocator, .limited(10 * 1024 * 1024)); // 10MB max
     defer allocator.free(json_content);
     
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{

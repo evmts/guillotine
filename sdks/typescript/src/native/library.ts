@@ -1,17 +1,18 @@
-import { CString, dlopen, FFIType, type Pointer, ptr, read, suffix, toArrayBuffer } from 'bun:ffi'
+import { dlopen, FFIType, type Pointer, ptr, read, suffix, toArrayBuffer } from 'bun:ffi'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { GuillotineError } from '../errors.js'
+import { decodeUtf8 } from '../evm/execution-result.js'
 
 /**
  * Symbols from `sdks/c/include/guillotine.h` (the ABI of `src/evm_c_api.zig`)
- * that this SDK binds. Mainnet and tracing handles have different native types;
- * see `docs/building-custom-sdks.md` for the compatible-operation matrix.
+ * that this SDK binds. Every native function accepts any handle type;
+ * see `docs/building-custom-sdks.md` for ownership and error rules.
  */
 const symbols = {
 	guillotine_init: { args: [], returns: FFIType.void },
-	guillotine_get_last_error: { args: [], returns: FFIType.cstring },
+	guillotine_get_last_error: { args: [], returns: FFIType.ptr },
 	guillotine_evm_create: { args: [FFIType.ptr], returns: FFIType.ptr },
 	guillotine_evm_create_tracing: { args: [FFIType.ptr], returns: FFIType.ptr },
 	guillotine_evm_destroy: { args: [FFIType.ptr], returns: FFIType.void },
@@ -61,8 +62,8 @@ let loaded: { path: string; symbols: NativeSymbols } | null = null
 
 /**
  * Load `libguillotine_ffi` once per process and call `guillotine_init`.
- * The native allocator and error buffer are thread-local, so every call must run
- * on the JS thread that loaded the library. Bun FFI calls are synchronous on that thread.
+ * The native last-error buffer is thread-local, so read it on the thread that made the
+ * failing call. Bun FFI calls are synchronous on the JS thread that loaded the library.
  */
 export function loadNative(libraryPath?: string): NativeSymbols {
 	const path = resolveLibraryPath(libraryPath)
@@ -113,10 +114,13 @@ export function pointerAt(address: number): Pointer {
 	return address as Pointer
 }
 
-/** Copy the borrowed thread-local last-error string. Call only right after a reported failure. */
+/**
+ * Copy the borrowed thread-local last-error string. Call only right after a reported failure.
+ * Throws `InvalidUtf8` if the native message is not valid UTF-8.
+ */
 export function lastError(native: NativeSymbols): string {
-	const message = native.guillotine_get_last_error()
-	return message === null ? 'unknown native error' : message.toString()
+	const message = toPointer(native.guillotine_get_last_error())
+	return message === null ? 'unknown native error' : readCString(message, 'Native last-error message')
 }
 
 /** Copy `len` bytes from native memory into a JS-owned buffer. */
@@ -147,8 +151,12 @@ export function readU64(address: Pointer, offset: number): bigint {
 	return read.u64(address, offset)
 }
 
-export function readCString(address: Pointer): string {
-	return new CString(address).toString()
+/** Copy a NUL-terminated native string and decode it as strict UTF-8. */
+export function readCString(address: Pointer, what: string): string {
+	if (address === 0) throw GuillotineError.memoryError(`${what} has a null pointer`)
+	let len = 0
+	while (read.u8(address, len) !== 0) len++
+	return decodeUtf8(copyNative(address, 0, len), what)
 }
 
 /** Raw address of a JS buffer, for embedding inside a native struct. */

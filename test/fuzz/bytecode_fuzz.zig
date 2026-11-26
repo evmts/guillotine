@@ -238,7 +238,6 @@ pub fn fuzzBytecodeOomResilience(_: void, input: []const u8) !void {
         var failing = std.testing.FailingAllocator.init(fuzz_alloc.get(), .{ .fail_index = fail_index });
         var bc = BytecodeFusionOn.init(failing.allocator(), code) catch |err| switch (err) {
             error.OutOfMemory, error.InitcodeTooLarge, error.InvalidJumpDestination, error.InvalidOpcode, error.TruncatedPush => continue,
-            else => return err,
         };
         bc.deinit();
     }
@@ -258,17 +257,17 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz bytecode jumpdest reference oracle and fusion invariants" {
-    try std.testing.fuzz({}, fuzzBytecodeJumpdestOracle, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBytecodeJumpdestOracle), .{ .corpus = seed_corpus });
 }
 
 test "fuzz dispatch schedule build fusion on and off" {
-    try std.testing.fuzz({}, fuzzDispatchScheduleBuild, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzDispatchScheduleBuild), .{ .corpus = seed_corpus });
 }
 
 test "fuzz structured fusion patterns and fake jumpdests" {
-    try std.testing.fuzz({}, fuzzStructuredFusionPatterns, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzStructuredFusionPatterns), .{ .corpus = seed_corpus });
 }
 
 test "fuzz bytecode oom resilience without leaks" {
-    try std.testing.fuzz({}, fuzzBytecodeOomResilience, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBytecodeOomResilience), .{ .corpus = seed_corpus });
 }

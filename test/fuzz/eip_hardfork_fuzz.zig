@@ -178,11 +178,11 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    var authority_bytes = [_]u8{0} ** 20;
+    var authority_bytes = @as([20]u8, @splat(0));
     authority_bytes[19] = (input[0] % 16) + 1;
     const authority = Address{ .bytes = authority_bytes };
 
-    var target_bytes = [_]u8{0} ** 20;
+    var target_bytes = @as([20]u8, @splat(0));
     target_bytes[19] = input[1];
     const target = Address{ .bytes = target_bytes };
 
@@ -207,7 +207,7 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
             .balance = 1000,
             .nonce = acct_nonce,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
     }
 
@@ -224,8 +224,8 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
         .address = target,
         .nonce = auth_nonce,
         .v = 0,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0)),
     };
 
     const res = proc.processAuthorization(auth, authority);
@@ -233,22 +233,26 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
     // Verify EXACT specification outcome!
     if (auth_chain_id != 0 and auth_chain_id != active_chain_id) {
         try std.testing.expectError(evm.AuthorizationError.InvalidChainId, res);
-    } else if (!acct_exists) {
-        try std.testing.expectError(evm.AuthorizationError.AccountNotFound, res);
-    } else if (acct_has_code) {
+    } else if (acct_exists and acct_has_code) {
         try std.testing.expectError(evm.AuthorizationError.NotEOA, res);
-    } else if (auth_nonce != acct_nonce) {
-        try std.testing.expectError(evm.AuthorizationError.NonceMismatch, res);
     } else {
-        try res;
-        // Must have incremented nonce by 1 and set delegation!
-        const updated = (try db.get_account(authority.bytes)).?;
-        try std.testing.expectEqual(acct_nonce + 1, updated.nonce);
+        // EIP-7702: a missing authority is an empty account (nonce 0, no code).
+        const expected_nonce: u64 = if (acct_exists) acct_nonce else 0;
+        if (auth_nonce != expected_nonce) {
+            try std.testing.expectError(evm.AuthorizationError.NonceMismatch, res);
+        } else {
+            try res;
+            // Nonce incremented by 1 and delegation set (cleared for a zero target).
+            const updated = (try db.get_account(authority.bytes)).?;
+            try std.testing.expectEqual(expected_nonce + 1, updated.nonce);
+            const expected_delegate: ?primitives.Address = if (target.isZero()) null else target;
+            try std.testing.expectEqual(expected_delegate, updated.delegated_address);
+        }
     }
 }
 
 const seed_corpus: []const []const u8 = &.{
-    &([_]u8{0} ** 24),
+    &(@as([24]u8, @splat(0))),
     &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 },
     &.{ 0xff, 0xff, 0, 1, 5, 0, 10, 20, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
     &.{ 0, 1, 2, 3, 4, 5, 6, 7 },
@@ -257,17 +261,17 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz EIP-4844 blob gas monotonicity and EIP-1559 effective gas price" {
-    try std.testing.fuzz({}, fuzzBlobGasAndEip1559Invariants, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBlobGasAndEip1559Invariants), .{ .corpus = seed_corpus });
 }
 
 test "fuzz SSTORE gas costs and EIP-3529 refund caps across all 14 hardforks" {
-    try std.testing.fuzz({}, fuzzSstoreGasAndRefundAcrossHardforks, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSstoreGasAndRefundAcrossHardforks), .{ .corpus = seed_corpus });
 }
 
 test "fuzz EIP-2028/3860/7623 calldata and initcode gas formulas" {
-    try std.testing.fuzz({}, fuzzCalldataAndInitcodeGas, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCalldataAndInitcodeGas), .{ .corpus = seed_corpus });
 }
 
 test "fuzz EIP-7702 authorization processor validation and delegation state transitions" {
-    try std.testing.fuzz({}, fuzzEip7702AuthorizationProcessor, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzEip7702AuthorizationProcessor), .{ .corpus = seed_corpus });
 }

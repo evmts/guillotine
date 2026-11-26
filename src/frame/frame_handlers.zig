@@ -1,6 +1,8 @@
 const std = @import("std");
 const opcode_data = @import("../opcodes/opcode_data.zig");
+const fork_gas = @import("fork_gas.zig");
 const Opcode = opcode_data.Opcode;
+const handler_abi = @import("../preprocessor/handler_abi.zig");
 const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 const stack_frame_arithmetic = @import("../instructions/handlers_arithmetic.zig");
 const stack_frame_comparison = @import("../instructions/handlers_comparison.zig");
@@ -47,20 +49,20 @@ pub fn getOpcodeHandlers(
     const LogHandlers = stack_frame_log.Handlers(FrameType);
 
     // The default opcode handler used for any opcode that is not supported by the EVM
-    const invalid = struct {
-        fn handler(frame: *FrameType, cursor: [*]const FrameType.Dispatch.Item) FrameType.Error!noreturn {
+    const invalid = handler_abi.wrap(FrameType, struct {
+        fn handler(frame: *FrameType, cursor: [*]const FrameType.Dispatch.Item) FrameType.Error![*]const FrameType.Dispatch.Item {
             _ = cursor;
             // Invalid opcodes consume all remaining gas and revert
             frame.gas_remaining = 0;
             return FrameType.Error.InvalidOpcode;
         }
-    }.handler;
+    }.handler);
 
     var h: [256]FrameType.OpcodeHandler = undefined;
     @setEvalBranchQuota(10000);
-    for (&h) |*handler| handler.* = &invalid;
+    for (&h) |*handler| handler.* = invalid;
 
-    h[@intFromEnum(Opcode.STOP)] = &SystemHandlers.stop;
+    h[@intFromEnum(Opcode.STOP)] = handler_abi.wrap(FrameType, SystemHandlers.stop);
     h[@intFromEnum(Opcode.ADD)] = &ArithmeticHandlers.add;
     h[@intFromEnum(Opcode.MUL)] = &ArithmeticHandlers.mul;
     h[@intFromEnum(Opcode.SUB)] = &ArithmeticHandlers.sub;
@@ -70,7 +72,7 @@ pub fn getOpcodeHandlers(
     h[@intFromEnum(Opcode.SMOD)] = &ArithmeticHandlers.smod;
     h[@intFromEnum(Opcode.ADDMOD)] = &ArithmeticHandlers.addmod;
     h[@intFromEnum(Opcode.MULMOD)] = &ArithmeticHandlers.mulmod;
-    h[@intFromEnum(Opcode.EXP)] = &ArithmeticHandlers.exp;
+    h[@intFromEnum(Opcode.EXP)] = handler_abi.wrap(FrameType, ArithmeticHandlers.exp);
     h[@intFromEnum(Opcode.SIGNEXTEND)] = &ArithmeticHandlers.signextend;
     h[@intFromEnum(Opcode.LT)] = &ComparisonHandlers.lt;
     h[@intFromEnum(Opcode.GT)] = &ComparisonHandlers.gt;
@@ -86,50 +88,50 @@ pub fn getOpcodeHandlers(
     h[@intFromEnum(Opcode.SHL)] = &BitwiseHandlers.shl;
     h[@intFromEnum(Opcode.SHR)] = &BitwiseHandlers.shr;
     h[@intFromEnum(Opcode.SAR)] = &BitwiseHandlers.sar;
-    h[@intFromEnum(Opcode.CLZ)] = &BitwiseHandlers.clz;
-    h[@intFromEnum(Opcode.KECCAK256)] = &KeccakHandlers.keccak;
-    h[@intFromEnum(Opcode.ADDRESS)] = &ContextHandlers.address;
-    h[@intFromEnum(Opcode.BALANCE)] = &ContextHandlers.balance;
-    h[@intFromEnum(Opcode.ORIGIN)] = &ContextHandlers.origin;
-    h[@intFromEnum(Opcode.CALLER)] = &ContextHandlers.caller;
-    h[@intFromEnum(Opcode.CALLVALUE)] = &ContextHandlers.callvalue;
-    h[@intFromEnum(Opcode.CALLDATALOAD)] = &ContextHandlers.calldataload;
-    h[@intFromEnum(Opcode.CALLDATASIZE)] = &ContextHandlers.calldatasize;
-    h[@intFromEnum(Opcode.CALLDATACOPY)] = &ContextHandlers.calldatacopy;
-    h[@intFromEnum(Opcode.CODESIZE)] = &ContextHandlers.codesize;
-    h[@intFromEnum(Opcode.CODECOPY)] = &ContextHandlers.codecopy;
-    h[@intFromEnum(Opcode.GASPRICE)] = &ContextHandlers.gasprice;
-    h[@intFromEnum(Opcode.EXTCODESIZE)] = &ContextHandlers.extcodesize;
-    h[@intFromEnum(Opcode.EXTCODECOPY)] = &ContextHandlers.extcodecopy;
-    h[@intFromEnum(Opcode.RETURNDATASIZE)] = &ContextHandlers.returndatasize;
-    h[@intFromEnum(Opcode.RETURNDATACOPY)] = &ContextHandlers.returndatacopy;
-    h[@intFromEnum(Opcode.EXTCODEHASH)] = &ContextHandlers.extcodehash;
-    h[@intFromEnum(Opcode.BLOCKHASH)] = &ContextHandlers.blockhash;
-    h[@intFromEnum(Opcode.COINBASE)] = &ContextHandlers.coinbase;
-    h[@intFromEnum(Opcode.TIMESTAMP)] = &ContextHandlers.timestamp;
-    h[@intFromEnum(Opcode.NUMBER)] = &ContextHandlers.number;
-    h[@intFromEnum(Opcode.DIFFICULTY)] = &ContextHandlers.difficulty;
-    h[@intFromEnum(Opcode.GASLIMIT)] = &ContextHandlers.gaslimit;
-    h[@intFromEnum(Opcode.CHAINID)] = &ContextHandlers.chainid;
-    h[@intFromEnum(Opcode.SELFBALANCE)] = &ContextHandlers.selfbalance;
-    h[@intFromEnum(Opcode.BASEFEE)] = &ContextHandlers.basefee;
-    h[@intFromEnum(Opcode.BLOBHASH)] = &ContextHandlers.blobhash;
-    h[@intFromEnum(Opcode.BLOBBASEFEE)] = &ContextHandlers.blobbasefee;
+    h[@intFromEnum(Opcode.CLZ)] = handler_abi.wrap(FrameType, BitwiseHandlers.clz);
+    h[@intFromEnum(Opcode.KECCAK256)] = handler_abi.wrap(FrameType, KeccakHandlers.keccak);
+    h[@intFromEnum(Opcode.ADDRESS)] = handler_abi.wrap(FrameType, ContextHandlers.address);
+    h[@intFromEnum(Opcode.BALANCE)] = handler_abi.wrap(FrameType, ContextHandlers.balance);
+    h[@intFromEnum(Opcode.ORIGIN)] = handler_abi.wrap(FrameType, ContextHandlers.origin);
+    h[@intFromEnum(Opcode.CALLER)] = handler_abi.wrap(FrameType, ContextHandlers.caller);
+    h[@intFromEnum(Opcode.CALLVALUE)] = handler_abi.wrap(FrameType, ContextHandlers.callvalue);
+    h[@intFromEnum(Opcode.CALLDATALOAD)] = handler_abi.wrap(FrameType, ContextHandlers.calldataload);
+    h[@intFromEnum(Opcode.CALLDATASIZE)] = handler_abi.wrap(FrameType, ContextHandlers.calldatasize);
+    h[@intFromEnum(Opcode.CALLDATACOPY)] = handler_abi.wrap(FrameType, ContextHandlers.calldatacopy);
+    h[@intFromEnum(Opcode.CODESIZE)] = handler_abi.wrap(FrameType, ContextHandlers.codesize);
+    h[@intFromEnum(Opcode.CODECOPY)] = handler_abi.wrap(FrameType, ContextHandlers.codecopy);
+    h[@intFromEnum(Opcode.GASPRICE)] = handler_abi.wrap(FrameType, ContextHandlers.gasprice);
+    h[@intFromEnum(Opcode.EXTCODESIZE)] = handler_abi.wrap(FrameType, ContextHandlers.extcodesize);
+    h[@intFromEnum(Opcode.EXTCODECOPY)] = handler_abi.wrap(FrameType, ContextHandlers.extcodecopy);
+    h[@intFromEnum(Opcode.RETURNDATASIZE)] = handler_abi.wrap(FrameType, ContextHandlers.returndatasize);
+    h[@intFromEnum(Opcode.RETURNDATACOPY)] = handler_abi.wrap(FrameType, ContextHandlers.returndatacopy);
+    h[@intFromEnum(Opcode.EXTCODEHASH)] = handler_abi.wrap(FrameType, ContextHandlers.extcodehash);
+    h[@intFromEnum(Opcode.BLOCKHASH)] = handler_abi.wrap(FrameType, ContextHandlers.blockhash);
+    h[@intFromEnum(Opcode.COINBASE)] = handler_abi.wrap(FrameType, ContextHandlers.coinbase);
+    h[@intFromEnum(Opcode.TIMESTAMP)] = handler_abi.wrap(FrameType, ContextHandlers.timestamp);
+    h[@intFromEnum(Opcode.NUMBER)] = handler_abi.wrap(FrameType, ContextHandlers.number);
+    h[@intFromEnum(Opcode.DIFFICULTY)] = handler_abi.wrap(FrameType, ContextHandlers.difficulty);
+    h[@intFromEnum(Opcode.GASLIMIT)] = handler_abi.wrap(FrameType, ContextHandlers.gaslimit);
+    h[@intFromEnum(Opcode.CHAINID)] = handler_abi.wrap(FrameType, ContextHandlers.chainid);
+    h[@intFromEnum(Opcode.SELFBALANCE)] = handler_abi.wrap(FrameType, ContextHandlers.selfbalance);
+    h[@intFromEnum(Opcode.BASEFEE)] = handler_abi.wrap(FrameType, ContextHandlers.basefee);
+    h[@intFromEnum(Opcode.BLOBHASH)] = handler_abi.wrap(FrameType, ContextHandlers.blobhash);
+    h[@intFromEnum(Opcode.BLOBBASEFEE)] = handler_abi.wrap(FrameType, ContextHandlers.blobbasefee);
     h[@intFromEnum(Opcode.POP)] = &StackHandlers.pop;
     h[@intFromEnum(Opcode.MLOAD)] = &MemoryHandlers.mload;
     h[@intFromEnum(Opcode.MSTORE)] = &MemoryHandlers.mstore;
     h[@intFromEnum(Opcode.MSTORE8)] = &MemoryHandlers.mstore8;
-    h[@intFromEnum(Opcode.SLOAD)] = &StorageHandlers.sload;
-    h[@intFromEnum(Opcode.SSTORE)] = &StorageHandlers.sstore;
+    h[@intFromEnum(Opcode.SLOAD)] = handler_abi.wrap(FrameType, StorageHandlers.sload);
+    h[@intFromEnum(Opcode.SSTORE)] = handler_abi.wrap(FrameType, StorageHandlers.sstore);
     h[@intFromEnum(Opcode.JUMP)] = &JumpHandlers.jump;
     h[@intFromEnum(Opcode.JUMPI)] = &JumpHandlers.jumpi;
-    h[@intFromEnum(Opcode.PC)] = &ContextHandlers.pc;
+    h[@intFromEnum(Opcode.PC)] = handler_abi.wrap(FrameType, ContextHandlers.pc);
     h[@intFromEnum(Opcode.MSIZE)] = &MemoryHandlers.msize;
-    h[@intFromEnum(Opcode.MCOPY)] = &MemoryHandlers.mcopy;
-    h[@intFromEnum(Opcode.GAS)] = &ContextHandlers.gas;
+    h[@intFromEnum(Opcode.MCOPY)] = handler_abi.wrap(FrameType, MemoryHandlers.mcopy);
+    h[@intFromEnum(Opcode.GAS)] = handler_abi.wrap(FrameType, ContextHandlers.gas);
     h[@intFromEnum(Opcode.JUMPDEST)] = &JumpHandlers.jumpdest;
-    h[@intFromEnum(Opcode.TLOAD)] = &StorageHandlers.tload;
-    h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
+    h[@intFromEnum(Opcode.TLOAD)] = handler_abi.wrap(FrameType, StorageHandlers.tload);
+    h[@intFromEnum(Opcode.TSTORE)] = handler_abi.wrap(FrameType, StorageHandlers.tstore);
     // PUSH
     h[@intFromEnum(Opcode.PUSH0)] = &StackHandlers.push0;
     inline for (1..33) |i| {
@@ -154,23 +156,28 @@ pub fn getOpcodeHandlers(
     h[@intFromEnum(Opcode.LOG2)] = LogHandlers.log2;
     h[@intFromEnum(Opcode.LOG3)] = LogHandlers.log3;
     h[@intFromEnum(Opcode.LOG4)] = LogHandlers.log4;
-    h[@intFromEnum(Opcode.CREATE)] = &SystemHandlers.create;
-    h[@intFromEnum(Opcode.CALL)] = &SystemHandlers.call;
-    h[@intFromEnum(Opcode.CREATE2)] = &SystemHandlers.create2;
-    h[@intFromEnum(Opcode.CALLCODE)] = &SystemHandlers.callcode;
-    h[@intFromEnum(Opcode.RETURN)] = &SystemHandlers.@"return";
-    h[@intFromEnum(Opcode.DELEGATECALL)] = &SystemHandlers.delegatecall;
-    h[@intFromEnum(Opcode.STATICCALL)] = &SystemHandlers.staticcall;
-    h[@intFromEnum(Opcode.REVERT)] = &SystemHandlers.revert;
-    h[@intFromEnum(Opcode.INVALID)] = &invalid;
-    h[@intFromEnum(Opcode.SELFDESTRUCT)] = &SystemHandlers.selfdestruct;
+    h[@intFromEnum(Opcode.CREATE)] = handler_abi.wrap(FrameType, SystemHandlers.create);
+    h[@intFromEnum(Opcode.CALL)] = handler_abi.wrap(FrameType, SystemHandlers.call);
+    h[@intFromEnum(Opcode.CREATE2)] = handler_abi.wrap(FrameType, SystemHandlers.create2);
+    h[@intFromEnum(Opcode.CALLCODE)] = handler_abi.wrap(FrameType, SystemHandlers.callcode);
+    h[@intFromEnum(Opcode.RETURN)] = handler_abi.wrap(FrameType, SystemHandlers.@"return");
+    h[@intFromEnum(Opcode.DELEGATECALL)] = handler_abi.wrap(FrameType, SystemHandlers.delegatecall);
+    h[@intFromEnum(Opcode.STATICCALL)] = handler_abi.wrap(FrameType, SystemHandlers.staticcall);
+    h[@intFromEnum(Opcode.REVERT)] = handler_abi.wrap(FrameType, SystemHandlers.revert);
+    h[@intFromEnum(Opcode.INVALID)] = invalid;
+    h[@intFromEnum(Opcode.SELFDESTRUCT)] = handler_abi.wrap(FrameType, SystemHandlers.selfdestruct);
     // 0xF6 and 0xF7 (AUTH/AUTHCALL) belonged to EIP-3074, which was withdrawn and never
     // activated: EIP-7702 replaced it in Prague. Both are undefined on every mainnet fork.
-    h[@intFromEnum(Opcode.AUTH)] = &invalid;
-    h[@intFromEnum(Opcode.AUTHCALL)] = &invalid;
+    h[@intFromEnum(Opcode.AUTH)] = invalid;
+    h[@intFromEnum(Opcode.AUTHCALL)] = invalid;
     // Note: Synthetic opcodes (0xa5-0xbc) are NOT mapped here because they should only be used
     // internally by the dispatch system during optimization. Raw bytecode containing these values
     // should be treated as invalid opcodes and use the default invalid handler.
+
+    // Opcodes a later fork introduces are undefined on this one.
+    for (&h, 0..) |*handler, opcode| {
+        if (!fork_gas.isOpcodeDefined(FrameType.config.hardfork, @intCast(opcode))) handler.* = invalid;
+    }
 
     // Apply custom overrides
     inline for (overrides) |override| {
@@ -202,9 +209,9 @@ pub fn getSyntheticHandler(FrameType: type, synthetic_opcode: u8) FrameType.Opco
         @intFromEnum(OpcodeSynthetic.JUMP_TO_STATIC_LOCATION) => &JumpSyntheticHandlers.jump_to_static_location,
         @intFromEnum(OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION) => &JumpSyntheticHandlers.jumpi_to_static_location,
         @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_INLINE) => &MemorySyntheticHandlers.push_mload_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER) => &MemorySyntheticHandlers.push_mload_pointer,
+        @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER) => handler_abi.wrap(FrameType, MemorySyntheticHandlers.push_mload_pointer),
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_INLINE) => &MemorySyntheticHandlers.push_mstore_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_POINTER) => &MemorySyntheticHandlers.push_mstore_pointer,
+        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_POINTER) => handler_abi.wrap(FrameType, MemorySyntheticHandlers.push_mstore_pointer),
         @intFromEnum(OpcodeSynthetic.PUSH_AND_INLINE) => &BitwiseSyntheticHandlers.push_and_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_AND_POINTER) => &BitwiseSyntheticHandlers.push_and_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_OR_INLINE) => &BitwiseSyntheticHandlers.push_or_inline,
@@ -212,22 +219,10 @@ pub fn getSyntheticHandler(FrameType: type, synthetic_opcode: u8) FrameType.Opco
         @intFromEnum(OpcodeSynthetic.PUSH_XOR_INLINE) => &BitwiseSyntheticHandlers.push_xor_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER) => &BitwiseSyntheticHandlers.push_xor_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_INLINE) => &MemorySyntheticHandlers.push_mstore8_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER) => &MemorySyntheticHandlers.push_mstore8_pointer,
-        @intFromEnum(OpcodeSynthetic.MULTI_PUSH_2) => &AdvancedSyntheticHandlers.multi_push_2,
-        @intFromEnum(OpcodeSynthetic.MULTI_PUSH_3) => &AdvancedSyntheticHandlers.multi_push_3,
-        @intFromEnum(OpcodeSynthetic.MULTI_POP_2) => &AdvancedSyntheticHandlers.multi_pop_2,
-        @intFromEnum(OpcodeSynthetic.MULTI_POP_3) => &AdvancedSyntheticHandlers.multi_pop_3,
+        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER) => handler_abi.wrap(FrameType, MemorySyntheticHandlers.push_mstore8_pointer),
         @intFromEnum(OpcodeSynthetic.ISZERO_JUMPI) => &AdvancedSyntheticHandlers.iszero_jumpi,
-        @intFromEnum(OpcodeSynthetic.DUP2_MSTORE_PUSH) => &AdvancedSyntheticHandlers.dup2_mstore_push,
-        @intFromEnum(OpcodeSynthetic.DUP3_ADD_MSTORE) => &AdvancedSyntheticHandlers.dup3_add_mstore,
-        @intFromEnum(OpcodeSynthetic.SWAP1_DUP2_ADD) => &AdvancedSyntheticHandlers.swap1_dup2_add,
-        @intFromEnum(OpcodeSynthetic.PUSH_DUP3_ADD) => &AdvancedSyntheticHandlers.push_dup3_add,
-        @intFromEnum(OpcodeSynthetic.FUNCTION_DISPATCH) => &AdvancedSyntheticHandlers.function_dispatch,
-        @intFromEnum(OpcodeSynthetic.CALLVALUE_CHECK) => &AdvancedSyntheticHandlers.callvalue_check,
-        @intFromEnum(OpcodeSynthetic.PUSH0_REVERT) => &AdvancedSyntheticHandlers.push0_revert,
-        @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1) => &AdvancedSyntheticHandlers.push_add_dup1,
-        @intFromEnum(OpcodeSynthetic.MLOAD_SWAP1_DUP2) => &AdvancedSyntheticHandlers.mload_swap1_dup2,
-        @intFromEnum(OpcodeSynthetic.BACKWARD_LOOP_JUMPI) => &JumpSyntheticHandlers.backward_loop_jumpi,
+        @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1_INLINE) => &AdvancedSyntheticHandlers.push_add_dup1_inline,
+        @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1_POINTER) => &AdvancedSyntheticHandlers.push_add_dup1_pointer,
         @intFromEnum(OpcodeSynthetic.BLOCK_BEGIN) => &JumpSyntheticHandlers.block_begin,
         @intFromEnum(OpcodeSynthetic.INVALID_JUMP_TARGET) => &JumpSyntheticHandlers.invalid_jump_target,
         else => unreachable, // Invalid synthetic opcode

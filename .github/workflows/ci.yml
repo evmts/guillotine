@@ -8,6 +8,29 @@ permissions:
   contents: read
 
 jobs:
+  ast-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig 0.17.1
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Every tracked Zig file parses (zig ast-check)
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          checked=0
+          while IFS= read -r -d '' file; do
+            checked=$((checked + 1))
+            if ! zig ast-check "$file"; then failed=$((failed + 1)); fi
+          done < <(git ls-files -z -- '*.zig')
+          echo "zig ast-check: $checked tracked files, $failed failed"
+          test "$checked" -gt 0
+          test "$failed" -eq 0
+
   build-test:
     strategy:
       fail-fast: false
@@ -18,22 +41,24 @@ jobs:
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/global
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
+      # One Cargo target directory for `cargo test` and the Rust archives that
+      # build.zig links (lib/bn254.zig, lib/foundry.zig). Voltaire's
+      # libcrypto_wrappers.a is built by `zig build` itself into the Zig cache.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install Zig 0.15.2
+      - name: Install Zig 0.17.1
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
-      - name: Select a macOS SDK that Zig 0.15.2 can link
+          version: 0.17.1
+      - name: Select a macOS SDK that Zig 0.17.1 can link
         if: runner.os == 'macOS'
         shell: bash
-        # macOS SDK 26.4 and later list libSystem stubs for arm64e-macos but
-        # not arm64-macos. Zig 0.15.2 ignores arm64e stubs, so every native
-        # link fails with "undefined symbol: _abort" and friends. Keep the
-        # default Xcode while it links; otherwise use the newest one that does.
+        # Some macOS SDKs list libSystem stubs only for arm64e-macos, which Zig
+        # does not use, so native links fail with "undefined symbol: _abort".
+        # Keep the default Xcode while it links; otherwise use the newest one that does.
         run: |
           set -euo pipefail
           probe="$RUNNER_TEMP/zig-sdk-probe"
@@ -52,7 +77,7 @@ jobs:
             fi
             echo "Skipping $dev: $(grep -m1 error: "$probe/log" || tail -n1 "$probe/log")"
           done
-          echo "::error::No installed Xcode has a macOS SDK that Zig 0.15.2 can link against." >&2
+          echo "::error::No installed Xcode has a macOS SDK that Zig 0.17.1 can link against." >&2
           exit 1
       - name: Record toolchain and architecture
         id: toolchain
@@ -71,9 +96,9 @@ jobs:
           path: |
             .smithers/cache/tools/zig/global
             .smithers/cache/tools/zig/local
-          key: ${{ runner.os }}-${{ runner.arch }}-zig-0.15.2-${{ hashFiles('**/*.zig', '**/*.zig.zon', '**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-zig-0.17.1-${{ hashFiles('**/*.zig', '**/*.zig.zon', '**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-zig-0.15.2-
+            ${{ runner.os }}-${{ runner.arch }}-zig-0.17.1-
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
@@ -86,13 +111,9 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-
       - name: Foundry Linux archive regression (#815)
         run: node --test .smithers/tests/foundry-link.test.mjs
-      - name: Voltaire archive fresh-checkout regression (#862, #863)
-        if: ${{ !cancelled() }}
-        run: node --test .smithers/tests/voltaire-archive.test.mjs
-      # No prebuilt archive: lib/voltaire/target is uncached, so this is the
-      # fresh-clone `zig build` that #862 and #863 report.
+      - name: Rust workspace tests
+        run: cargo test --locked
       - name: Build
-        if: ${{ !cancelled() }}
         run: zig build
       - name: Unit tests
         if: ${{ !cancelled() }}
@@ -102,6 +123,99 @@ jobs:
         run: zig build test-opcodes
       - name: MODEXP arithmetic and gas tests
         if: ${{ !cancelled() }}
-        # The supplemental build runs only lib/voltaire/src/crypto/modexp.zig's
-        # tests. The root build's own test-modexp already runs inside test-opcodes.
-        run: zig build test-modexp --build-file .smithers/build.zig
+        run: zig build test-modexp
+      - name: Precompile tests
+        if: ${{ !cancelled() }}
+        run: zig build test-precompiles
+      - name: Layer 2 tests
+        if: ${{ !cancelled() }}
+        run: zig build test-layer2
+      - name: Benchmark harness tests
+        if: ${{ !cancelled() }}
+        run: zig build test-bench
+      - name: Fusion tests
+        if: ${{ !cancelled() }}
+        run: zig build test-fusions
+      - name: Integration tests
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: zig build test-integration
+      - name: Fuzz campaign smoke run (5 s)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=5
+      - name: JIT tests (macOS arm64)
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          zig build test-jit
+      - name: FFI libraries (ReleaseFast)
+        if: ${{ !cancelled() }}
+        run: zig build shared static -Doptimize=ReleaseFast
+      - name: C SDK tests
+        if: ${{ !cancelled() }}
+        run: make -f sdks/c/Makefile -o build-core test
+      - name: Setup Bun
+        if: ${{ !cancelled() }}
+        uses: oven-sh/setup-bun@v2
+      - name: TypeScript SDK tests
+        if: ${{ !cancelled() }}
+        working-directory: sdks/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun test
+
+  state-tests:
+    name: state-tests (fusion ${{ matrix.fusion && 'on' || 'off' }})
+    strategy:
+      fail-fast: false
+      matrix:
+        fusion: [true, false]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/global
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Every case of the pinned release (Frontier through Osaka) must pass.
+      EEST_EXPECTED_CASES: 66652
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Zig 0.17.1
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Cache EEST fixtures
+        uses: actions/cache@v4
+        with:
+          path: .cache/eest-fixtures
+          key: eest-fixtures-${{ hashFiles('scripts/fetch-eest-fixtures.sh') }}
+      - name: Fetch official EEST state fixtures (pinned release and SHA-256)
+        run: scripts/fetch-eest-fixtures.sh
+      - name: Official EEST state tests
+        run: >-
+          zig build state-tests -Doptimize=ReleaseSafe
+          -Devm-enable-fusion=${{ matrix.fusion }}
+          -- --report=eest-report-fusion-${{ matrix.fusion }}.json
+      - name: Every pinned case ran and passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I - "eest-report-fusion-${{ matrix.fusion }}.json" "$EEST_EXPECTED_CASES" <<'PY'
+          import json, sys
+          totals = json.load(open(sys.argv[1]))["totals"]
+          expected = int(sys.argv[2])
+          print(f"EEST: {totals['passed']} / {totals['cases']} passed, {totals['failed']} failed")
+          if totals["cases"] != expected or totals["passed"] != expected or totals["failed"] != 0:
+              sys.exit(f"expected {expected} / {expected} passing cases")
+          PY
+      - name: Upload EEST report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eest-report-fusion-${{ matrix.fusion }}
+          path: eest-report-fusion-${{ matrix.fusion }}.json
+          if-no-files-found: ignore

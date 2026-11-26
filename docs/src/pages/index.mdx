@@ -10,10 +10,11 @@ execution **fast**, **configurable at compile time**, and **embeddable** from
 other languages through a C ABI (`src/evm_c_api.zig`).
 
 :::warning[Alpha software]
-Guillotine is early alpha and is **not suitable for production use**. The
-Ethereum execution-spec suite does not fully pass yet. See
-[Project status](/status) for the real numbers, measured from this repository
-rather than aspirational ones.
+Guillotine is early alpha and is **not suitable for production use**. v0.1.0
+passes all 66,652 official EEST state-test cases across the 14 mainnet
+hardforks (Frontier through Osaka), with fusions on and off, but has had no
+external audit. See [Project status](/status) for the measured numbers and
+their sources.
 :::
 
 ## Why another EVM?
@@ -44,25 +45,22 @@ codebase:
 - **Dispatch-based execution, not a switch loop.** Bytecode is analysed once
   into a *dispatch schedule* of function pointers plus inline metadata, then
   executed by tail calls. There is no `switch (opcode)` on the hot path and no
-  program counter in the frame — see [Dispatch](/concepts/dispatch).
+  program counter in the frame. See [Dispatch](/concepts/dispatch).
 - **Gas batched per basic block.** Analysis computes the static gas cost of a
   whole basic block, so the interpreter charges once per block instead of once
   per instruction.
-- **Opcode fusion.** Common adjacent sequences (`PUSH1 n; MSTORE`, a Solidity
-  function-selector comparison, …) collapse into a single synthetic handler. See
+- **Opcode fusion.** Common adjacent sequences (`PUSH1 n; MSTORE`,
+  `ISZERO; PUSH; JUMPI`, a `PUSH` before a static `JUMP`) collapse into a single
+  synthetic handler. See
   [Synthetic opcodes](/concepts/synthetic-opcodes).
 - **A differential tracer built in.** Every handler can be validated in
   lock-step against `MinimalEvm`, a plain, readable, switch-loop reference
   interpreter that lives in the same repository. See [Tracing and
   debugging](/guides/tracing).
-- **Self-contained benchmarks & opt-in ARM64 JIT.** Sixteen ReleaseFast
-  benchmark suites track regressions across every subsystem, alongside an opt-in
-  zero-dependency ARM64 JIT tier (`src/jit/`). See
-  [Benchmarks and native JIT](/guides/benchmarks-and-jit).
 
 ## Two EVMs, one repository
 
-| | Performance EVM (`src/`) | Reference EVM (`MinimalEvm` in `src/tracer/`) |
+| | Performance EVM (`src/`) | `MinimalEvm` (`src/tracer/`) |
 | --- | --- | --- |
 | Execution model | Dispatch schedule + tail calls | Sequential `switch` over bytecode |
 | Optimised for | Throughput | Readability and correctness |
@@ -71,7 +69,9 @@ codebase:
 
 They are not competitors. `MinimalEvm` is the thing that lets you *trust* the
 fast one: the tracer steps both machines forward together and asserts they agree
-on stack, memory, gas, and storage after every instruction.
+on stack, memory, gas, and storage after every instruction. The standalone
+readable reference EVM is a separate repository,
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini).
 
 ## Where to go next
 
@@ -79,8 +79,8 @@ on stack, memory, gas, and storage after every instruction.
 
 ### Install the toolchain
 
-[Installation](/installation) lists the actual verified prerequisites — Zig
-0.15.x, a Rust toolchain for the vendored crypto wrappers, and a C compiler.
+[Installation](/installation) lists the prerequisites: stock Zig 0.17.1 (no
+compiler fork), a Rust toolchain for the vendored crypto wrappers, and a C compiler.
 
 ### Run your first execution
 
@@ -105,5 +105,5 @@ each SDK, honestly labelled.
 
 Guillotine is the execution engine at the bottom of the Tevm stack. If you are
 trying to work out whether you want this repository, Tevm, ZEVM, Voltaire, or
-guillotine-mini, read [The stack](/stack) first — it is a two-minute page that
+guillotine-mini, read [The stack](/stack) first. It is a two-minute page that
 will save you an afternoon.

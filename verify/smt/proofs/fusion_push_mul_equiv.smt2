@@ -11,27 +11,27 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:47 (push_mul_inline)
-;;   |         pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_MUL_INLINE, cursor);
-;;   |             validate_stack(self);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:40 (push_mul_inline)
+;;   |         pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_MUL_INLINE, cursor, s.sp, gas);
 ;;   | 
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_INLINE, Dispatch, Dispatch.Item, cursor);
-;;   |             const top = self.stack.peek_unsafe();
-;;   |             self.stack.set_top_unsafe(op_data.metadata.value *% top);
+;;   |             const top = s.peek_unsafe();
+;;   |             s.set_top_unsafe(op_data.metadata.value *% top);
 ;;   | 
-;;   |             return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_MUL_INLINE);
+;;   |             return N.next(self, .PUSH_MUL_INLINE, cursor, s.sp, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:59 (push_mul_pointer)
-;;   |         pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_MUL_POINTER, cursor);
-;;   |             validate_stack(self);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:52 (push_mul_pointer)
+;;   |         pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_MUL_POINTER, cursor, s.sp, gas);
 ;;   | 
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
-;;   |             const top = self.stack.peek_unsafe();
-;;   |             self.stack.set_top_unsafe(op_data.metadata.value_ptr.* *% top);
+;;   |             const top = s.peek_unsafe();
+;;   |             s.set_top_unsafe(op_data.metadata.value_ptr.* *% top);
 ;;   | 
-;;   |             return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_MUL_POINTER);
+;;   |             return N.next(self, .PUSH_MUL_POINTER, cursor, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

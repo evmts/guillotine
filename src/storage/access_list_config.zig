@@ -8,19 +8,18 @@
 /// Configuration is validated at compile time to ensure EVM compliance
 /// and proper gas accounting.
 const std = @import("std");
-const GasConstants = @import("voltaire").GasConstants;
 
 pub const AccessListConfig = struct {
     const Self = @This();
 
     /// Gas cost for accessing a cold (unaccessed) account. Defaults to 2600 per EIP-2929
-    cold_account_access_cost: u64 = GasConstants.ColdAccountAccessCost,
+    cold_account_access_cost: u64 = 2600,
     /// Gas cost for accessing a warm (previously accessed) account. Defaults to 100 per EIP-2929
-    warm_account_access_cost: u64 = GasConstants.WarmStorageReadCost,
+    warm_account_access_cost: u64 = 100,
     /// Gas cost for accessing a cold (unaccessed) storage slot. Defaults to 2100 per EIP-2929
-    cold_sload_cost: u64 = GasConstants.ColdSloadCost,
+    cold_sload_cost: u64 = 2100,
     /// Gas cost for accessing a warm (previously accessed) storage slot. Defaults to 100 per EIP-2929
-    warm_sload_cost: u64 = GasConstants.WarmStorageReadCost,
+    warm_sload_cost: u64 = 100,
     /// The type used for storage slot indices. Defaults to u256 for standard EVM compatibility
     SlotType: type = u256,
 

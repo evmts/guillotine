@@ -28,13 +28,13 @@ pub fn Handlers(FrameType: type) type {
         /// The actual Keccak variant used depends on WordType:
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
-        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.KECCAK256, cursor);
             self.validateOpcodeHandler(.KECCAK256, cursor);
             const offset = self.stack.pop_unsafe(); // Top of stack is offset
             const size = self.stack.pop_unsafe(); // Second is size
 
-            // Handle empty data case first: EVM ignores offset when size == 0.
+            // Handle empty data case
             if (size == 0) {
                 @branchHint(.unlikely);
                 // Empty input costs only the 30 gas base, which the basic block
@@ -67,7 +67,8 @@ pub fn Handlers(FrameType: type) type {
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
             }
 
-            // Check bounds (only for non-zero size)
+            // Hashing a non-empty region beyond usize could never pay for its memory. This
+            // check follows the empty case because an empty region ignores its offset.
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 @branchHint(.unlikely);
                 self.afterComplete(.KECCAK256);
@@ -508,7 +509,7 @@ test "KECCAK256 opcode - patterns" {
     defer frame.deinit(testing.allocator);
 
     // Test pattern: all zeros
-    const zeros = [_]u8{0} ** 64;
+    const zeros = @as([64]u8, @splat(0));
     try frame.memory.set_data_evm(testing.allocator, 0, &zeros);
 
     try frame.stack.push(0); // offset
@@ -520,7 +521,7 @@ test "KECCAK256 opcode - patterns" {
     const zeros_hash = try frame.stack.pop();
 
     // Test pattern: all ones
-    const ones = [_]u8{0xFF} ** 64;
+    const ones = @as([64]u8, @splat(0xFF));
     try frame.memory.set_data_evm(testing.allocator, 0, &ones);
 
     try frame.stack.push(0); // offset

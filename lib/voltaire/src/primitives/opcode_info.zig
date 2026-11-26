@@ -21,7 +21,7 @@ pub const OpcodeInfo = struct {
 
 /// Static opcode information for all 256 opcodes
 pub const OPCODE_INFO = blk: {
-    var info: [256]OpcodeInfo = [_]OpcodeInfo{.{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 }} ** 256;
+    var info: [256]OpcodeInfo = @as([256]OpcodeInfo, @splat(.{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 }));
 
     // 0x00s: Stop and Arithmetic Operations
     info[@intFromEnum(Opcode.STOP)] = .{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 };

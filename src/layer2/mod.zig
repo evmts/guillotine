@@ -9,3 +9,5 @@ pub const Layer2Config = layer2_config.Layer2Config;
 pub const OptimismConfig = layer2_config.OptimismConfig;
 pub const BaseConfig = layer2_config.BaseConfig;
 pub const OpSpecId = optimism.OpSpecId;
+
+pub const executor = @import("executor.zig");

@@ -1,104 +1,91 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
+const log = @import("../log.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// Jump operation handlers for the EVM stack frame.
-/// These handle control flow operations including JUMP, JUMPI, JUMPDEST, and PC.
+/// These handle control flow operations including JUMP, JUMPI, and JUMPDEST.
 pub fn Handlers(FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
+
+        /// Resolve a dynamic jump destination to the schedule cursor of its JUMPDEST.
+        /// Returns null when the destination is not a JUMPDEST.
+        inline fn resolve(self: *FrameType, dest: WordType) ?[*]const Dispatch.Item {
+            if (dest > std.math.maxInt(FrameType.PcType)) return null;
+            const dest_pc: FrameType.PcType = @intCast(dest);
+            const target = self.jump_table.findJumpTarget(dest_pc) orelse return null;
+            return target.cursor;
+        }
 
         /// JUMP opcode (0x56) - Unconditional jump.
-        /// Basic-block entry validation guarantees stack >= 1 (proven by BLOCK-SOUND).
-        /// Uses O(1) single-compare dense lookup and direct JUMPDEST tail-call.
-        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.JUMP, cursor);
-            const dest = self.stack.pop_unsafe();
-            const target = self.jump_table.findJumpTargetU256(@as(u256, dest)) orelse {
-                @branchHint(.unlikely);
-                self.afterComplete(.JUMP);
-                return Error.InvalidJump;
-            };
-
-            const build_options = @import("build_options");
-            if (comptime build_options.enable_tracing) {
-                const frame_handlers = @import("../frame/frame_handlers.zig");
-                frame_handlers.setCurrentPc(@truncate(dest));
-            }
-            const next_cursor = target.cursor;
-            const next_handler = next_cursor[0].opcode_handler;
-            self.afterInstruction(.JUMP, next_handler, next_cursor);
-            return @call(Dispatch.getTailCallModifier(), next_handler, .{ self, next_cursor });
+        /// Pops destination from stack and transfers control to that location.
+        /// The destination must be a valid JUMPDEST.
+        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .JUMP, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            if (s.size(self) < 1) return N.exit(self, .JUMP, s.sp, gas, .stack_underflow);
+            const dest = s.pop_unsafe();
+            const target = resolve(self, dest) orelse return N.exit(self, .JUMP, s.sp, gas, .invalid_jump);
+            return N.jump(self, .JUMP, target, s.sp, gas);
         }
 
         /// JUMPI opcode (0x57) - Conditional jump.
-        /// Basic-block entry validation guarantees stack >= 2 (proven by BLOCK-SOUND).
-        /// Uses O(1) single-compare dense lookup and direct JUMPDEST tail-call.
-        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.JUMPI, cursor);
-            const jump_table = self.jump_table;
-            const dest = self.stack.pop_unsafe();
-            const condition = self.stack.pop_unsafe();
+        /// Pops destination and condition from stack.
+        /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
+        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .JUMPI, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            if (s.size(self) < 2) return N.exit(self, .JUMPI, s.sp, gas, .stack_underflow);
+            const dest = s.pop_unsafe();
+            const condition = s.pop_unsafe();
+            if (condition == 0) return N.next(self, .JUMPI, cursor, s.sp, gas);
+            const target = resolve(self, dest) orelse return N.exit(self, .JUMPI, s.sp, gas, .invalid_jump);
+            return N.jump(self, .JUMPI, target, s.sp, gas);
+        }
 
-            if (condition != 0) {
-                if (jump_table.findJumpTargetU256(@as(u256, dest))) |jump_dispatch| {
-                    const build_options = @import("build_options");
-                    if (comptime build_options.enable_tracing) {
-                        const frame_handlers = @import("../frame/frame_handlers.zig");
-                        frame_handlers.setCurrentPc(@truncate(dest));
-                    }
-                    const next_cursor = jump_dispatch.cursor;
-                    const next_handler = next_cursor[0].opcode_handler;
-                    self.afterInstruction(.JUMPI, next_handler, next_cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), next_handler, .{ self, next_cursor });
-                } else {
-                    self.afterComplete(.JUMPI);
-                    return Error.InvalidJump;
-                }
-            } else {
-                @branchHint(.likely);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .JUMPI);
+        /// Enter a basic block: charge its static gas and validate its stack bounds in one
+        /// shot. Every instruction in the block then runs without gas or bounds checks.
+        /// Shared by JUMPDEST and BLOCK_BEGIN. The cursor points to: [0] = handler,
+        /// [1] = jump_dest metadata for the block.
+        pub inline fn enterBlock(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_before: FrameType.GasType) handler_abi.ExitCode {
+            N.before(self, opcode, cursor, sp, gas_before);
+            const meta = cursor[1].jump_dest;
+
+            // Negative gas pattern: a single branch detects out of gas.
+            const gas = gas_before - @as(FrameType.GasType, @intCast(meta.gas));
+            if (gas < 0) {
+                @branchHint(.unlikely);
+                return N.exit(self, opcode, sp, gas, .out_of_gas);
             }
+
+            var s = N.StackView{ .sp = sp };
+            const size: u32 = @intCast(s.size(self));
+            const min_stack: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
+            const max_stack: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
+            switch (verified_ops.blockStackGuardFast(size, min_stack, max_stack, FrameType.Stack.stack_capacity)) {
+                .ok => {},
+                .underflow => {
+                    @branchHint(.unlikely);
+                    return N.exit(self, opcode, sp, gas, .stack_underflow);
+                },
+                .overflow => {
+                    @branchHint(.unlikely);
+                    return N.exit(self, opcode, sp, gas, .stack_overflow);
+                },
+            }
+            return N.next(self, opcode, cursor, sp, gas);
         }
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
-        /// Charges static gas and validates stack bounds for the entire basic block
-        /// using the verified single-compare stack guard (`verified_ops.blockStackGuardFast`).
-        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.JUMPDEST, cursor);
-            const verified_ops = @import("../verified_ops.zig");
-            const dispatch = Dispatch{ .cursor = cursor };
-            const op_data = dispatch.getOpData(.JUMPDEST);
-            const gas_cost = op_data.metadata.gas;
-            const min_stack = op_data.metadata.min_stack;
-            const max_stack = op_data.metadata.max_stack;
-
-            self.gas_remaining -= @as(FrameType.GasType, @intCast(gas_cost));
-            if (self.gas_remaining < 0) {
-                self.afterComplete(.JUMPDEST);
-                return Error.OutOfGas;
-            }
-
-            const current_stack_size: u32 = @intCast(self.stack.size());
-            const min_u16: u16 = if (min_stack > 0) @intCast(min_stack) else 0;
-            const max_u16: u16 = if (max_stack > 0) @intCast(max_stack) else 0;
-            switch (verified_ops.blockStackGuardFast(current_stack_size, min_u16, max_u16, @TypeOf(self.stack).stack_capacity)) {
-                .ok => {},
-                .underflow => {
-                    self.afterComplete(.JUMPDEST);
-                    return Error.StackUnderflow;
-                },
-                .overflow => {
-                    self.afterComplete(.JUMPDEST);
-                    return Error.StackOverflow;
-                },
-            }
-
-            self.afterInstruction(.JUMPDEST, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        /// It is also the gas consumption and stack validation point for its basic block.
+        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            return enterBlock(self, .JUMPDEST, cursor, sp, gas);
         }
     };
 }
@@ -517,51 +504,98 @@ test "JUMPI opcode - no validation when not taken" {
 }
 
 test "JUMP opcode - invalid destination should revert" {
-    const allocator = testing.allocator;
-    const Evm = @import("../evm.zig").Evm(.{ .enable_fusion = false });
-    const Database = @import("../storage/database.zig").Database;
-    const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});
-    const zero = Address.ZERO_ADDRESS;
-    var db = Database.init(allocator);
-    defer db.deinit();
-    var evm = try Evm.init(allocator, &db, BlockInfo.init(), .{ .gas_limit = 1_000_000, .coinbase = zero, .chain_id = 1 }, 0, zero);
-    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
 
-    const code = [_]u8{ 0x60, 0x03, 0x56, 0x00, 0x5b, 0x00 };
-    var bytecode = try Evm.Bytecode.init(allocator, &code);
+    // Create bytecode with JUMPDEST at position 5
+    const bytecode_data = [_]u8{
+        0x60, 0x03, // PUSH1 3 (invalid destination - not a JUMPDEST)
+        0x56, // JUMP
+        0x00, // STOP (should not reach here)
+        0x5b, // JUMPDEST at position 5
+        0x00, // STOP
+    };
+    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data, null);
     defer bytecode.deinit();
-    var analysis = try Evm.Frame.Dispatch.initWithJumpTable(allocator, &bytecode, &Evm.Frame.opcode_handlers, null);
-    defer analysis.schedule.deinit();
-    defer analysis.jump_table.deinit(allocator);
 
-    try testing.expect(analysis.jump_table.find_jump_target(4) != null);
-    var frame = try Evm.Frame.init(allocator, 1_000_000, zero, 0, &.{}, &evm);
-    defer frame.deinit(allocator);
-    try testing.expectError(error.InvalidJump, frame.interpret(&analysis.schedule, &analysis.jump_table, &code));
+    // Create dispatch with jump table
+    const schedule = try TestFrame.Dispatch.init(testing.allocator, &bytecode, &TestFrame.opcode_handlers);
+    defer testing.allocator.free(schedule);
+
+    const jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, bytecode);
+    defer testing.allocator.free(jump_table.entries);
+
+    // Find the JUMP handler in the schedule
+    var jump_handler_index: ?usize = null;
+    for (schedule, 0..) |item, i| {
+        if (item == .opcode_handler) {
+            // This is a simplification - in real code we'd check if it's the JUMP handler
+            // For this test, we know the third handler is JUMP (after two PUSH1s)
+            if (i == 2) {
+                jump_handler_index = i;
+                break;
+            }
+        }
+    }
+
+    try testing.expect(jump_handler_index != null);
+
+    // Push invalid destination (3)
+    try frame.stack.push(3);
+
+    // Call the JUMP handler
+    const result = TestFrame.JumpHandlers.jump(&frame, schedule.ptr + jump_handler_index.?);
+
+    // Should return InvalidJump error
+    try testing.expectError(TestFrame.Error.InvalidJump, result);
 }
 
 test "JUMPI opcode - invalid destination should revert when taken" {
-    const allocator = testing.allocator;
-    const Evm = @import("../evm.zig").Evm(.{ .enable_fusion = false });
-    const Database = @import("../storage/database.zig").Database;
-    const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});
-    const zero = Address.ZERO_ADDRESS;
-    var db = Database.init(allocator);
-    defer db.deinit();
-    var evm = try Evm.init(allocator, &db, BlockInfo.init(), .{ .gas_limit = 1_000_000, .coinbase = zero, .chain_id = 1 }, 0, zero);
-    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
 
-    const code = [_]u8{ 0x60, 0x01, 0x60, 0x05, 0x57, 0x00, 0x5b, 0x00 };
-    var bytecode = try Evm.Bytecode.init(allocator, &code);
+    // Create bytecode with JUMPDEST at position 6
+    const bytecode_data = [_]u8{
+        0x60, 0x01, // PUSH1 1 (condition - true)
+        0x60, 0x04, // PUSH1 4 (invalid destination - not a JUMPDEST)
+        0x57, // JUMPI
+        0x5b, // JUMPDEST at position 6
+        0x00, // STOP
+    };
+    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data, null);
     defer bytecode.deinit();
-    var analysis = try Evm.Frame.Dispatch.initWithJumpTable(allocator, &bytecode, &Evm.Frame.opcode_handlers, null);
-    defer analysis.schedule.deinit();
-    defer analysis.jump_table.deinit(allocator);
 
-    try testing.expect(analysis.jump_table.find_jump_target(6) != null);
-    var frame = try Evm.Frame.init(allocator, 1_000_000, zero, 0, &.{}, &evm);
-    defer frame.deinit(allocator);
-    try testing.expectError(error.InvalidJump, frame.interpret(&analysis.schedule, &analysis.jump_table, &code));
+    // Create dispatch with jump table
+    const schedule = try TestFrame.Dispatch.init(testing.allocator, &bytecode, &TestFrame.opcode_handlers);
+    defer testing.allocator.free(schedule);
+
+    const jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, bytecode);
+    defer testing.allocator.free(jump_table.entries);
+
+    // Find the JUMPI handler in the schedule
+    var jumpi_handler_index: ?usize = null;
+    for (schedule, 0..) |item, i| {
+        if (item == .opcode_handler) {
+            // This is a simplification - in real code we'd check if it's the JUMPI handler
+            // For this test, we know the fifth handler is JUMPI (after four PUSH1s)
+            if (i == 4) {
+                jumpi_handler_index = i;
+                break;
+            }
+        }
+    }
+
+    try testing.expect(jumpi_handler_index != null);
+
+    // Push condition and destination (stack order: bottom to top)
+    try frame.stack.push(1); // Condition (true)
+    try frame.stack.push(4); // Invalid destination (top of stack)
+
+    // Call the JUMPI handler
+    const result = TestFrame.JumpHandlers.jumpi(&frame, schedule.ptr + jumpi_handler_index.?);
+
+    // Should return InvalidJump error
+    try testing.expectError(TestFrame.Error.InvalidJump, result);
 }
 
 test "Jump operations - integration test" {

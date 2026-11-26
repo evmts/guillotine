@@ -5,8 +5,13 @@ const std = @import("std");
 pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
     const Self = DispatchType;
 
-    const Cursor = @FieldType(Self, "cursor");
-
+    // Performance note: JumpTable is a compact array of structs rather than a sparse bitmap. A sparse bitmap would provide O(1) lookups
+    // But at the cost of cpu cache utilization. For the scale of how many jump destinations contracts have it is more performant to
+    // Create a compact data structure where all to most of the items fit in a single cache line and can be quickly binary searched
+    // 
+    // Optimization: We use interpolated search to start at an estimated position based on the assumption that
+    // JUMPDESTs are roughly evenly distributed through bytecode. This reduces average search iterations significantly
+    // for large jump tables while maintaining O(log n) worst case performance
     return struct {
         /// Jump table entry for dynamic jumps
         pub const JumpTableEntry = struct {
@@ -14,69 +19,66 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
             dispatch: Self,
         };
 
-        entries: []const JumpTableEntry = &.{},
-        /// Each slot is one plus the schedule index, with zero marking an invalid target.
-        dense_indices: []const u32 = &.{},
-        schedule_base: ?Cursor = null,
+        entries: []const JumpTableEntry,
 
-        pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
-            allocator.free(self.dense_indices);
-            allocator.free(self.entries);
-        }
-
-        /// Check the full stack operand before narrowing it to a PC or dense index.
-        pub inline fn findJumpTargetU256(self: *const @This(), dest: u256) ?Self {
-            if (self.schedule_base) |base| {
-                @branchHint(.likely);
-                if (dest >= self.dense_indices.len) return null;
-                const slot = self.dense_indices[@as(usize, @intCast(dest))];
-                if (slot == 0) return null;
-                return .{ .cursor = base + (slot - 1) };
+        /// Find the dispatch for a given PC using binary search with interpolated starting point
+        pub fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
+            // Early return for empty table
+            if (self.entries.len == 0) return null;
+            
+            // Quick check: if target is outside bounds, return early
+            if (target_pc < self.entries[0].pc or target_pc > self.entries[self.entries.len - 1].pc) {
+                return null;
             }
-
-            if (dest > std.math.maxInt(FrameType.PcType)) return null;
-            const entry = self.findEntry(@intCast(dest)) orelse return null;
-            return entry.dispatch;
-        }
-
-        /// Find the handler cursor for a valid JUMPDEST PC.
-        pub fn find_jump_target(self: *const @This(), target: FrameType.PcType) ?Cursor {
-            if (self.schedule_base) |base| {
-                @branchHint(.likely);
-                if (target >= self.dense_indices.len) return null;
-                const slot = self.dense_indices[@intCast(target)];
-                if (slot == 0) return null;
-                return base + (slot - 1);
-            }
-
-            const entry = self.findEntry(target) orelse return null;
-            return entry.dispatch.cursor;
-        }
-
-        fn findEntry(self: *const @This(), target: FrameType.PcType) ?*const JumpTableEntry {
+            
             var left: usize = 0;
-            var right = self.entries.len;
+            var right: usize = self.entries.len;
+            
+            // Interpolated search optimization: Start at the expected position
+            // Since JUMPDESTs are roughly evenly distributed through bytecode,
+            // we can estimate where the target_pc would be in our sorted array
+            const max_pc = self.entries[self.entries.len - 1].pc;
+            const min_pc = self.entries[0].pc;
+            
+            if (max_pc > min_pc) {
+                // Calculate interpolated starting position
+                const pc_range = max_pc - min_pc;
+                const target_offset = target_pc - min_pc;
+                const estimated_index = (target_offset * self.entries.len) / pc_range;
+                
+                // Start our search at the interpolated position
+                // We'll expand outward from this point
+                const start_idx = @min(estimated_index, self.entries.len - 1);
+                
+                // Check if we got lucky with our estimate
+                if (self.entries[start_idx].pc == target_pc) {
+                    return self.entries[start_idx].dispatch;
+                }
+                
+                // Determine which direction to search based on our estimate
+                if (self.entries[start_idx].pc < target_pc) {
+                    left = start_idx + 1;
+                } else {
+                    right = start_idx;
+                }
+            }
+
+            // Standard binary search from the adjusted bounds
+            const has_frame_config = @hasField(FrameType, "frame_config");
+            var loop_counter = if (has_frame_config) FrameType.frame_config.createLoopSafetyCounter().init(FrameType.frame_config.loop_quota orelse 0) else {};
             while (left < right) {
-                const mid = left + ((right - left) >> 1);
-                const entry = &self.entries[mid];
-                if (entry.pc == target) return entry;
-                if (entry.pc < target) {
+                if (has_frame_config) loop_counter.inc();
+                const mid = left + (right - left) / 2;
+                const entry = self.entries[mid];
+
+                if (entry.pc == target_pc) return entry.dispatch;
+                if (entry.pc < target_pc) {
                     left = mid + 1;
                 } else {
                     right = mid;
                 }
             }
             return null;
-        }
-
-        /// Find the dispatch for a given PC.
-        pub inline fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
-            if (self.schedule_base != null) {
-                const cursor = self.find_jump_target(target_pc) orelse return null;
-                return .{ .cursor = cursor };
-            }
-            const entry = self.findEntry(target_pc) orelse return null;
-            return entry.dispatch;
         }
 
         /// Find the PC for a given dispatch pointer
@@ -109,24 +111,6 @@ const TestFrame = struct {
 const TestDispatch = struct {
     cursor: [*]const u8,
 };
-
-test "JumpTable dense lookup decodes the first schedule slot and rejects holes" {
-    const JumpTableType = JumpTable(TestFrame, TestDispatch);
-    const schedule = [_]u8{ 1, 2, 3, 4 };
-    const indices = [_]u32{ 1, 0, 4 };
-    const jump_table = JumpTableType{
-        .schedule_base = &schedule,
-        .dense_indices = &indices,
-    };
-
-    try testing.expectEqual(@as([*]const u8, &schedule), jump_table.find_jump_target(0).?);
-    try testing.expect(jump_table.find_jump_target(1) == null);
-    try testing.expectEqual(@as([*]const u8, &schedule) + 3, jump_table.findJumpTarget(2).?.cursor);
-    try testing.expect(jump_table.find_jump_target(3) == null);
-    try testing.expectEqual(@as([*]const u8, &schedule) + 3, jump_table.findJumpTargetU256(2).?.cursor);
-    try testing.expect(jump_table.findJumpTargetU256(1) == null);
-    try testing.expect(jump_table.findJumpTargetU256((@as(u256, 1) << 128) + 2) == null);
-}
 
 test "JumpTable binary search finds existing entries" {
     const JumpTableType = JumpTable(TestFrame, TestDispatch);
@@ -165,7 +149,6 @@ test "JumpTable binary search returns null for non-existent entries" {
     try testing.expect(jump_table.findJumpTarget(5) == null);
     try testing.expect(jump_table.findJumpTarget(20) == null);
     try testing.expect(jump_table.findJumpTarget(50) == null);
-    try testing.expect(jump_table.findJumpTargetU256((@as(u256, 1) << 32) + 10) == null);
 }
 
 test "JumpTable handles empty entries" {
@@ -178,7 +161,7 @@ test "JumpTable handles empty entries" {
     try testing.expect(jump_table.findJumpTarget(100) == null);
 }
 
-test "JumpTable binary search across a large table" {
+test "JumpTable interpolated search optimization" {
     const JumpTableType = JumpTable(TestFrame, TestDispatch);
     
     // Create a large table with evenly distributed PCs to test interpolation
@@ -193,6 +176,7 @@ test "JumpTable binary search across a large table" {
     const jump_table = JumpTableType{ .entries = &entries };
     
     // Test finding entries at various positions
+    // The interpolated search should find these efficiently
     
     // Test near beginning
     const result1 = jump_table.findJumpTarget(20);
@@ -209,7 +193,7 @@ test "JumpTable binary search across a large table" {
     try testing.expect(result3 != null);
     try testing.expectEqual(@as(usize, 0x1000 + 98 * 0x100), @intFromPtr(result3.?.cursor));
     
-    // Test an interior entry
+    // Test exact interpolation hit (should return immediately)
     const result4 = jump_table.findJumpTarget(450); // Exactly at index 45
     try testing.expect(result4 != null);
     try testing.expectEqual(@as(usize, 0x1000 + 45 * 0x100), @intFromPtr(result4.?.cursor));
@@ -219,7 +203,7 @@ test "JumpTable binary search across a large table" {
     try testing.expect(jump_table.findJumpTarget(505) == null);
     try testing.expect(jump_table.findJumpTarget(1000) == null); // Beyond max
     
-    // Test boundary checks
+    // Test boundary checks (early return optimization)
     try testing.expect(jump_table.findJumpTarget(0xFFFF) == null); // Way beyond max
     try testing.expect(jump_table.findJumpTarget(0) != null); // First element
     try testing.expect(jump_table.findJumpTarget(990) != null); // Last element

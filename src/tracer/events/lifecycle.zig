@@ -250,7 +250,7 @@ test "lifecycle event sizes" {
     const testing = std.testing;
     
     // Ensure reasonable sizes for lifecycle events
-    try testing.expect(@sizeOf(TransactionStart) <= 320);
+    try testing.expect(@sizeOf(TransactionStart) <= 256);
     try testing.expect(@sizeOf(TransactionEnd) <= 384);
     try testing.expect(@sizeOf(VmStep) <= 256);
     try testing.expect(@sizeOf(CallEnter) <= 128);

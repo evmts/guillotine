@@ -18,7 +18,7 @@ const NUM_ACCOUNTS = 6;
 const NUM_SLOTS = 6;
 
 fn makeAddr(idx: u8) [20]u8 {
-    var bytes = [_]u8{0} ** 20;
+    var bytes = @as([20]u8, @splat(0));
     bytes[19] = (idx % NUM_ACCOUNTS) + 1;
     return bytes;
 }
@@ -27,13 +27,13 @@ const RefAccount = struct {
     exists: bool = false,
     balance: u256 = 0,
     nonce: u64 = 0,
-    code_hash: [32]u8 = [_]u8{0} ** 32,
+    code_hash: [32]u8 = @as([32]u8, @splat(0)),
 };
 
 const RefState = struct {
-    accounts: [NUM_ACCOUNTS]RefAccount = [_]RefAccount{.{}} ** NUM_ACCOUNTS,
-    storage: [NUM_ACCOUNTS][NUM_SLOTS]u256 = [_][NUM_SLOTS]u256{[_]u256{0} ** NUM_SLOTS} ** NUM_ACCOUNTS,
-    transient: [NUM_ACCOUNTS][NUM_SLOTS]u256 = [_][NUM_SLOTS]u256{[_]u256{0} ** NUM_SLOTS} ** NUM_ACCOUNTS,
+    accounts: [NUM_ACCOUNTS]RefAccount = @as([NUM_ACCOUNTS]RefAccount, @splat(.{})),
+    storage: [NUM_ACCOUNTS][NUM_SLOTS]u256 = @as([NUM_ACCOUNTS][NUM_SLOTS]u256, @splat(@as([NUM_SLOTS]u256, @splat(0)))),
+    transient: [NUM_ACCOUNTS][NUM_SLOTS]u256 = @as([NUM_ACCOUNTS][NUM_SLOTS]u256, @splat(@as([NUM_SLOTS]u256, @splat(0)))),
 };
 
 fn verifyDbMatchesRef(db: *Database, ref: *const RefState) !void {
@@ -67,7 +67,7 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
 
     // Snapshot stack storing (snapshot_id, RefState copy)
     const SnapEntry = struct { id: u64, state: RefState };
-    var snaps = std.ArrayList(SnapEntry){};
+    var snaps = std.ArrayList(SnapEntry).empty;
     defer snaps.deinit(allocator);
 
     var i: usize = 0;
@@ -83,8 +83,8 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
                 const acc = Account{
                     .balance = @as(u256, val_byte) * 1000,
                     .nonce = val_byte,
-                    .code_hash = [_]u8{0} ** 32,
-                    .storage_root = [_]u8{0} ** 32,
+                    .code_hash = @as([32]u8, @splat(0)),
+                    .storage_root = @as([32]u8, @splat(0)),
                 };
                 try db.set_account(addr, acc);
                 ref.accounts[a_idx] = .{
@@ -126,9 +126,10 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
                 try db.set_storage(addr, @intCast(slot_idx), val);
                 ref.storage[a_idx][slot_idx] = val;
             },
-            5 => { // delete_account
+            5 => { // delete_account (removes the account and its storage)
                 try db.delete_account(addr);
                 ref.accounts[a_idx] = .{};
+                ref.storage[a_idx] = @splat(0);
             },
             6 => { // create_snapshot (up to depth 6)
                 if (snaps.items.len < 6) {
@@ -182,14 +183,14 @@ pub fn fuzzJournalOriginalStorageIndex(_: void, input: []const u8) !void {
     defer journal.deinit();
 
     // Independent flat log of (snap_id, addr_idx, slot_idx, original_value)
-    const LogEntry = struct { snap_id: u16, addr_idx: u8, slot_idx: u8, orig: u256 };
-    var ref_log = std.ArrayList(LogEntry){};
+    const LogEntry = struct { snap_id: JournalType.SnapshotIdType, addr_idx: u8, slot_idx: u8, orig: u256 };
+    var ref_log = std.ArrayList(LogEntry).empty;
     defer ref_log.deinit(allocator);
 
-    var snaps = std.ArrayList(u16){};
+    var snaps = std.ArrayList(JournalType.SnapshotIdType).empty;
     defer snaps.deinit(allocator);
 
-    var current_snap: u16 = 0;
+    var current_snap: JournalType.SnapshotIdType = 0;
 
     var i: usize = 0;
     while (i + 3 <= input.len) : (i += 3) {
@@ -256,8 +257,8 @@ pub fn fuzzAccessListWarmCold(_: void, input: []const u8) !void {
     var al = AccessList.init(allocator);
     defer al.deinit();
 
-    var ref_addrs = [_]bool{false} ** NUM_ACCOUNTS;
-    var ref_slots = [_][NUM_SLOTS]bool{[_]bool{false} ** NUM_SLOTS} ** NUM_ACCOUNTS;
+    var ref_addrs = @as([NUM_ACCOUNTS]bool, @splat(false));
+    var ref_slots = @as([NUM_ACCOUNTS][NUM_SLOTS]bool, @splat(@as([NUM_SLOTS]bool, @splat(false))));
 
     var i: usize = 0;
     while (i + 2 <= input.len) : (i += 2) {
@@ -295,8 +296,8 @@ pub fn fuzzAccessListWarmCold(_: void, input: []const u8) !void {
             else => { // clear
                 if (input[i + 1] < 16) {
                     al.clear();
-                    ref_addrs = [_]bool{false} ** NUM_ACCOUNTS;
-                    ref_slots = [_][NUM_SLOTS]bool{[_]bool{false} ** NUM_SLOTS} ** NUM_ACCOUNTS;
+                    ref_addrs = @as([NUM_ACCOUNTS]bool, @splat(false));
+                    ref_slots = @as([NUM_ACCOUNTS][NUM_SLOTS]bool, @splat(@as([NUM_SLOTS]bool, @splat(false))));
                 }
             },
         }
@@ -312,13 +313,26 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz database nested snapshots, ephemeral views, and storage model" {
-    try std.testing.fuzz({}, fuzzDatabaseSnapshotsAndViews, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzDatabaseSnapshotsAndViews), .{ .corpus = seed_corpus });
 }
 
 test "fuzz journal O(1) original storage index vs brute-force log under nested reverts" {
-    try std.testing.fuzz({}, fuzzJournalOriginalStorageIndex, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzJournalOriginalStorageIndex), .{ .corpus = seed_corpus });
 }
 
 test "fuzz EIP-2929 access list warm/cold gas accounting and cloning" {
-    try std.testing.fuzz({}, fuzzAccessListWarmCold, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzAccessListWarmCold), .{ .corpus = seed_corpus });
+}
+
+// Found by `zig build fuzz-campaign` (seed 1795676221327508486, iteration 47):
+// set_storage on account 1, then delete_account(1). The reference model kept
+// the deleted account's storage while Database.delete_account clears it.
+test "storage_db: delete_account clears storage under snapshots" {
+    const input = [_]u8{
+        0xdd, 0x70, 0x52, 0x71, 0x40, 0xf5, 0xe8, 0xb3, 0xad, 0x88, 0xf7, 0x73, 0x53, 0xec, 0xea, 0xc5,
+        0xdd, 0x9b, 0xee, 0x35, 0x3d, 0xeb, 0x5a, 0x14, 0xce, 0x42, 0x49, 0x62, 0x19, 0x49, 0x22, 0x77,
+        0xd8, 0xe4, 0x42, 0x32, 0x09, 0x28, 0x41, 0x52, 0xd3, 0x7b, 0xcc, 0xd1, 0x16, 0x3d, 0xeb, 0x5a,
+        0x14, 0xce, 0x42, 0x49, 0x62, 0x19, 0x49, 0x22, 0x77, 0xd8, 0xe4, 0x42, 0x32,
+    };
+    try fuzzDatabaseSnapshotsAndViews({}, &input);
 }

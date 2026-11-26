@@ -71,52 +71,6 @@ pub fn bytecodeAnalyze(
         }
     }.check;
 
-    const checkNPushPattern = struct {
-        fn check(bytecode: []const u8, position: PcType, n: u8) ?FusionInfo {
-            if (position + n > bytecode.len) return null;
-
-            var current_pc = position;
-            var total_length: PcType = 0;
-
-            var i: u8 = 0;
-            while (i < n) : (i += 1) {
-                if (current_pc >= bytecode.len) return null;
-                const op = bytecode[current_pc];
-                if (op < @intFromEnum(Opcode.PUSH1) or op > @intFromEnum(Opcode.PUSH32)) {
-                    return null;
-                }
-                const push_size = op - @intFromEnum(Opcode.PUSH1) + 1;
-                current_pc += 1 + push_size;
-                total_length += 1 + push_size;
-            }
-
-            return FusionInfo{
-                .fusion_type = .multi_push,
-                .original_length = total_length,
-                .count = n,
-            };
-        }
-    }.check;
-
-    const checkNPopPattern = struct {
-        fn check(bytecode: []const u8, position: PcType, n: u8) ?FusionInfo {
-            if (position + n > bytecode.len) return null;
-
-            var i: u8 = 0;
-            while (i < n) : (i += 1) {
-                if (bytecode[position + i] != @intFromEnum(Opcode.POP)) {
-                    return null;
-                }
-            }
-
-            return FusionInfo{
-                .fusion_type = .multi_pop,
-                .original_length = n,
-                .count = n,
-            };
-        }
-    }.check;
-
     const checkIszeroJumpiFusion = struct {
         fn check(bytecode: []const u8, position: PcType) ?FusionInfo {
             if (position + 2 >= bytecode.len) return null;
@@ -142,31 +96,10 @@ pub fn bytecodeAnalyze(
         }
     }.check;
 
-    const checkDup2MstorePushFusion = struct {
-        fn check(bytecode: []const u8, position: PcType) ?FusionInfo {
-            if (position + 3 >= bytecode.len) return null;
-            if (bytecode[position] != @intFromEnum(Opcode.DUP2)) return null;
-            if (bytecode[position + 1] != @intFromEnum(Opcode.MSTORE)) return null;
-
-            const push_pc = position + 2;
-            const push_op = bytecode[push_pc];
-            if (push_op < @intFromEnum(Opcode.PUSH1) or push_op > @intFromEnum(Opcode.PUSH32)) {
-                return null;
-            }
-
-            const push_size = push_op - @intFromEnum(Opcode.PUSH1) + 1;
-
-            return FusionInfo{
-                .fusion_type = .dup2_mstore_push,
-                .original_length = 3 + push_size,
-            };
-        }
-    }.check;
-
-    var push_list = std.ArrayList(PcType){};
+    var push_list = std.ArrayList(PcType).empty;
     defer push_list.deinit(allocator);
 
-    var jumpdest_list = std.ArrayList(PcType){};
+    var jumpdest_list = std.ArrayList(PcType).empty;
     defer jumpdest_list.deinit(allocator);
 
     var jump_fusions = std.AutoHashMap(PcType, PcType).init(allocator);
@@ -184,32 +117,7 @@ pub fn bytecodeAnalyze(
             pc += fusion_info.original_length;
             continue;
         }
-        if (checkNPushPattern(code, pc, 3)) |fusion_info| {
-            try advanced_fusions.put(pc, fusion_info);
-            pc += fusion_info.original_length;
-            continue;
-        }
-        if (checkNPopPattern(code, pc, 3)) |fusion_info| {
-            try advanced_fusions.put(pc, fusion_info);
-            pc += fusion_info.original_length;
-            continue;
-        }
         if (checkIszeroJumpiFusion(code, pc)) |fusion_info| {
-            try advanced_fusions.put(pc, fusion_info);
-            pc += fusion_info.original_length;
-            continue;
-        }
-        if (checkDup2MstorePushFusion(code, pc)) |fusion_info| {
-            try advanced_fusions.put(pc, fusion_info);
-            pc += fusion_info.original_length;
-            continue;
-        }
-        if (checkNPushPattern(code, pc, 2)) |fusion_info| {
-            try advanced_fusions.put(pc, fusion_info);
-            pc += fusion_info.original_length;
-            continue;
-        }
-        if (checkNPopPattern(code, pc, 2)) |fusion_info| {
             try advanced_fusions.put(pc, fusion_info);
             pc += fusion_info.original_length;
             continue;
@@ -272,7 +180,7 @@ pub fn bytecodeAnalyze(
     errdefer allocator.free(jumpdests);
 
     var iter = jump_fusions.iterator();
-    var to_remove = std.ArrayList(PcType){};
+    var to_remove = std.ArrayList(PcType).empty;
     defer to_remove.deinit(allocator);
     while (iter.next()) |entry| {
         const target = entry.value_ptr.*;
@@ -284,7 +192,7 @@ pub fn bytecodeAnalyze(
     }
     for (to_remove.items) |key| { _ = jump_fusions.remove(key); }
 
-    var blocks = std.ArrayList(BasicBlock){};
+    var blocks = std.ArrayList(BasicBlock).empty;
     defer blocks.deinit(allocator);
     var block_start: PcType = 0;
     for (jumpdests) |jd| {
@@ -452,106 +360,6 @@ test "bytecode analyze - constant folding fusion MUL" {
     try testing.expectEqual(@as(u256, 24), fusion.folded_value);
 }
 
-test "bytecode analyze - multi push fusion (3 pushes)" {
-    const allocator = testing.allocator;
-    const code = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.PUSH1), 0x02,
-        @intFromEnum(Opcode.PUSH1), 0x03,
-    };
-
-    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
-    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
-    defer {
-        allocator.free(analysis.push_pcs);
-        allocator.free(analysis.jumpdests);
-        allocator.free(analysis.basic_blocks);
-        analysis.jump_fusions.deinit();
-        analysis.advanced_fusions.deinit();
-    }
-
-    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
-    const fusion = analysis.advanced_fusions.get(0).?;
-    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_push, fusion.fusion_type);
-    try testing.expectEqual(@as(u8, 3), fusion.count);
-    try testing.expectEqual(@as(BytecodeType.PcType, 6), fusion.original_length);
-}
-
-test "bytecode analyze - multi push fusion (2 pushes)" {
-    const allocator = testing.allocator;
-    const code = [_]u8{
-        @intFromEnum(Opcode.PUSH2), 0x01, 0x23,  // 3 bytes
-        @intFromEnum(Opcode.PUSH1), 0x04,        // 2 bytes
-        @intFromEnum(Opcode.ADD), // This prevents 3-push fusion, so should get 2-push fusion
-    };
-
-    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
-    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
-    defer {
-        allocator.free(analysis.push_pcs);
-        allocator.free(analysis.jumpdests);
-        allocator.free(analysis.basic_blocks);
-        analysis.jump_fusions.deinit();
-        analysis.advanced_fusions.deinit();
-    }
-
-    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
-    const fusion = analysis.advanced_fusions.get(0).?;
-    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_push, fusion.fusion_type);
-    try testing.expectEqual(@as(u8, 2), fusion.count);
-    try testing.expectEqual(@as(BytecodeType.PcType, 5), fusion.original_length);
-}
-
-test "bytecode analyze - multi pop fusion (3 pops)" {
-    const allocator = testing.allocator;
-    const code = [_]u8{
-        @intFromEnum(Opcode.POP),
-        @intFromEnum(Opcode.POP),
-        @intFromEnum(Opcode.POP),
-    };
-
-    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
-    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
-    defer {
-        allocator.free(analysis.push_pcs);
-        allocator.free(analysis.jumpdests);
-        allocator.free(analysis.basic_blocks);
-        analysis.jump_fusions.deinit();
-        analysis.advanced_fusions.deinit();
-    }
-
-    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
-    const fusion = analysis.advanced_fusions.get(0).?;
-    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_pop, fusion.fusion_type);
-    try testing.expectEqual(@as(u8, 3), fusion.count);
-    try testing.expectEqual(@as(BytecodeType.PcType, 3), fusion.original_length);
-}
-
-test "bytecode analyze - multi pop fusion (2 pops)" {
-    const allocator = testing.allocator;
-    const code = [_]u8{
-        @intFromEnum(Opcode.POP),
-        @intFromEnum(Opcode.POP),
-        @intFromEnum(Opcode.ADD), // This prevents 3-pop fusion
-    };
-
-    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
-    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
-    defer {
-        allocator.free(analysis.push_pcs);
-        allocator.free(analysis.jumpdests);
-        allocator.free(analysis.basic_blocks);
-        analysis.jump_fusions.deinit();
-        analysis.advanced_fusions.deinit();
-    }
-
-    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
-    const fusion = analysis.advanced_fusions.get(0).?;
-    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_pop, fusion.fusion_type);
-    try testing.expectEqual(@as(u8, 2), fusion.count);
-    try testing.expectEqual(@as(BytecodeType.PcType, 2), fusion.original_length);
-}
-
 test "bytecode analyze - iszero jumpi fusion" {
     const allocator = testing.allocator;
     const code = [_]u8{
@@ -575,30 +383,6 @@ test "bytecode analyze - iszero jumpi fusion" {
     const fusion = analysis.advanced_fusions.get(0).?;
     try testing.expectEqual(BytecodeType.FusionInfo.FusionType.iszero_jumpi, fusion.fusion_type);
     try testing.expectEqual(@as(BytecodeType.PcType, 4), fusion.original_length);
-}
-
-test "bytecode analyze - dup2 mstore push fusion" {
-    const allocator = testing.allocator;
-    const code = [_]u8{
-        @intFromEnum(Opcode.DUP2),
-        @intFromEnum(Opcode.MSTORE),
-        @intFromEnum(Opcode.PUSH2), 0x12, 0x34,
-    };
-
-    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
-    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
-    defer {
-        allocator.free(analysis.push_pcs);
-        allocator.free(analysis.jumpdests);
-        allocator.free(analysis.basic_blocks);
-        analysis.jump_fusions.deinit();
-        analysis.advanced_fusions.deinit();
-    }
-
-    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
-    const fusion = analysis.advanced_fusions.get(0).?;
-    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.dup2_mstore_push, fusion.fusion_type);
-    try testing.expectEqual(@as(BytecodeType.PcType, 5), fusion.original_length);
 }
 
 test "bytecode analyze - jump fusion detection" {
@@ -715,10 +499,10 @@ test "bytecode analyze - complex fusion patterns mixed" {
         @intFromEnum(Opcode.PUSH1), 0x03,
         @intFromEnum(Opcode.ADD), // Fusion 1: pc=0, length=5
         
-        // Multi-pop
-        @intFromEnum(Opcode.POP),  // pc=5
+        // Consecutive POPs are not fused
+        @intFromEnum(Opcode.POP), // pc=5
         @intFromEnum(Opcode.POP),
-        @intFromEnum(Opcode.POP), // Fusion 2: pc=5, length=3
+        @intFromEnum(Opcode.POP),
         
         // Regular instruction
         @intFromEnum(Opcode.STOP), // pc=8
@@ -734,15 +518,11 @@ test "bytecode analyze - complex fusion patterns mixed" {
         analysis.advanced_fusions.deinit();
     }
 
-    try testing.expectEqual(@as(usize, 2), analysis.advanced_fusions.count());
-    
-    // Check constant folding fusion
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+
     const fusion1 = analysis.advanced_fusions.get(0).?;
     try testing.expectEqual(BytecodeType.FusionInfo.FusionType.constant_fold, fusion1.fusion_type);
-    
-    // Check multi-pop fusion
-    const fusion2 = analysis.advanced_fusions.get(5).?;
-    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_pop, fusion2.fusion_type);
+    try testing.expect(analysis.advanced_fusions.get(5) == null);
 }
 
 test "bytecode analyze - boundary conditions insufficient bytes" {

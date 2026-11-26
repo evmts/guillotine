@@ -45,8 +45,8 @@ test "Journal snapshot - creation with different ID types" {
 }
 
 test "Journal snapshot - basic revert to snapshot" {
-    const addr1 = [_]u8{1} ** 20;
-    const addr2 = [_]u8{2} ** 20;
+    const addr1 = @as([20]u8, @splat(1));
+    const addr2 = @as([20]u8, @splat(2));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -64,7 +64,7 @@ test "Journal snapshot - basic revert to snapshot" {
     try journal.record_nonce_change(snapshot1, addr2, 5);
     
     try journal.record_storage_change(snapshot2, addr1, 3, 300);
-    try journal.record_code_change(snapshot2, addr2, [_]u8{0xAB} ** 32);
+    try journal.record_code_change(snapshot2, addr2, @as([32]u8, @splat(0xAB)));
     
     try testing.expectEqual(@as(usize, 6), journal.entry_count());
     
@@ -96,7 +96,7 @@ test "Journal snapshot - basic revert to snapshot" {
 }
 
 test "Journal snapshot - revert to non-existent snapshot" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -115,7 +115,7 @@ test "Journal snapshot - revert to non-existent snapshot" {
 }
 
 test "Journal snapshot - revert to snapshot 0" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -135,9 +135,9 @@ test "Journal snapshot - revert to snapshot 0" {
 }
 
 test "Journal snapshot - nested call simulation" {
-    const caller_addr = [_]u8{1} ** 20;
-    const contract1_addr = [_]u8{2} ** 20;
-    const contract2_addr = [_]u8{3} ** 20;
+    const caller_addr = @as([20]u8, @splat(1));
+    const contract1_addr = @as([20]u8, @splat(2));
+    const contract2_addr = @as([20]u8, @splat(3));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -156,7 +156,7 @@ test "Journal snapshot - nested call simulation" {
     const inner2_snapshot = journal.create_snapshot();
     try journal.record_storage_change(inner2_snapshot, contract2_addr, 1, 200);
     try journal.record_balance_change(inner2_snapshot, contract2_addr, 5000);
-    try journal.record_code_change(inner2_snapshot, contract2_addr, [_]u8{0xFF} ** 32);
+    try journal.record_code_change(inner2_snapshot, contract2_addr, @as([32]u8, @splat(0xFF)));
     
     try testing.expectEqual(@as(usize, 7), journal.entry_count());
     
@@ -196,7 +196,7 @@ test "Journal snapshot - nested call simulation" {
 }
 
 test "Journal snapshot - complex multi-level revert scenario" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -276,7 +276,7 @@ test "Journal snapshot - revert with no entries" {
 }
 
 test "Journal snapshot - revert to current state" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -304,7 +304,7 @@ test "Journal snapshot - revert to current state" {
 }
 
 test "Journal snapshot - revert preserves capacity" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -344,7 +344,7 @@ test "Journal snapshot - revert preserves capacity" {
 }
 
 test "Journal snapshot - stress test with many snapshots" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -384,7 +384,7 @@ test "Journal snapshot - stress test with many snapshots" {
 }
 
 test "Journal snapshot - memory usage with frequent reverts" {
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
@@ -426,7 +426,7 @@ test "Journal snapshot - snapshot ID uniqueness across clear operations" {
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();
     
-    const addr = [_]u8{0} ** 20;
+    const addr = @as([20]u8, @splat(0));
     
     // Create snapshots and entries
     const snapshot1 = journal.create_snapshot();
@@ -467,7 +467,7 @@ test "Journal snapshot - snapshot ID uniqueness across clear operations" {
 test "Journal snapshot - all entry types with selective reversion" {
     const addr1 = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
     const addr2 = Address.fromHex("0x9876543210987654321098765432109876543210") catch unreachable;
-    const code_hash = [_]u8{0xAB} ** 32;
+    const code_hash = @as([32]u8, @splat(0xAB));
     
     var journal = Journal(.{}).init(testing.allocator);
     defer journal.deinit();

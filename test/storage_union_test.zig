@@ -14,9 +14,6 @@ test "Storage union - all variants compile" {
     
     // Verify all types can be created
     comptime {
-        _ = Storage;
-        _ = MemoryStorage;
-        _ = TestStorage;
         _ = ForkedStorage;
     }
     
@@ -27,11 +24,11 @@ test "Storage union - all variants compile" {
     var memory_storage = Storage{ .memory = MemoryStorage.init(allocator) };
     defer memory_storage.deinit();
     
-    const test_addr = [_]u8{0x12} ** 20;
+    const test_addr = @as([20]u8, @splat(0x12));
     try testing.expect(!memory_storage.account_exists(test_addr));
     
     // Test storage variant
-    var test_storage = Storage{ .test = TestStorage.init(allocator) };
+    var test_storage = Storage{ .@"test" = TestStorage.init(allocator) };
     defer test_storage.deinit();
     
     try testing.expect(!test_storage.account_exists(test_addr));

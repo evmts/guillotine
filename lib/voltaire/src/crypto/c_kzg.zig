@@ -24,6 +24,7 @@ pub const KZGError = ckzg.KZGError;
 
 /// Load trusted setup from file
 pub fn loadTrustedSetupFile(trusted_setup_path: []const u8, precompute: u64) KZGError!void {
+    if (std.mem.indexOfScalar(u8, trusted_setup_path, 0) != null) return KZGError.FileNotFound;
     const file = std.fs.cwd().openFile(trusted_setup_path, .{}) catch return KZGError.FileNotFound;
     defer file.close();
 
@@ -34,7 +35,7 @@ pub fn loadTrustedSetupFile(trusted_setup_path: []const u8, precompute: u64) KZG
 }
 
 /// Free the trusted setup
-pub fn freeTrustedSetup() KZGError!void {
+pub fn freeTrustedSetup() error{TrustedSetupNotLoaded}!void {
     try ckzg.freeTrustedSetup();
 }
 
@@ -97,8 +98,10 @@ test "c_kzg error handling - file not found" {
 test "c_kzg error handling - operations without trusted setup" {
     const testing = std.testing;
 
-    // Ensure trusted setup is not loaded
-    _ = freeTrustedSetup() catch {};
+    // Ensure trusted setup is not loaded. NotLoaded means it already is.
+    freeTrustedSetup() catch |err| switch (err) {
+        error.TrustedSetupNotLoaded => {},
+    };
 
     var blob = getRandomBlob(42);
 
@@ -421,4 +424,11 @@ test "c_kzg proof consistency across multiple calls" {
         const is_valid = try verifyKZGProof(&commitment, &z, &result.y, &result.proof);
         try testing.expect(is_valid);
     }
+}
+
+test "KZG runtime text loader rejects tampered setup" {
+    const bytes = try std.testing.allocator.dupe(u8, ckzg.embedded_trusted_setup);
+    defer std.testing.allocator.free(bytes);
+    bytes[100] ^= 1;
+    try std.testing.expectError(error.IntegrityCheckFailed, ckzg.loadTrustedSetupFromText(bytes, 0));
 }

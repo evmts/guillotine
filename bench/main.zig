@@ -13,32 +13,31 @@ const report = @import("report.zig");
 // Suppress routine core warnings during measurements; execution errors remain visible.
 pub const std_options: std.Options = .{ .log_level = .err };
 
-pub fn main() void {
-    run() catch |err| {
+pub fn main(init: std.process.Init) void {
+    run(init.io, init.minimal.args) catch |err| {
         var buffer: [4096]u8 = undefined;
-        var stderr = std.fs.File.stderr().writer(&buffer);
+        var stderr = std.Io.File.stderr().writer(init.io, &buffer);
         stderr.interface.print("guillotine-bench: {s} (use --help for usage)\n", .{@errorName(err)}) catch std.process.exit(2);
         stderr.interface.flush() catch std.process.exit(2);
         std.process.exit(1);
     };
 }
 
-fn run() !void {
+fn run(io: std.Io, process_args: std.process.Args) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try process_args.toSlice(allocator);
     const options = try cli.parse(args[1..]);
     var buffer: [16384]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buffer);
+    var stdout = std.Io.File.stdout().writer(io, &buffer);
     const writer = &stdout.interface;
     if (options.help) {
         try writer.writeAll(cli.usage);
         try writer.flush();
         return;
     }
-    if (builtin.mode != .ReleaseFast) return error.ReleaseFastRequired;
+    if (builtin.mode != .fast) return error.ReleaseFastRequired;
     const suite = try workloads.build(allocator);
     var rows: std.ArrayList(report.Row) = .empty;
     defer rows.deinit(allocator);
@@ -46,11 +45,11 @@ fn run() !void {
     for (suite) |workload| {
         if (!cli.matches(workload.name, options.filter)) continue;
         matched += 1;
-        try rows.append(allocator, execute(evm, true, false, workload, options));
+        try rows.append(allocator, execute(io, evm, true, false, workload, options));
         if (options.compare) {
-            try rows.append(allocator, execute(evm, false, false, workload, options));
+            try rows.append(allocator, execute(io, evm, false, false, workload, options));
             if (comptime build.loop_available) {
-                try rows.append(allocator, execute(loop_evm, false, true, workload, options));
+                try rows.append(allocator, execute(io, loop_evm, false, true, workload, options));
             } else {
                 var row = base(workload, false, true);
                 row.status = "unavailable";
@@ -62,7 +61,7 @@ fn run() !void {
     if (matched == 0) return error.NoMatchingBenchmarks;
     try report.markdown(writer, rows.items);
     try writer.flush();
-    try report.writeJson(options.json, .{ .timestamp_unix = std.time.timestamp(), .hardfork = build.hardfork, .gas_limit = engine.gas_limit, .iterations = options.iterations, .warmup = options.warmup, .results = rows.items });
+    try report.writeJson(io, options.json, .{ .timestamp_unix = std.Io.Timestamp.now(io, .real).toSeconds(), .hardfork = build.hardfork, .gas_limit = engine.suite_gas_limit, .iterations = options.iterations, .warmup = options.warmup, .results = rows.items });
     var failed = false;
     var unavailable = false;
     for (rows.items) |row| {
@@ -70,13 +69,19 @@ fn run() !void {
         unavailable = unavailable or std.mem.eql(u8, row.status, "unavailable");
     }
     if (failed) return error.BenchmarkFailed;
-    if (unavailable and !options.allow_unavailable) return error.BenchmarkUnavailable;
+    if (unavailable) return error.BenchmarkUnavailable;
 }
 
 fn base(workload: workloads.Workload, fusion: bool, loop: bool) report.Row {
     return .{
         .name = workload.name,
         .category = workload.category,
+        .hardfork = switch (workload.profile) {
+            inline else => |profile| engine.hardforkName(profile),
+        },
+        .gas_limit = switch (workload.profile) {
+            inline else => |profile| engine.gasLimit(profile),
+        },
         .mode = if (loop) "loop" else if (fusion) "tailcall+fusions" else "tailcall-no-fusions",
         .enable_fusion = fusion,
         .disable_tailcall_dispatch = loop,
@@ -84,9 +89,15 @@ fn base(workload: workloads.Workload, fusion: bool, loop: bool) report.Row {
     };
 }
 
-fn execute(comptime implementation: type, comptime fusion: bool, comptime loop: bool, workload: workloads.Workload, options: cli.Options) report.Row {
+fn execute(io: std.Io, comptime implementation: type, comptime fusion: bool, comptime loop: bool, workload: workloads.Workload, options: cli.Options) report.Row {
+    return switch (workload.profile) {
+        inline else => |profile| executeProfile(io, implementation, fusion, loop, profile, workload, options),
+    };
+}
+
+fn executeProfile(io: std.Io, comptime implementation: type, comptime fusion: bool, comptime loop: bool, comptime profile: workloads.Profile, workload: workloads.Workload, options: cli.Options) report.Row {
     var row = base(workload, fusion, loop);
-    const Runner = engine.Runner(implementation, fusion);
+    const Runner = engine.Runner(implementation, fusion, profile);
     if (Runner.available(workload)) |reason| {
         row.status = "unavailable";
         row.reason = reason;
@@ -94,13 +105,13 @@ fn execute(comptime implementation: type, comptime fusion: bool, comptime loop: 
     }
     // Use a reclaiming allocator: large iteration counts must not retain
     // every owned call result as an arena would.
-    var runner = Runner.init(std.heap.smp_allocator, workload, &row) catch |err| {
+    var runner = Runner.init(std.heap.smp_allocator, io, workload, &row) catch |err| {
         if (row.stage == null) row.stage = "setup";
         row.reason = @errorName(err);
         return row;
     };
     defer runner.deinit(workload);
-    runner.measure(workload, options, &row) catch |err| {
+    runner.measure(io, workload, options, &row) catch |err| {
         row.stage = runner.stage;
         row.reason = @errorName(err);
     };

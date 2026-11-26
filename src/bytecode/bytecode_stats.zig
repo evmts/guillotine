@@ -39,7 +39,7 @@ pub const BytecodeStats = struct {
             try writer.writeAll("[");
             for (self.opcodes, 0..) |op, i| {
                 if (i > 0) try writer.writeAll(", ");
-                const opcode_enum = std.meta.intToEnum(Opcode, op) catch {
+                const opcode_enum = std.enums.fromInt(Opcode, op) orelse {
                     try writer.print("0x{x:0>2}", .{op});
                     continue;
                 };
@@ -67,7 +67,7 @@ pub const BytecodeStats = struct {
     
     /// Analyze bytecode and return statistics
     pub fn analyze(allocator: std.mem.Allocator, bytecode: []const u8) !BytecodeStats {
-        var opcode_counts = [_]u32{0} ** 256;
+        var opcode_counts = @as([256]u32, @splat(0));
         var push_values = try std.ArrayList(PushValue).initCapacity(allocator, 0);
         errdefer push_values.deinit(allocator);
         var potential_fusions = try std.ArrayList(Fusion).initCapacity(allocator, 0);
@@ -106,7 +106,7 @@ pub const BytecodeStats = struct {
             // Add to opcodes list for pattern tracking (only actual opcodes, not push data)
             try opcodes.append(allocator, opcode_byte);
             
-            const opcode = std.meta.intToEnum(Opcode, opcode_byte) catch {
+            const opcode = std.enums.fromInt(Opcode, opcode_byte) orelse {
                 // Invalid opcode
                 pc += 1;
                 continue;
@@ -135,7 +135,7 @@ pub const BytecodeStats = struct {
                     // Check for potential fusion with next opcode
                     const next_pc = pc + 1 + push_size;
                     if (next_pc < bytecode.len) {
-                        const next_opcode = std.meta.intToEnum(Opcode, bytecode[next_pc]) catch {
+                        const next_opcode = std.enums.fromInt(Opcode, bytecode[next_pc]) orelse {
                             pc += 1 + push_size;
                             continue;
                         };
@@ -161,7 +161,7 @@ pub const BytecodeStats = struct {
                     
                     // Scan backwards for PUSH instruction
                     while (push_pc > 0 and pc - push_pc < 33) : (push_pc -= 1) {
-                        const prev_opcode = std.meta.intToEnum(Opcode, bytecode[push_pc]) catch continue;
+                        const prev_opcode = std.enums.fromInt(Opcode, bytecode[push_pc]) orelse continue;
                         if (@intFromEnum(prev_opcode) >= @intFromEnum(Opcode.PUSH1) and 
                             @intFromEnum(prev_opcode) <= @intFromEnum(Opcode.PUSH32)) {
                             const push_size = @intFromEnum(prev_opcode) - @intFromEnum(Opcode.PUSH1) + 1;
@@ -585,9 +585,9 @@ pub const BytecodeStats = struct {
     
     pub fn formatStats(self: BytecodeStats, allocator: std.mem.Allocator) ![]const u8 {
         // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
-        var list = std.ArrayList(u8){};
-        defer list.deinit(allocator);
-        const writer = list.writer(allocator);
+        var list: std.Io.Writer.Allocating = .init(allocator);
+        defer list.deinit();
+        const writer = &list.writer;
         
         try writer.writeAll("\n=== Bytecode Statistics ===\n");
         try writer.writeAll("Opcode counts:\n");
@@ -596,7 +596,7 @@ pub const BytecodeStats = struct {
             if (count > 0) {
                 // https://ziglang.org/documentation/master/std/#std.meta.intToEnum
                 // Converts an integer to an enum value, returns error if invalid
-                const opcode_enum = std.meta.intToEnum(Opcode, op) catch {
+                const opcode_enum = std.enums.fromInt(Opcode, op) orelse {
                     try writer.print("  UNKNOWN(0x{x:0>2}): {}\n", .{ op, count });
                     continue;
                 };
@@ -692,7 +692,7 @@ pub const BytecodeStats = struct {
         try writer.print("\nContract type: {s}\n", .{if (self.is_create_code) "Create/Deploy code" else "Runtime code"});
         try writer.writeAll("======================\n");
         
-        return try list.toOwnedSlice(allocator);
+        return try list.toOwnedSlice();
     }
 };
 
@@ -700,7 +700,7 @@ test "BytecodeStats formatStats basic functionality" {
     const allocator = std.testing.allocator;
     
     // Create mock statistics data
-    var opcode_counts = [_]u32{0} ** 256;
+    var opcode_counts = @as([256]u32, @splat(0));
     opcode_counts[@intFromEnum(Opcode.PUSH1)] = 3;
     opcode_counts[@intFromEnum(Opcode.ADD)] = 2;
     opcode_counts[@intFromEnum(Opcode.STOP)] = 1;
@@ -778,7 +778,7 @@ test "BytecodeStats formatStats basic functionality" {
 test "BytecodeStats formatStats empty statistics" {
     const allocator = std.testing.allocator;
 
-    const opcode_counts = [_]u32{0} ** 256;
+    const opcode_counts = @as([256]u32, @splat(0));
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &.{},
@@ -814,7 +814,7 @@ test "BytecodeStats formatStats empty statistics" {
 test "BytecodeStats formatStats create code detection" {
     const allocator = std.testing.allocator;
 
-    var opcode_counts = [_]u32{0} ** 256;
+    var opcode_counts = @as([256]u32, @splat(0));
     opcode_counts[@intFromEnum(Opcode.CODECOPY)] = 1;
 
     const stats = BytecodeStats{
@@ -844,7 +844,7 @@ test "BytecodeStats formatStats create code detection" {
 test "BytecodeStats formatStats backwards jumps" {
     const allocator = std.testing.allocator;
 
-    const opcode_counts = [_]u32{0} ** 256;
+    const opcode_counts = @as([256]u32, @splat(0));
     const jumps = [_]BytecodeStats.Jump{
         .{ .pc = 10, .target = 5 },  // Backwards jump
         .{ .pc = 15, .target = 20 }, // Forward jump
@@ -881,7 +881,7 @@ test "BytecodeStats formatStats backwards jumps" {
 test "BytecodeStats formatStats large values" {
     const allocator = std.testing.allocator;
 
-    var opcode_counts = [_]u32{0} ** 256;
+    var opcode_counts = @as([256]u32, @splat(0));
     opcode_counts[@intFromEnum(Opcode.PUSH32)] = 999999;
 
     const push_values = [_]BytecodeStats.PushValue{
@@ -922,7 +922,7 @@ test "BytecodeStats formatStats large values" {
 test "BytecodeStats formatStats all fusion types" {
     const allocator = std.testing.allocator;
 
-    const opcode_counts = [_]u32{0} ** 256;
+    const opcode_counts = @as([256]u32, @splat(0));
     const fusions = [_]BytecodeStats.Fusion{
         .{ .pc = 0, .second_opcode = Opcode.ADD },
         .{ .pc = 3, .second_opcode = Opcode.SUB },
@@ -965,7 +965,7 @@ test "BytecodeStats formatStats all fusion types" {
 test "BytecodeStats formatStats invalid opcode handling" {
     const allocator = std.testing.allocator;
 
-    var opcode_counts = [_]u32{0} ** 256;
+    var opcode_counts = @as([256]u32, @splat(0));
     opcode_counts[0xFE] = 1; // Invalid opcode
     opcode_counts[0xFF] = 2; // Invalid opcode
 

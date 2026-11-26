@@ -59,7 +59,7 @@ pub fn createTestEvm(allocator: std.mem.Allocator) !TestEvm {
 
 /// Convert a number to an Address
 pub fn toAddress(value: u256) Address {
-    var addr: Address = [_]u8{0} ** 20;
+    var addr: Address = @as([20]u8, @splat(0));
     var i: usize = 0;
     while (i < 20) : (i += 1) {
         addr[19 - i] = @truncate(value >> @intCast(i * 8));

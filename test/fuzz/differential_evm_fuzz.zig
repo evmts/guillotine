@@ -42,13 +42,13 @@ const EvmShanghaiNoFusion = evm.Evm(.{ .enable_fusion = false, .eips = .{ .hardf
 const EvmPrague = evm.Evm(.{ .enable_fusion = true, .eips = .{ .hardfork = .PRAGUE } });
 const EvmPragueNoFusion = evm.Evm(.{ .enable_fusion = false, .eips = .{ .hardfork = .PRAGUE } });
 
-const CALLER = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0xaa} };
-const CONTRACT_A = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x01} };
-const CONTRACT_B = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x02} };
-const BENEFICIARY = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0xbb} };
+const CALLER = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xaa} };
+const CONTRACT_A = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x01} };
+const CONTRACT_B = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x02} };
+const BENEFICIARY = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xbb} };
 
 fn makeBlockInfo(seed_byte: u8) BlockInfo {
-    var randao = [_]u8{0} ** 32;
+    var randao = @as([32]u8, @splat(0));
     randao[31] = seed_byte;
     return BlockInfo{
         .chain_id = 1,
@@ -66,7 +66,7 @@ fn makeBlockInfo(seed_byte: u8) BlockInfo {
 
 /// Generates structure-aware EVM bytecode from raw fuzzer bytes.
 fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out = std.ArrayList(u8).empty;
     errdefer out.deinit(allocator);
 
     switch (mode) {
@@ -354,22 +354,22 @@ fn setupWorld(
     try db.set_account(CALLER.bytes, .{
         .balance = 10_000_000_000_000,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     const hash_a = try db.set_code(code_a);
     try db.set_account(CONTRACT_A.bytes, .{
         .balance = 1_000_000,
         .nonce = 1,
         .code_hash = hash_a,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     const hash_b = try db.set_code(code_b);
     try db.set_account(CONTRACT_B.bytes, .{
         .balance = 500_000,
         .nonce = 1,
         .code_hash = hash_b,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     if (init_slot0 != 0) {
         try db.set_storage(CONTRACT_A.bytes, 0, init_slot0);
@@ -559,8 +559,8 @@ pub fn fuzzCreateAndCreate2Parity(_: void, input: []const u8) !void {
     var db_off = Database.init(allocator);
     defer db_off.deinit();
 
-    try db_on.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 });
-    try db_off.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 });
+    try db_on.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
+    try db_off.set_account(CALLER.bytes, .{ .balance = 10_000_000_000, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
 
     var evm_on = try EvmFusionOn.init(allocator, &db_on, block_info, tx_ctx, 1, CALLER);
     defer evm_on.deinit();
@@ -620,13 +620,13 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz differential EVM execution: fusion ON vs fusion OFF vs simulate() across all modes" {
-    try std.testing.fuzz({}, fuzzDifferentialFusionAndSimulate, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzDifferentialFusionAndSimulate), .{ .corpus = seed_corpus });
 }
 
 test "fuzz multi-hardfork differential EVM execution (FRONTIER, BERLIN, SHANGHAI, PRAGUE)" {
-    try std.testing.fuzz({}, fuzzMultiHardforkDifferential, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMultiHardforkDifferential), .{ .corpus = seed_corpus });
 }
 
 test "fuzz CREATE and CREATE2 deployment parity and EIP-3541/EIP-170 invariants" {
-    try std.testing.fuzz({}, fuzzCreateAndCreate2Parity, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCreateAndCreate2Parity), .{ .corpus = seed_corpus });
 }

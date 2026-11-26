@@ -27,7 +27,7 @@ fn benchToBytesFixed20(allocator: std.mem.Allocator) void {
 
 // Benchmark: Hex.bytesToHexFixed (32 bytes - hash size)
 fn benchBytesToHexFixed32(allocator: std.mem.Allocator) void {
-    const bytes = [_]u8{0xab} ** 32;
+    const bytes = @as([32]u8, @splat(0xab));
     const hex_arr = Hex.bytesToHexFixed(32, bytes);
     _ = hex_arr;
     _ = allocator;

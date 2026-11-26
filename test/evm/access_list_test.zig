@@ -28,7 +28,7 @@ test "Access lists should be populated in CallResult" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -44,8 +44,8 @@ test "Access lists should be populated in CallResult" {
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);
@@ -85,7 +85,7 @@ test "Access lists should be populated in CallResult" {
     const account_a = evm.Account{
         .balance = 0,
         .code_hash = code_hash_a,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
         .nonce = 0,
         .delegated_address = null,
     };
@@ -95,7 +95,7 @@ test "Access lists should be populated in CallResult" {
     const account_b = evm.Account{
         .balance = 1000,
         .code_hash = primitives.EMPTY_CODE_HASH,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
         .nonce = 0,
         .delegated_address = null,
     };

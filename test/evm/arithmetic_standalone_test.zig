@@ -18,8 +18,8 @@ test "guillotine standalone: basic arithmetic operations" {
     try db.set_account(caller.bytes, .{
         .balance = 10000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const block_info = @import("evm").BlockInfo{
@@ -30,7 +30,7 @@ test "guillotine standalone: basic arithmetic operations" {
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .difficulty = 0,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -115,7 +115,7 @@ test "guillotine standalone: basic arithmetic operations" {
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     std.debug.print("Testing Guillotine arithmetic chain in isolation...\n", .{});

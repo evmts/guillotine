@@ -8,7 +8,7 @@
 //!
 //! | Rule                         | Bedrock                         | Regolith+                     |
 //! |------------------------------|---------------------------------|-------------------------------|
-//! | is_system_transaction        | allowed                         | rejected (invalid tx)         |
+//! | is_system_transaction        | allowed                         | failed deposit (see validate) |
 //! | mint                         | credited before execution       | same                          |
 //! | nonce                        | +1 before execution if CALL     | same                          |
 //! | signature, nonce, balance    | not validated                   | same                          |
@@ -59,6 +59,8 @@ pub const DepositResult = struct {
 };
 
 /// Validate deposit fields against the active spec (op-revm `validate_env`).
+/// An error here does not drop the deposit: op-revm `catch_error_failed_deposit` and
+/// op-geth `StateTransition.execute` include it as a failed deposit (executor.zig).
 pub fn validate(spec: OpSpecId, parts: DepositTransactionParts) DepositError!void {
     if (parts.is_system_transaction and spec.isAtLeast(.REGOLITH)) {
         return error.DepositSystemTxPostRegolith;
@@ -126,7 +128,7 @@ pub fn finalize(
 const testing = std.testing;
 
 fn sourceHash(byte: u8) [32]u8 {
-    return [_]u8{byte} ** 32;
+    return @as([32]u8, @splat(byte));
 }
 
 test "system transaction allowed in Bedrock, rejected from Regolith" {

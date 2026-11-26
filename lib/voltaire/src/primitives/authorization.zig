@@ -13,8 +13,6 @@ const Allocator = std.mem.Allocator;
 
 // Authorization error types
 pub const AuthorizationError = error{
-    InvalidChainId,
-    ZeroAddress,
     InvalidSignature,
     OutOfMemory,
 };
@@ -34,7 +32,7 @@ pub const Authorization = struct {
         const r_value = std.mem.readInt(u256, &self.r, .big);
         const s_value = std.mem.readInt(u256, &self.s, .big);
         const signature = crypto.Signature{
-            .v = @intCast(self.v),
+            .v = std.math.cast(u8, self.v) orelse return AuthorizationError.InvalidSignature,
             .r = r_value,
             .s = s_value,
         };
@@ -55,7 +53,7 @@ pub const Authorization = struct {
         try list.appendSlice(chain_id_encoded);
 
         // Encode address
-        const address_encoded = try rlp.encode_bytes(allocator, &self.address.bytes);
+        const address_encoded = try rlp.encodeBytes(allocator, &self.address.bytes);
         defer allocator.free(address_encoded);
         try list.appendSlice(address_encoded);
 
@@ -71,7 +69,7 @@ pub const Authorization = struct {
         if (list.items.len <= 55) {
             try rlp_list.append(@as(u8, @intCast(0xc0 + list.items.len)));
         } else {
-            const len_bytes = try rlp.encode_length(allocator, list.items.len);
+            const len_bytes = try rlp.encodeLength(allocator, list.items.len);
             defer allocator.free(len_bytes);
             try rlp_list.append(@as(u8, @intCast(0xf7 + len_bytes.len)));
             try rlp_list.appendSlice(len_bytes);
@@ -87,21 +85,13 @@ pub const Authorization = struct {
         return hash.keccak256(data);
     }
 
-    pub fn validate(self: *const Authorization) !void {
-        // Chain ID must be non-zero
-        if (self.chain_id == 0) {
-            return AuthorizationError.InvalidChainId;
-        }
-
-        // Address must not be zero
-        if (self.address.isZero()) {
-            return AuthorizationError.ZeroAddress;
-        }
-
-        // Signature must be valid
+    /// Checks the signature fields. EIP-7702 accepts `chain_id == 0` (valid on every
+    /// chain) and the zero target address (clears the authority's delegation).
+    pub fn validate(self: *const Authorization) AuthorizationError!void {
+        const v = std.math.cast(u8, self.v) orelse return AuthorizationError.InvalidSignature;
         const r_value = std.mem.readInt(u256, &self.r, .big);
         const s_value = std.mem.readInt(u256, &self.s, .big);
-        if (!crypto.isValidSignature(.{ .v = @intCast(self.v), .r = r_value, .s = s_value })) {
+        if (!crypto.isValidSignature(.{ .v = v, .r = r_value, .s = s_value })) {
             return AuthorizationError.InvalidSignature;
         }
     }
@@ -121,8 +111,8 @@ pub fn createAuthorization(
         .address = addr,
         .nonce = nonce,
         .v = 0,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0)),
     };
 
     const h = try auth.signingHash();
@@ -151,7 +141,7 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
         const chain_id_enc = try rlp.encode(allocator, auth.chain_id);
         defer allocator.free(chain_id_enc);
         try auth_fields.appendSlice(chain_id_enc);
-        const addr_enc = try rlp.encode_bytes(allocator, &auth.address.bytes);
+        const addr_enc = try rlp.encodeBytes(allocator, &auth.address.bytes);
         defer allocator.free(addr_enc);
         try auth_fields.appendSlice(addr_enc);
         const nonce_enc = try rlp.encode(allocator, auth.nonce);
@@ -160,10 +150,11 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
         const v_enc = try rlp.encode(allocator, auth.v);
         defer allocator.free(v_enc);
         try auth_fields.appendSlice(v_enc);
-        const r_enc = try rlp.encode_bytes(allocator, &auth.r);
+        // r and s are RLP integers: minimal big-endian, no leading zero bytes.
+        const r_enc = try rlp.encode(allocator, std.mem.readInt(u256, &auth.r, .big));
         defer allocator.free(r_enc);
         try auth_fields.appendSlice(r_enc);
-        const s_enc = try rlp.encode_bytes(allocator, &auth.s);
+        const s_enc = try rlp.encode(allocator, std.mem.readInt(u256, &auth.s, .big));
         defer allocator.free(s_enc);
         try auth_fields.appendSlice(s_enc);
 
@@ -171,7 +162,7 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
         if (auth_fields.items.len <= 55) {
             try list.append(@as(u8, @intCast(0xc0 + auth_fields.items.len)));
         } else {
-            const len_bytes = try rlp.encode_length(allocator, auth_fields.items.len);
+            const len_bytes = try rlp.encodeLength(allocator, auth_fields.items.len);
             defer allocator.free(len_bytes);
             try list.append(@as(u8, @intCast(0xf7 + len_bytes.len)));
             try list.appendSlice(len_bytes);
@@ -181,10 +172,12 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
 
     // Wrap entire list
     var result = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer result.deinit();
     if (list.items.len <= 55) {
         try result.append(@as(u8, @intCast(0xc0 + list.items.len)));
     } else {
-        const len_bytes = rlp.encode_length(list.items.len);
+        const len_bytes = try rlp.encodeLength(allocator, list.items.len);
+        defer allocator.free(len_bytes);
         try result.append(@as(u8, @intCast(0xf7 + len_bytes.len)));
         try result.appendSlice(len_bytes);
     }
@@ -200,7 +193,7 @@ pub const DelegationDesignation = struct {
 
     pub fn isActive(self: *const DelegationDesignation) bool {
         // Delegation is active if delegated address is not zero
-        return !self.delegated_address.is_zero();
+        return !self.delegated_address.isZero();
     }
 
     pub fn revoke(self: *DelegationDesignation) void {
@@ -248,9 +241,9 @@ pub fn calculateAuthorizationGasCost(auth_list: AuthorizationList, empty_account
 test "authorization creation and recovery" {
     const allocator = testing.allocator;
 
-    const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
+    const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
 
-    const signer_address = try crypto.getAddress(allocator, private_key);
+    const signer_address = (try crypto.unaudited_getPublicKey(private_key)).toAddress();
     const target_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
 
     const auth = try createAuthorization(
@@ -275,27 +268,39 @@ test "authorization validation" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     // Valid
     try auth.validate();
 
-    // Invalid chain ID
+    // EIP-7702: chain_id 0 authorizes on every chain.
     auth.chain_id = 0;
-    try testing.expectError(AuthorizationError.InvalidChainId, auth.validate());
+    try auth.validate();
     auth.chain_id = 1;
 
-    // Zero address
+    // EIP-7702: the zero target address clears delegation.
     auth.address = Address.ZERO;
-    try testing.expectError(AuthorizationError.ZeroAddress, auth.validate());
+    try auth.validate();
+
+    // A v that does not fit a byte is an invalid signature, not a panic.
+    auth.v = 256;
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.authority());
+    auth.v = std.math.maxInt(u64);
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
+    auth.v = 27;
+
+    // s above n/2 fails the signature check.
+    auth.s = @as([32]u8, @splat(0xff));
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
 }
 
 test "authorization list encoding" {
     const allocator = testing.allocator;
 
-    const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
+    const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
 
     const auth1 = try createAuthorization(
         allocator,
@@ -323,6 +328,43 @@ test "authorization list encoding" {
     try testing.expect(encoded[0] >= 0xc0); // RLP list prefix
 }
 
+test "encodeAuthorizationList encodes r and s as minimal RLP integers" {
+    const allocator = testing.allocator;
+
+    var r: [32]u8 = @splat(0x11);
+    r[0] = 0;
+    var s: [32]u8 = @splat(0);
+    s[31] = 1;
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = .{ .bytes = @splat(0x11) },
+        .nonce = 0,
+        .v = 0,
+        .r = r,
+        .s = s,
+    };
+    const auth_list = [_]Authorization{auth};
+
+    const encoded = try encodeAuthorizationList(allocator, &auth_list);
+    defer allocator.free(encoded);
+
+    // [[0x01, 0x94 ++ 20*0x11, 0x80, 0x80, 0x9f ++ 31*0x11, 0x01]]
+    var expected: [61]u8 = undefined;
+    expected[0] = 0xf8;
+    expected[1] = 59;
+    expected[2] = 0xf8;
+    expected[3] = 57;
+    expected[4] = 0x01;
+    expected[5] = 0x94;
+    @memset(expected[6..26], 0x11);
+    expected[26] = 0x80;
+    expected[27] = 0x80;
+    expected[28] = 0x9f;
+    @memset(expected[29..60], 0x11);
+    expected[60] = 0x01;
+    try testing.expectEqualSlices(u8, &expected, encoded);
+}
+
 test "delegation designation" {
     var delegation = DelegationDesignation{
         .authority = try Address.fromHex("0x1111111111111111111111111111111111111111"),
@@ -341,8 +383,8 @@ test "delegation designation" {
 test "batch authorization processing" {
     const allocator = testing.allocator;
 
-    const private_key1: crypto.PrivateKey = [_]u8{0x01} ** 32;
-    const private_key2: crypto.PrivateKey = [_]u8{0x02} ** 32;
+    const private_key1: crypto.PrivateKey = @as([32]u8, @splat(0x01));
+    const private_key2: crypto.PrivateKey = @as([32]u8, @splat(0x02));
 
     const auth1 = try createAuthorization(
         allocator,
@@ -377,16 +419,16 @@ test "authorization gas cost calculation" {
             .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
             .nonce = 0,
             .v = 27,
-            .r = [_]u8{0x12} ** 32,
-            .s = [_]u8{0x34} ** 32,
+            .r = @as([32]u8, @splat(0x12)),
+            .s = @as([32]u8, @splat(0x34)),
         },
         .{
             .chain_id = 1,
             .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
             .nonce = 0,
             .v = 27,
-            .r = [_]u8{0x56} ** 32,
-            .s = [_]u8{0x78} ** 32,
+            .r = @as([32]u8, @splat(0x56)),
+            .s = @as([32]u8, @splat(0x78)),
         },
     };
 
@@ -400,8 +442,8 @@ test "authorization gas cost calculation" {
 test "authority() recovers correct signer address" {
     const allocator = testing.allocator;
 
-    const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
-    const expected_signer = try crypto.getAddress(allocator, private_key);
+    const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
+    const expected_signer = (try crypto.unaudited_getPublicKey(private_key)).toAddress();
     const target = try Address.fromHex("0x1111111111111111111111111111111111111111");
 
     const auth = try createAuthorization(
@@ -419,8 +461,8 @@ test "authority() recovers correct signer address" {
 test "authority() recovers correct signer with different nonces" {
     const allocator = testing.allocator;
 
-    const private_key: crypto.PrivateKey = [_]u8{0x99} ** 32;
-    const expected_signer = try crypto.getAddress(allocator, private_key);
+    const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x99));
+    const expected_signer = (try crypto.unaudited_getPublicKey(private_key)).toAddress();
     const target = try Address.fromHex("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
     const nonces = [_]u64{ 0, 1, 100, 999999, std.math.maxInt(u64) };
@@ -449,8 +491,8 @@ test "signingHash() produces consistent hashes" {
         .address = addr,
         .nonce = 42,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const auth2 = Authorization{
@@ -458,8 +500,8 @@ test "signingHash() produces consistent hashes" {
         .address = addr,
         .nonce = 42,
         .v = 28,
-        .r = [_]u8{0xff} ** 32,
-        .s = [_]u8{0xaa} ** 32,
+        .r = @as([32]u8, @splat(0xff)),
+        .s = @as([32]u8, @splat(0xaa)),
     };
 
     const hash1 = try auth1.signingHash();
@@ -478,8 +520,8 @@ test "signingHash() produces different hashes for different inputs" {
         .address = addr,
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const auth2 = Authorization{
@@ -487,8 +529,8 @@ test "signingHash() produces different hashes for different inputs" {
         .address = addr,
         .nonce = 1,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const auth3 = Authorization{
@@ -496,8 +538,8 @@ test "signingHash() produces different hashes for different inputs" {
         .address = addr,
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const hash1 = try auth1.signingHash();
@@ -520,8 +562,8 @@ test "signingHash() handles edge case nonce values" {
         .address = addr,
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const auth_max = Authorization{
@@ -529,8 +571,8 @@ test "signingHash() handles edge case nonce values" {
         .address = addr,
         .nonce = std.math.maxInt(u64),
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const hash_zero = try auth_zero.signingHash();
@@ -541,36 +583,36 @@ test "signingHash() handles edge case nonce values" {
     try testing.expect(!std.mem.eql(u8, &hash_zero, &hash_max));
 }
 
-test "validate() rejects zero chain ID" {
+test "validate() accepts zero chain ID (EIP-7702 any-chain authorization)" {
     const allocator = testing.allocator;
     _ = allocator;
 
-    var auth = Authorization{
+    const auth = Authorization{
         .chain_id = 0,
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(AuthorizationError.InvalidChainId, auth.validate());
+    try auth.validate();
 }
 
-test "validate() rejects zero address" {
+test "validate() accepts zero target address (EIP-7702 delegation reset)" {
     const allocator = testing.allocator;
     _ = allocator;
 
-    var auth = Authorization{
+    const auth = Authorization{
         .chain_id = 1,
         .address = Address.ZERO,
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(AuthorizationError.ZeroAddress, auth.validate());
+    try auth.validate();
 }
 
 test "validate() rejects signature with r=0" {
@@ -582,8 +624,8 @@ test "validate() rejects signature with r=0" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
@@ -598,8 +640,8 @@ test "validate() rejects signature with s=0" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0)),
     };
 
     try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
@@ -619,7 +661,7 @@ test "validate() rejects signature with r >= N" {
         .nonce = 0,
         .v = 27,
         .r = r_bytes,
-        .s = [_]u8{0x34} ** 32,
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
@@ -638,7 +680,7 @@ test "validate() rejects signature with s >= N" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
         .s = s_bytes,
     };
 
@@ -661,7 +703,7 @@ test "validate() rejects malleable signature (high S-value)" {
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
         .s = s_bytes,
     };
 

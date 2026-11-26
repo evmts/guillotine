@@ -1,6 +1,7 @@
 const std = @import("std");
 const crypto = @import("crypto");
 const PrecompileError = @import("common.zig").PrecompileError;
+const backend_error = @import("bls12_backend_error.zig");
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas costs for BLS12-381 pairing
@@ -27,11 +28,10 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 32);
     errdefer allocator.free(output);
-    errdefer allocator.free(output);
     @memset(output, 0);
 
-    const success = crypto.Crypto.bls12_381.pairingCheck(input) catch {
-        return error.InvalidPairing;
+    const success = crypto.Crypto.bls12_381.pairingCheck(input) catch |err| {
+        return backend_error.precompileError(err, error.InvalidPairing);
     };
 
     if (success) {
@@ -57,7 +57,7 @@ test "bls12_pairing - empty input is an error" {
 
 test "bls12_pairing - single pair exact gas" {
     // Single pair: G1 point (128 bytes) + G2 point (256 bytes) = 384 bytes
-    const input = [_]u8{0} ** 384;
+    const input = @as([384]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_PAIR_GAS;
     const result = execute(std.testing.allocator, &input, expected_gas);
 
@@ -72,7 +72,7 @@ test "bls12_pairing - single pair exact gas" {
 }
 
 test "bls12_pairing - single pair insufficient gas" {
-    const input = [_]u8{0} ** 384;
+    const input = @as([384]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_PAIR_GAS;
     const result = execute(std.testing.allocator, &input, expected_gas - 1);
     try std.testing.expectError(error.OutOfGas, result);
@@ -80,7 +80,7 @@ test "bls12_pairing - single pair insufficient gas" {
 
 test "bls12_pairing - two pairs exact gas" {
     // Two pairs: 2 * 384 = 768 bytes
-    const input = [_]u8{0} ** 768;
+    const input = @as([768]u8, @splat(0));
     const expected_gas = BASE_GAS + 2 * PER_PAIR_GAS;
     const result = execute(std.testing.allocator, &input, expected_gas);
 
@@ -96,7 +96,7 @@ test "bls12_pairing - two pairs exact gas" {
 
 test "bls12_pairing - three pairs" {
     // Three pairs: 3 * 384 = 1152 bytes
-    const input = [_]u8{0} ** 1152;
+    const input = @as([1152]u8, @splat(0));
     const expected_gas = BASE_GAS + 3 * PER_PAIR_GAS;
     const result = execute(std.testing.allocator, &input, expected_gas);
 
@@ -112,7 +112,7 @@ test "bls12_pairing - three pairs" {
 
 test "bls12_pairing - invalid input length not multiple of 384" {
     // 383 bytes - not a multiple of 384
-    const input = [_]u8{0} ** 383;
+    const input = @as([383]u8, @splat(0));
     const result = execute(std.testing.allocator, &input, 1000000);
     try std.testing.expectError(error.InvalidInput, result);
 }
@@ -124,7 +124,7 @@ test "bls12_pairing - invalid input length 1" {
 }
 
 test "bls12_pairing - invalid input length 385" {
-    const input = [_]u8{0} ** 385;
+    const input = @as([385]u8, @splat(0));
     const result = execute(std.testing.allocator, &input, 1000000);
     try std.testing.expectError(error.InvalidInput, result);
 }
@@ -144,7 +144,7 @@ test "bls12_pairing - gas cost calculation" {
 
 test "bls12_pairing - output format" {
     // One pair of points at infinity: e(O, O) = 1, so the check succeeds.
-    const input = [_]u8{0} ** 384;
+    const input = @as([384]u8, @splat(0));
     const res = try execute(std.testing.allocator, &input, BASE_GAS + PER_PAIR_GAS);
     defer std.testing.allocator.free(res.output);
     try std.testing.expectEqual(BASE_GAS + PER_PAIR_GAS, res.gas_used);
@@ -158,7 +158,7 @@ test "bls12_pairing - output format" {
 test "bls12_pairing - large number of pairs gas calculation" {
     // Test with 10 pairs
     const k: u64 = 10;
-    const input = [_]u8{0} ** (384 * k);
+    const input = @as([(384 * k)]u8, @splat(0));
     const expected_gas = BASE_GAS + k * PER_PAIR_GAS;
 
     const result = execute(std.testing.allocator, &input, expected_gas);
@@ -211,5 +211,21 @@ test "bls12_pairing - output size consistency" {
         } else |_| {
             // Stub implementation
         }
+    }
+}
+
+test "EIP-2537 pairing rejects padding and noncanonical field elements without leaking" {
+    var input = @as([384]u8, @splat(0));
+    const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
+    for (0..6) |slot| {
+        const offset = slot * 64;
+        for (0..16) |padding| {
+            input[offset + padding] = 1;
+            try std.testing.expectError(error.InvalidPairing, execute(std.testing.allocator, &input, 1_000_000));
+            input[offset + padding] = 0;
+        }
+        std.mem.writeInt(u512, input[offset..][0..64], modulus, .big);
+        try std.testing.expectError(error.InvalidPairing, execute(std.testing.allocator, &input, 1_000_000));
+        @memset(input[offset..][0..64], 0);
     }
 }

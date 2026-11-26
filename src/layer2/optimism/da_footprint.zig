@@ -44,7 +44,7 @@ pub fn gasMetered(gas_used: u64, blob_gas_used: u64) u64 {
 const testing = std.testing;
 
 test "deposit transactions have zero DA footprint" {
-    const deposit = [_]u8{0x7E} ++ [_]u8{0xAB} ** 1000;
+    const deposit = [_]u8{0x7E} ++ @as([1000]u8, @splat(0xAB));
     try testing.expectEqual(@as(u64, 0), txDaFootprint(&deposit, 400));
 }
 

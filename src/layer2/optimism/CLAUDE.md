@@ -23,7 +23,7 @@ When in doubt, read that code; do not trust prose (including this file) over it.
 | Spec | Eth fork | EVM-visible change |
 | --- | --- | --- |
 | BEDROCK | MERGE | L1 fee with overhead; +1088 data gas; system deposits allowed |
-| REGOLITH | MERGE | no +1088; system deposits rejected; deposit gas = actual |
+| REGOLITH | MERGE | no +1088; system deposits become failed deposits; deposit gas = actual |
 | CANYON | SHANGHAI | Shanghai |
 | ECOTONE | CANCUN | blob-aware L1 fee |
 | FJORD | CANCUN | FastLZ L1 fee; P256VERIFY at 0x100 (3450 gas) |

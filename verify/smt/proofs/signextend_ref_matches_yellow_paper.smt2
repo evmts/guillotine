@@ -8,7 +8,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:196 (signextendRef)
+;; --- src/core/verified_ops.zig:196 (signextendRef)
 ;;   | pub inline fn signextendRef(ext: u256, value: u256) u256 {
 ;;   |     if (ext >= 31) return value;
 ;;   |     const byte_index: u8 = @intCast(ext);

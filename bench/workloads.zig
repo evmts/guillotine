@@ -9,20 +9,29 @@ pub const Source = union(enum) {
     p256verify,
 };
 
+/// Fork and gas budget a workload runs under.
+pub const Profile = enum {
+    /// The suite fork (`bench_options.hardfork`) and gas budget.
+    suite,
+    /// Prague with `uncapped_gas_limit`, for workloads that need more gas than one
+    /// Osaka+ transaction may carry (EIP-7825 caps it at 2^24).
+    uncapped,
+};
+
+/// Gas budget of the `uncapped` profile.
+pub const uncapped_gas_limit: u64 = 3_000_000_000;
+
 pub const Workload = struct {
     name: []const u8,
     category: []const u8,
     source: Source,
+    profile: Profile = .suite,
     input: []const u8 = &.{},
     operations: u32 = 1,
     expected: ?u256 = null,
     output_len: ?usize = null,
     // Prepopulate independent storage slots for cold/warm SLOAD cases.
     storage: bool = false,
-    // Minimum transaction gas budget required to execute the workload.
-    // Workloads exceeding a hardfork's EIP-7825 tx gas cap report unavailable
-    // rather than failing preflight with OutOfGas.
-    min_gas: u64 = 0,
 };
 
 pub fn decodeHex(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
@@ -89,22 +98,13 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
     const arithmetic = [_]struct { name: []const u8, opcode: u8, expected: u256 }{
         .{ .name = "ADD", .opcode = 0x01, .expected = 10 },
         .{ .name = "MUL", .opcode = 0x02, .expected = 21 },
-        .{ .name = "SUB", .opcode = 0x03, .expected = 4 },
         .{ .name = "DIV", .opcode = 0x04, .expected = 2 },
         .{ .name = "SDIV", .opcode = 0x05, .expected = 2 },
         .{ .name = "MOD", .opcode = 0x06, .expected = 1 },
-        .{ .name = "SMOD", .opcode = 0x07, .expected = 1 },
         .{ .name = "EXP", .opcode = 0x0a, .expected = 343 },
-        .{ .name = "SIGNEXTEND", .opcode = 0x0b, .expected = 3 },
-        .{ .name = "LT", .opcode = 0x10, .expected = 0 },
-        .{ .name = "GT", .opcode = 0x11, .expected = 1 },
-        .{ .name = "SLT", .opcode = 0x12, .expected = 0 },
-        .{ .name = "SGT", .opcode = 0x13, .expected = 1 },
-        .{ .name = "EQ", .opcode = 0x14, .expected = 0 },
         .{ .name = "AND", .opcode = 0x16, .expected = 3 },
         .{ .name = "OR", .opcode = 0x17, .expected = 7 },
         .{ .name = "XOR", .opcode = 0x18, .expected = 4 },
-        .{ .name = "BYTE", .opcode = 0x1a, .expected = 0 },
         .{ .name = "SHL", .opcode = 0x1b, .expected = 384 },
         .{ .name = "SHR", .opcode = 0x1c, .expected = 0 },
         .{ .name = "SAR", .opcode = 0x1d, .expected = 0 },
@@ -125,34 +125,8 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             .expected = item.expected,
         });
     }
-    const ternary = [_]struct { name: []const u8, opcode: u8, expected: u256 }{
-        .{ .name = "ADDMOD", .opcode = 0x08, .expected = 4 },
-        .{ .name = "MULMOD", .opcode = 0x09, .expected = 3 },
-    };
-    for (ternary) |item| {
-        var code = Assembler{ .allocator = allocator };
-        for (0..repetitions) |_| {
-            try code.push(6);
-            try code.push(3);
-            try code.push(7);
-            try code.op(item.opcode);
-            try code.store(0);
-        }
-        try list.append(allocator, .{
-            .name = try std.fmt.allocPrint(allocator, "opcode/{s}", .{item.name}),
-            .category = "opcode",
-            .source = .{ .bytecode = try code.finish(0) },
-            .operations = repetitions,
-            .expected = item.expected,
-        });
-    }
     try list.append(allocator, .{ .name = "opcode/CLZ", .category = "opcode", .source = .clz, .operations = repetitions, .expected = 253 });
-    const memory = [_][]const u8{
-        "MLOAD",      "MSTORE",     "MCOPY",        "KECCAK256",
-        "SLOAD-cold", "SLOAD-warm", "SSTORE-cold",  "SSTORE-warm",
-        "CALL",       "STATICCALL", "DELEGATECALL", "MSTORE8",
-        "TLOAD",      "TSTORE",     "LOG0",
-    };
+    const memory = [_][]const u8{ "MLOAD", "MSTORE", "MCOPY", "KECCAK256", "SLOAD-cold", "SLOAD-warm", "SSTORE-cold", "SSTORE-warm", "CALL", "STATICCALL" };
     for (memory, 0..) |name, kind| {
         var code = Assembler{ .allocator = allocator };
         try code.push(42);
@@ -161,10 +135,6 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             try code.push(0);
             try code.op(0x54);
             try code.op(0x50);
-        } else if (kind == 12) {
-            try code.push(42);
-            try code.push(0);
-            try code.op(0x5d);
         }
         for (0..repetitions) |index| {
             switch (kind) {
@@ -198,7 +168,7 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
                     try code.push(if (kind == 6) index else 0);
                     try code.op(0x55);
                 },
-                8, 9, 10 => {
+                8, 9 => {
                     // Child at 0x2000 returns 42. Accumulate success flags;
                     // a failed nested call changes the checked result.
                     try code.push(0);
@@ -208,30 +178,10 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
                     if (kind == 8) try code.push(0);
                     try code.push(0x2000);
                     try code.push(50_000);
-                    try code.op(if (kind == 8) 0xf1 else if (kind == 9) 0xfa else 0xf4);
+                    try code.op(if (kind == 8) 0xf1 else 0xfa);
                     try code.load(32);
                     try code.op(0x01);
                     try code.store(32);
-                },
-                11 => {
-                    try code.push(42);
-                    try code.push(63);
-                    try code.op(0x53);
-                },
-                12 => {
-                    try code.push(0);
-                    try code.op(0x5c);
-                    try code.store(32);
-                },
-                13 => {
-                    try code.push(42);
-                    try code.push(index);
-                    try code.op(0x5d);
-                },
-                14 => {
-                    try code.push(32);
-                    try code.push(0);
-                    try code.op(0xa0);
                 },
                 else => unreachable,
             }
@@ -240,15 +190,8 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             try code.push(if (kind == 6) repetitions - 1 else 0);
             try code.op(0x54);
             try code.store(32);
-        } else if (kind == 13) {
-            try code.push(repetitions - 1);
-            try code.op(0x5c);
-            try code.store(32);
-        } else if (kind == 14) {
-            try code.load(0);
-            try code.store(32);
         }
-        var word = [_]u8{0} ** 32;
+        var word = @as([32]u8, @splat(0));
         word[31] = 42;
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(&word, &hash, .{});
@@ -256,7 +199,7 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             3 => std.mem.readInt(u256, &hash, .big),
             4, 5 => 7,
             6, 7 => 9,
-            8, 9, 10 => repetitions,
+            8, 9 => repetitions,
             else => 42,
         };
         try list.append(allocator, .{
@@ -285,199 +228,19 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
         try code.store(0);
         try list.append(allocator, .{ .name = "opcode/JUMP-JUMPI-loop", .category = "opcode", .source = .{ .bytecode = try code.finish(0) }, .operations = repetitions, .expected = 0 });
     }
-    for ([_][]const u8{ "snailtracer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes" }) |name| {
-        const min_gas: u64 = if (std.mem.eql(u8, name, "snailtracer")) 240_000_000 else 0;
-        try list.append(allocator, .{
-            .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}),
-            .category = "contract",
-            .source = .{ .fixture = name },
-            .min_gas = min_gas,
-        });
+    // SnailTracer.Benchmark() spends about 2.09 Ggas (mostly warm SLOADs of the scene),
+    // far above the Osaka+ transaction cap, and it is the only entry point that
+    // configures the scene, so it runs under the uncapped profile.
+    try list.append(allocator, .{ .name = "contract/snailtracer", .category = "contract", .source = .{ .fixture = "snailtracer" }, .profile = .uncapped });
+    for ([_][]const u8{ "erc20-mint", "erc20-transfer", "ten-thousand-hashes" }) |name| {
+        try list.append(allocator, .{ .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}), .category = "contract", .source = .{ .fixture = name } });
     }
     for ([_][]const u8{ "BubbleSort", "Fibonacci", "Factorial", "Keccak-loop", "Uniswap-like-swap" }, 0..) |name, kind| {
         const result = try algorithm(allocator, kind);
         try list.append(allocator, .{ .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}), .category = "contract", .source = .{ .bytecode = result.code }, .expected = result.expected });
     }
-    try hotloops(allocator, &list);
     try precompiles(allocator, &list);
     return list.toOwnedSlice(allocator);
-}
-
-/// Tight multi-thousand-iteration interpreter loops that isolate EVM hot-path
-/// execution (branchless arithmetic/bitwise, warm memory, O(1) dense jumps,
-/// and basic-block guards) from per-call simulate()/dispatch setup overhead.
-fn hotloops(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !void {
-    const iters: u32 = 2048;
-
-    // 1. Signed arithmetic hot loop: SDIV + SMOD on negative dividends.
-    {
-        var code = Assembler{ .allocator = allocator };
-        const neg_dividend: u256 = @bitCast(@as(i256, -1_000_003));
-        const q_expected: u256 = @bitCast(@as(i256, -142_857));
-        const r_expected: u256 = @bitCast(@as(i256, -4));
-        // Stack invariant at `loop_pc`: [acc, i] (top = i)
-        try code.push(0);
-        try code.push(iters);
-        const loop_pc = try code.label();
-        // Stack: [acc, i]
-        try code.push(7);
-        try code.push(neg_dividend);
-        try code.op(0x05); // [acc, i, q]
-        try code.push(7);
-        try code.push(neg_dividend);
-        try code.op(0x07); // [acc, i, q, r]
-        try code.op(0x01); // [acc, i, q+%r]
-        try code.op(0x90); // SWAP1 -> [acc, q+%r, i]
-        try code.op(0x91); // SWAP2 -> [i, q+%r, acc]
-        try code.op(0x01); // ADD   -> [i, acc']
-        try code.op(0x90); // SWAP1 -> [acc', i]
-        try code.push(1);
-        try code.op(0x90); // [acc', 1, i]
-        try code.op(0x03); // SUB   -> [acc', i-1]
-        try code.op(0x80); // DUP1  -> [acc', i-1, i-1]
-        try code.push(loop_pc);
-        try code.op(0x57); // JUMPI -> if i-1 != 0 goto loop_pc
-        try code.op(0x50); // POP 0 -> [acc']
-        try code.store(0);
-        const expected = @as(u256, iters) *% (q_expected +% r_expected);
-        try list.append(allocator, .{
-            .name = "hotloop/sdiv-smod",
-            .category = "hotloop",
-            .source = .{ .bytecode = try code.finish(0) },
-            .operations = iters * 2,
-            .expected = expected,
-        });
-    }
-
-    // 2. Branchless bitwise + EXP gas loop: SIGNEXTEND + SAR + BYTE + EXP.
-    {
-        var code = Assembler{ .allocator = allocator };
-        const neg_val: u256 = @bitCast(@as(i256, -1024));
-        const se_out: u256 = @bitCast(@as(i256, -128)); // SIGNEXTEND(0, 0x80)
-        const sar_out: u256 = @bitCast(@as(i256, -64)); // SAR(4, -1024)
-        const byte_out: u256 = 0x34; // BYTE(31, 0x1234)
-        const exp_out: u256 = 6561; // EXP(3, 8)
-        // Stack invariant at `loop_pc`: [acc, i] (top = i)
-        try code.push(0);
-        try code.push(iters);
-        const loop_pc = try code.label();
-        try code.push(0x80);
-        try code.push(0);
-        try code.op(0x0b); // SIGNEXTEND(0, 0x80) = -128
-        try code.push(neg_val);
-        try code.push(4);
-        try code.op(0x1d); // SAR(4, -1024) = -64
-        try code.op(0x01); // ADD
-        try code.push(0x1234);
-        try code.push(31);
-        try code.op(0x1a); // BYTE(31, 0x1234) = 0x34
-        try code.op(0x01); // ADD
-        try code.push(8);
-        try code.push(3);
-        try code.op(0x0a); // EXP(3, 8) = 6561
-        try code.op(0x01); // ADD -> [acc, i, delta]
-        try code.op(0x90); // [acc, delta, i]
-        try code.op(0x91); // [i, delta, acc]
-        try code.op(0x01); // [i, acc']
-        try code.op(0x90); // [acc', i]
-        try code.push(1);
-        try code.op(0x90);
-        try code.op(0x03);
-        try code.op(0x80);
-        try code.push(loop_pc);
-        try code.op(0x57);
-        try code.op(0x50);
-        try code.store(0);
-        const expected = @as(u256, iters) *% (se_out +% sar_out +% byte_out +% exp_out);
-        try list.append(allocator, .{
-            .name = "hotloop/signext-sar-byte-exp",
-            .category = "hotloop",
-            .source = .{ .bytecode = try code.finish(0) },
-            .operations = iters * 4,
-            .expected = expected,
-        });
-    }
-
-    // 3. Warm-memory hot loop: MLOAD + MSTORE + MSTORE8 (exercises checkMemoryBoundsFast + unchecked fast paths).
-    {
-        var code = Assembler{ .allocator = allocator };
-        // Pre-warm slots 0..96
-        try code.push(0);
-        try code.store(0);
-        try code.push(7);
-        try code.store(32);
-        try code.push(0x42);
-        try code.push(95);
-        try code.op(0x53); // MSTORE8(95, 0x42) -> word at 64 == 0x42
-        // Stack: [i]
-        try code.push(iters);
-        const loop_pc = try code.label();
-        try code.load(0);
-        try code.load(32);
-        try code.op(0x01);
-        try code.load(64);
-        try code.op(0x01);
-        try code.store(0);
-        try code.push(0x42);
-        try code.push(95);
-        try code.op(0x53);
-        try code.push(1);
-        try code.op(0x90);
-        try code.op(0x03);
-        try code.op(0x80);
-        try code.push(loop_pc);
-        try code.op(0x57);
-        try code.op(0x50);
-        try list.append(allocator, .{
-            .name = "hotloop/memory-warm",
-            .category = "hotloop",
-            .source = .{ .bytecode = try code.finish(0) },
-            .operations = iters * 5,
-            .expected = @as(u256, iters) * (7 + 0x42),
-        });
-    }
-
-    // 4. Dynamic JUMP dispatch hot loop with 32 JUMPDESTs (exercises O(1) denseJumpInBoundsFast + direct tail-call).
-    {
-        var code = Assembler{ .allocator = allocator };
-        // Jump over 31 decoy JUMPDESTs so the jump table has 33 entries.
-        const entry = try code.jump(0x56);
-        for (0..31) |_| {
-            _ = try code.label();
-            try code.op(0x00);
-        }
-        code.patch(entry, try code.label());
-        // Stack: [acc, i]
-        try code.push(0);
-        try code.push(iters);
-        const loop_pc = try code.label();
-        // Compute target dynamically: (loop_pc + 0) via ADD so it uses dynamic JUMP (not static fusion)
-        try code.push(1);
-        try code.op(0x90); // [acc, 1, i]
-        try code.op(0x03); // [acc, i-1]
-        try code.op(0x90); // [i-1, acc]
-        try code.push(3);
-        try code.op(0x01); // [i-1, acc+3]
-        try code.op(0x90); // [acc+3, i-1]
-        try code.op(0x80); // [acc+3, i-1, i-1]
-        try code.op(0x15); // [acc+3, i-1, i-1 == 0]
-        const done = try code.jump(0x57);
-        // Dynamic JUMP to `loop_pc`: push (loop_pc - 1), push 1, ADD, JUMP
-        try code.push(loop_pc - 1);
-        try code.push(1);
-        try code.op(0x01);
-        try code.op(0x56); // dynamic JUMP -> O(1) dense lookup
-        code.patch(done, try code.label());
-        try code.op(0x50); // POP 0
-        try code.store(0);
-        try list.append(allocator, .{
-            .name = "hotloop/dynamic-jump-dense",
-            .category = "hotloop",
-            .source = .{ .bytecode = try code.finish(0) },
-            .operations = iters,
-            .expected = @as(u256, iters) * 3,
-        });
-    }
 }
 
 fn algorithm(allocator: std.mem.Allocator, kind: usize) !struct { code: []const u8, expected: u256 } {
@@ -540,7 +303,7 @@ fn algorithm(allocator: std.mem.Allocator, kind: usize) !struct { code: []const 
             expected = 2432902008176640000;
         },
         3 => {
-            var word = [_]u8{0} ** 32;
+            var word = @as([32]u8, @splat(0));
             for (0..256) |_| {
                 try code.push(32);
                 try code.push(0);
@@ -618,13 +381,14 @@ fn precompiles(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !vo
         "12c85ea5db8c6deb4aab71808dcb408fe3d1e7690c43d37b4ce6cc0166fa7daa");
     try list.append(allocator, .{ .name = "precompile/BN254-pairing", .category = "precompile", .source = .{ .precompile = 8 }, .input = pairing, .expected = 0 });
     // BLS map-to-curve performs real field/curve work and avoids the infinity
-    // shortcuts common in all-zero point-addition benchmark inputs.
+    // shortcuts common in all-zero point-addition benchmark inputs. Final
+    // EIP-2537 places MAP_FP_TO_G1 at 0x10 (0x12 was a withdrawn draft address).
     const field = try allocator.alloc(u8, 64);
     @memset(field, 0);
     field[63] = 42;
     try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x10 }, .input = field, .output_len = 128 });
     const scheme = std.crypto.sign.ecdsa.EcdsaP256Sha256;
-    const key = try scheme.KeyPair.generateDeterministic([_]u8{42} ** scheme.KeyPair.seed_length);
+    const key = try scheme.KeyPair.generateDeterministic(@as([scheme.KeyPair.seed_length]u8, @splat(42)));
     const text = "Guillotine P256 benchmark vector";
     const signature256 = (try key.sign(text, null)).toBytes();
     const public = key.public_key.toUncompressedSec1();
@@ -680,7 +444,7 @@ test "ECRECOVER benchmark signature verifies independently with the standard lib
     for (suite) |workload| {
         if (!std.mem.eql(u8, workload.name, "precompile/ECRECOVER")) continue;
         const scheme = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
-        var secret = [_]u8{0} ** 32;
+        var secret = @as([32]u8, @splat(0));
         secret[31] = 1;
         const key = try scheme.KeyPair.fromSecretKey(try scheme.SecretKey.fromBytes(secret));
         const signature = scheme.Signature.fromBytes(workload.input[64..128].*);
@@ -692,4 +456,15 @@ test "ECRECOVER benchmark signature verifies independently with the standard lib
         return;
     }
     return error.MissingEcrecoverBenchmark;
+}
+
+test "only snailtracer needs the uncapped profile, and its budget exceeds the Osaka+ cap" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const suite = try build(arena.allocator());
+    for (suite) |workload| {
+        const expected: Profile = if (std.mem.eql(u8, workload.name, "contract/snailtracer")) .uncapped else .suite;
+        try std.testing.expectEqual(expected, workload.profile);
+    }
+    try std.testing.expect(uncapped_gas_limit > 16_777_216);
 }

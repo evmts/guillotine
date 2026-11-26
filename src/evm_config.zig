@@ -1,5 +1,4 @@
 const std = @import("std");
-const limits = @import("evm_limits");
 const builtin = @import("builtin");
 const FrameConfig = @import("frame/frame_config.zig").FrameConfig;
 const BlockInfoConfig = @import("frame/block_info_config.zig").BlockInfoConfig;
@@ -36,7 +35,7 @@ pub const EvmConfig = struct {
 
     /// Maximum call depth allowed in the EVM (defaults to 1024 levels)
     /// This prevents infinite recursion and stack overflow attacks
-    max_call_depth: u11 = limits.max_call_depth,
+    max_call_depth: u11 = 1024,
 
     /// Maximum input size for interpreter operations (128 KB)
     /// This prevents excessive memory usage in single operations
@@ -49,13 +48,6 @@ pub const EvmConfig = struct {
     /// Enable bytecode fusion optimizations (default: true)
     /// When enabled, common opcode patterns like PUSH+ADD are fused into single operations
     enable_fusion: bool = true,
-
-    /// Run hot, eligible pure-compute contracts through the native ARM64 JIT tier
-    /// (src/jit). Ineligible code, traced runs, initcode and non-aarch64 targets
-    /// always use the interpreter. Native faults replay in the interpreter.
-    /// Opt-in: on current benchmarks the bridge overhead outweighs native speed
-    /// for short calls, so the interpreter remains the default.
-    enable_native_jit: bool = false,
 
     /// Disable gas checks for testing/development (default: false)
     /// When enabled, gas consumption methods become no-ops
@@ -72,16 +64,16 @@ pub const EvmConfig = struct {
 
     // Frame configuration fields (previously nested)
     /// The maximum stack size for the evm. Defaults to 1024
-    stack_size: u12 = limits.stack_capacity,
+    stack_size: u12 = 1024,
 
     /// The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
 
     /// The maximum amount of bytes allowed in contract code
-    max_bytecode_size: u32 = limits.max_code_size,
+    max_bytecode_size: u32 = 24576,
 
     /// The maximum amount of bytes allowed in contract deployment
-    max_initcode_size: u32 = limits.max_initcode_size,
+    max_initcode_size: u32 = 49152,
 
     /// The maximum gas limit for a block
     block_gas_limit: u64 = 30_000_000,
@@ -89,7 +81,7 @@ pub const EvmConfig = struct {
     /// Memory configuration
     memory_initial_capacity: usize = 4096,
 
-    memory_limit: u64 = limits.max_memory_size,
+    memory_limit: u64 = 0xFFFFFF,
 
     /// Arena allocator configuration
     /// Initial and maximum retained capacity for the arena allocator (in bytes)
@@ -122,7 +114,7 @@ pub const EvmConfig = struct {
     /// Loop quota for safety counters to prevent infinite loops
     /// null = disabled (default for optimized builds)
     /// value = maximum iterations before panic (default for debug/safe builds)
-    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
+    loop_quota: ?u32 = if (builtin.mode == .debug or builtin.mode == .safe) 1_000_000 else null,
 
     /// Enable system contract updates (EIP-4788 beacon roots, EIP-2935 historical block hashes)
     /// When true, these contracts are updated at the start of each transaction
@@ -188,7 +180,6 @@ pub const EvmConfig = struct {
             .disable_gas_checks = self.disable_gas_checks,
             .disable_balance_checks = self.disable_balance_checks,
             .disable_fusion = !self.enable_fusion,
-            .enable_tracer = self.tracer_config.enabled,
             .vector_length = self.getVectorLength(),
             .loop_quota = self.loop_quota,
             .opcode_overrides = &.{}, // Pass empty overrides - custom overrides should be handled differently

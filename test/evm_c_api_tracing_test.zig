@@ -69,11 +69,11 @@ test "C FFI API - create tracing EVM and verify trace JSON output" {
         .number = 100,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .base_fee = 0,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Create tracing EVM instance
@@ -89,15 +89,15 @@ test "C FFI API - create tracing EVM and verify trace JSON output" {
         0x00,        // STOP
     };
     
-    const contract_addr = [_]u8{0x01} ** 20;
+    const contract_addr = @as([20]u8, @splat(0x01));
     const success = guillotine_set_code_tracing(handle.?, &contract_addr, &bytecode, bytecode.len);
     try testing.expect(success);
     
     // Prepare call parameters
-    const caller = [_]u8{0} ** 20;
-    const value = [_]u8{0} ** 32; // 0 value
+    const caller = @as([20]u8, @splat(0));
+    const value = @as([32]u8, @splat(0)); // 0 value
     const empty_input = [_]u8{};
-    const salt = [_]u8{0} ** 32;
+    const salt = @as([32]u8, @splat(0));
     
     const params = CallParams{
         .caller = caller,
@@ -198,11 +198,11 @@ test "C FFI API - tracing captures REVERT with trace" {
         .number = 100,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .base_fee = 0,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Create tracing EVM instance
@@ -220,15 +220,15 @@ test "C FFI API - tracing captures REVERT with trace" {
         0xfd,                            // REVERT
     };
     
-    const contract_addr = [_]u8{0x02} ** 20;
+    const contract_addr = @as([20]u8, @splat(0x02));
     const success = guillotine_set_code_tracing(handle.?, &contract_addr, &bytecode, bytecode.len);
     try testing.expect(success);
     
     // Prepare call parameters
-    const caller = [_]u8{0} ** 20;
-    const value = [_]u8{0} ** 32; // 0 value
+    const caller = @as([20]u8, @splat(0));
+    const value = @as([32]u8, @splat(0)); // 0 value
     const empty_input = [_]u8{};
-    const salt = [_]u8{0} ** 32;
+    const salt = @as([32]u8, @splat(0));
     
     const params = CallParams{
         .caller = caller,
@@ -300,11 +300,11 @@ test "C FFI API - tracing captures CREATE operation" {
         .number = 100,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .base_fee = 0,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Create tracing EVM instance
@@ -320,10 +320,10 @@ test "C FFI API - tracing captures CREATE operation" {
     };
     
     // Prepare CREATE parameters
-    const caller = [_]u8{0x03} ** 20;
-    const to = [_]u8{0} ** 20; // CREATE doesn't use 'to'
-    const value = [_]u8{0} ** 32; // 0 value
-    const salt = [_]u8{0} ** 32;
+    const caller = @as([20]u8, @splat(0x03));
+    const to = @as([20]u8, @splat(0)); // CREATE doesn't use 'to'
+    const value = @as([32]u8, @splat(0)); // 0 value
+    const salt = @as([32]u8, @splat(0));
     
     const params = CallParams{
         .caller = caller,
@@ -392,11 +392,11 @@ test "C FFI API - non-tracing EVM returns no trace" {
         .number = 100,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .base_fee = 0,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Create regular (non-tracing) EVM instance
@@ -412,15 +412,15 @@ test "C FFI API - non-tracing EVM returns no trace" {
         0x00,        // STOP
     };
     
-    const contract_addr = [_]u8{0x04} ** 20;
+    const contract_addr = @as([20]u8, @splat(0x04));
     const success = guillotine_set_code(handle.?, &contract_addr, &bytecode, bytecode.len);
     try testing.expect(success);
     
     // Prepare call parameters
-    const caller = [_]u8{0} ** 20;
-    const value = [_]u8{0} ** 32;
+    const caller = @as([20]u8, @splat(0));
+    const value = @as([32]u8, @splat(0));
     const empty_input = [_]u8{};
-    const salt = [_]u8{0} ** 32;
+    const salt = @as([32]u8, @splat(0));
     
     const params = CallParams{
         .caller = caller,
@@ -458,11 +458,11 @@ test "C FFI API - tracing handles complex stack operations" {
         .number = 100,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .base_fee = 0,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Create tracing EVM instance
@@ -480,15 +480,15 @@ test "C FFI API - tracing handles complex stack operations" {
         0x00,        // STOP
     };
     
-    const contract_addr = [_]u8{0x05} ** 20;
+    const contract_addr = @as([20]u8, @splat(0x05));
     const success = guillotine_set_code_tracing(handle.?, &contract_addr, &bytecode, bytecode.len);
     try testing.expect(success);
     
     // Prepare call parameters
-    const caller = [_]u8{0} ** 20;
-    const value = [_]u8{0} ** 32;
+    const caller = @as([20]u8, @splat(0));
+    const value = @as([32]u8, @splat(0));
     const empty_input = [_]u8{};
-    const salt = [_]u8{0} ** 32;
+    const salt = @as([32]u8, @splat(0));
     
     const params = CallParams{
         .caller = caller,

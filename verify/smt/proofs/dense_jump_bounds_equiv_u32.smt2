@@ -8,13 +8,13 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/verified_ops.zig:295 (denseJumpInBoundsRef)
+;; --- src/core/verified_ops.zig:295 (denseJumpInBoundsRef)
 ;;   | pub inline fn denseJumpInBoundsRef(dest: u256, dense_len: u32, comptime PcType: type) bool {
 ;;   |     if (dest > std.math.maxInt(PcType)) return false;
 ;;   |     const dest_pc: u32 = @intCast(dest);
 ;;   |     return dest_pc < dense_len;
 ;;   | }
-;; --- src/verified_ops.zig:302 (denseJumpInBoundsFast)
+;; --- src/core/verified_ops.zig:302 (denseJumpInBoundsFast)
 ;;   | pub inline fn denseJumpInBoundsFast(dest: u256, dense_len: u32) bool {
 ;;   |     return dest < @as(u256, dense_len);
 ;;   | }

@@ -9,7 +9,6 @@
 /// Memory configuration affects both performance and resource usage.
 /// Larger initial capacity reduces allocations, while limits prevent DoS attacks.
 const std = @import("std");
-const limits = @import("evm_limits");
 
 pub const MemoryConfig = struct {
     const Self = @This();
@@ -17,7 +16,7 @@ pub const MemoryConfig = struct {
     // The initial capacity for memory allocation
     initial_capacity: usize = 4096,
     // The maximum memory limit
-    memory_limit: u64 = limits.max_memory_size,
+    memory_limit: u64 = 0xFFFFFF,
     // Whether this memory instance owns its buffer
     owned: bool = true,
     // SIMD vector length for optimized operations (1 = scalar)

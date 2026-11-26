@@ -11,30 +11,26 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:117 (push_sub_inline)
-;;   |         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_SUB_INLINE, cursor);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:109 (push_sub_inline)
+;;   |         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_SUB_INLINE, cursor, s.sp, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
 ;;   |             const push_value = op_data.metadata.value;
-;;   |             {
-;;   |                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_SUB_INLINE requires 1 stack item");
-;;   |             }
-;;   |             const top = self.stack.peek_unsafe();
+;;   |             const top = s.peek_unsafe();
 ;;   |             const result = push_value -% top;
-;;   |             self.stack.set_top_unsafe(result);
-;;   |             return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_SUB_INLINE);
+;;   |             s.set_top_unsafe(result);
+;;   |             return N.next(self, .PUSH_SUB_INLINE, cursor, s.sp, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:131 (push_sub_pointer)
-;;   |         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-;;   |             self.beforeInstruction(.PUSH_SUB_POINTER, cursor);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:121 (push_sub_pointer)
+;;   |         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             N.before(self, .PUSH_SUB_POINTER, cursor, s.sp, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
-;;   |             {
-;;   |                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_SUB_POINTER requires 1 stack item");
-;;   |             }
-;;   |             const top = self.stack.peek_unsafe();
+;;   |             const top = s.peek_unsafe();
 ;;   |             const result = op_data.metadata.value_ptr.* -% top;
-;;   |             self.stack.set_top_unsafe(result);
-;;   |             return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_SUB_POINTER);
+;;   |             s.set_top_unsafe(result);
+;;   |             return N.next(self, .PUSH_SUB_POINTER, cursor, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

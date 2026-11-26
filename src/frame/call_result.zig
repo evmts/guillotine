@@ -28,6 +28,32 @@ pub fn CallResult(config: anytype) type {
             };
         }
 
+        /// Failed result with no output. Allocates nothing, so it cannot fail.
+        pub fn failed(gas_left: u64) Self {
+            return Self{
+                .success = false,
+                .gas_left = gas_left,
+                .output = &.{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
+        }
+
+        /// Successful result with no output. Allocates nothing, so it cannot fail.
+        pub fn succeeded_empty(gas_left: u64) Self {
+            return Self{
+                .success = true,
+                .gas_left = gas_left,
+                .output = &.{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
+        }
+
         pub fn success_empty(allocator: std.mem.Allocator, gas_left: u64) !Self {
             _ = allocator; // Unused when using compile-time empty slices
             return Self{
@@ -509,7 +535,7 @@ test "call result edge cases" {
     try std.testing.expectEqual(@as(u64, 0), max_gas.gasConsumed(std.math.maxInt(u64)));
 
     // Large output data
-    const large_output = &[_]u8{0xaa} ** 10000;
+    const large_output = &@as([10000]u8, @splat(0xaa));
     const large_result = (DefaultCallResult.success_with_output(std.testing.allocator, 5000, large_output) catch unreachable);
     try std.testing.expect(large_result.hasOutput());
     try std.testing.expectEqual(@as(usize, 10000), large_result.output.len);
@@ -618,7 +644,7 @@ test "call result success with logs" {
     const logs = try allocator.alloc(Log, 1);
     defer allocator.free(logs);
     logs[0] = Log{
-        .address = .{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 },
+        .address = .{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) },
         .topics = topics,
         .data = data,
     };
@@ -630,7 +656,7 @@ test "call result success with logs" {
     try std.testing.expectEqual(@as(u64, 12000), result.gas_left);
     try std.testing.expectEqualSlices(u8, output_data, result.output);
     try std.testing.expectEqual(@as(usize, 1), result.logs.len);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 }, result.logs[0].address);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) }, result.logs[0].address);
     try std.testing.expectEqual(@as(usize, 2), result.logs[0].topics.len);
     try std.testing.expectEqual(@as(u256, 0x1234567890ABCDEF), result.logs[0].topics[0]);
     try std.testing.expectEqual(@as(u256, 0xFEDCBA0987654321), result.logs[0].topics[1]);
@@ -652,12 +678,12 @@ test "call result struct field defaults" {
 test "call result with self destructs" {
     var selfdestructs = [_]SelfDestructRecord{
         SelfDestructRecord{
-            .contract = .{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 },
-            .beneficiary = .{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 },
+            .contract = .{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) },
+            .beneficiary = .{ .bytes = [_]u8{0x22} ++ @as([19]u8, @splat(0)) },
         },
         SelfDestructRecord{
-            .contract = .{ .bytes = [_]u8{0x33} ++ [_]u8{0} ** 19 },
-            .beneficiary = .{ .bytes = [_]u8{0x44} ++ [_]u8{0} ** 19 },
+            .contract = .{ .bytes = [_]u8{0x33} ++ @as([19]u8, @splat(0)) },
+            .beneficiary = .{ .bytes = [_]u8{0x44} ++ @as([19]u8, @splat(0)) },
         },
     };
 
@@ -665,36 +691,36 @@ test "call result with self destructs" {
     result.selfdestructs = &selfdestructs;
 
     try std.testing.expectEqual(@as(usize, 2), result.selfdestructs.len);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 }, result.selfdestructs[0].contract);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 }, result.selfdestructs[0].beneficiary);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x33} ++ [_]u8{0} ** 19 }, result.selfdestructs[1].contract);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x44} ++ [_]u8{0} ** 19 }, result.selfdestructs[1].beneficiary);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) }, result.selfdestructs[0].contract);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x22} ++ @as([19]u8, @splat(0)) }, result.selfdestructs[0].beneficiary);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x33} ++ @as([19]u8, @splat(0)) }, result.selfdestructs[1].contract);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x44} ++ @as([19]u8, @splat(0)) }, result.selfdestructs[1].beneficiary);
 }
 
 test "call result with accessed addresses" {
     var accessed_addresses = [_]Address{
-        .{ .bytes = [_]u8{0xAA} ++ [_]u8{0} ** 19 },
-        .{ .bytes = [_]u8{0xBB} ++ [_]u8{0} ** 19 },
-        .{ .bytes = [_]u8{0xCC} ++ [_]u8{0} ** 19 },
+        .{ .bytes = [_]u8{0xAA} ++ @as([19]u8, @splat(0)) },
+        .{ .bytes = [_]u8{0xBB} ++ @as([19]u8, @splat(0)) },
+        .{ .bytes = [_]u8{0xCC} ++ @as([19]u8, @splat(0)) },
     };
 
     var result = (DefaultCallResult.failure(std.testing.allocator, 200) catch unreachable);
     result.accessed_addresses = &accessed_addresses;
 
     try std.testing.expectEqual(@as(usize, 3), result.accessed_addresses.len);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xAA} ++ [_]u8{0} ** 19 }, result.accessed_addresses[0]);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xBB} ++ [_]u8{0} ** 19 }, result.accessed_addresses[1]);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xCC} ++ [_]u8{0} ** 19 }, result.accessed_addresses[2]);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xAA} ++ @as([19]u8, @splat(0)) }, result.accessed_addresses[0]);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xBB} ++ @as([19]u8, @splat(0)) }, result.accessed_addresses[1]);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xCC} ++ @as([19]u8, @splat(0)) }, result.accessed_addresses[2]);
 }
 
 test "call result with accessed storage" {
     var accessed_storage = [_]StorageAccess{
         StorageAccess{
-            .address = .{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 },
+            .address = .{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) },
             .slot = 0x1234,
         },
         StorageAccess{
-            .address = .{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 },
+            .address = .{ .bytes = [_]u8{0x22} ++ @as([19]u8, @splat(0)) },
             .slot = 0xABCDEF,
         },
     };
@@ -703,9 +729,9 @@ test "call result with accessed storage" {
     result.accessed_storage = &accessed_storage;
 
     try std.testing.expectEqual(@as(usize, 2), result.accessed_storage.len);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 }, result.accessed_storage[0].address);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) }, result.accessed_storage[0].address);
     try std.testing.expectEqual(@as(u256, 0x1234), result.accessed_storage[0].slot);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 }, result.accessed_storage[1].address);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x22} ++ @as([19]u8, @splat(0)) }, result.accessed_storage[1].address);
     try std.testing.expectEqual(@as(u256, 0xABCDEF), result.accessed_storage[1].slot);
 }
 
@@ -743,7 +769,7 @@ test "trace step memory management" {
     var reads = try allocator.alloc(TraceStep.StorageRead, 1);
     reads[0] = TraceStep.StorageRead{ .address = ZERO_ADDRESS, .slot = 0x100, .value = 0x200 };
     var writes = try allocator.alloc(TraceStep.StorageWrite, 1);
-    writes[0] = TraceStep.StorageWrite{ .address = .{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 }, .slot = 0x300, .old_value = 0x400, .new_value = 0x500 };
+    writes[0] = TraceStep.StorageWrite{ .address = .{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) }, .slot = 0x300, .old_value = 0x400, .new_value = 0x500 };
     step.storage_reads = reads;
     step.storage_writes = writes;
 
@@ -765,7 +791,7 @@ test "trace step memory management" {
     try std.testing.expectEqual(@as(u256, 0x200), step.storage_reads[0].value);
 
     try std.testing.expectEqual(@as(usize, 1), step.storage_writes.len);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 }, step.storage_writes[0].address);
+    try std.testing.expectEqual(Address{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) }, step.storage_writes[0].address);
     try std.testing.expectEqual(@as(u256, 0x300), step.storage_writes[0].slot);
     try std.testing.expectEqual(@as(u256, 0x400), step.storage_writes[0].old_value);
     try std.testing.expectEqual(@as(u256, 0x500), step.storage_writes[0].new_value);
@@ -850,13 +876,13 @@ test "storage access and self destruct comprehensive" {
         .slot = 0,
     };
     const storage2 = StorageAccess{
-        .address = .{ .bytes = [_]u8{0xFF} ** 20 },
+        .address = .{ .bytes = @as([20]u8, @splat(0xFF)) },
         .slot = std.math.maxInt(u256),
     };
 
     try std.testing.expectEqual(ZERO_ADDRESS, storage1.address);
     try std.testing.expectEqual(@as(u256, 0), storage1.slot);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xFF} ** 20 }, storage2.address);
+    try std.testing.expectEqual(Address{ .bytes = @as([20]u8, @splat(0xFF)) }, storage2.address);
     try std.testing.expectEqual(std.math.maxInt(u256), storage2.slot);
 
     // Test boundary values for SelfDestructRecord
@@ -865,14 +891,14 @@ test "storage access and self destruct comprehensive" {
         .beneficiary = ZERO_ADDRESS,
     };
     const selfdestruct2 = SelfDestructRecord{
-        .contract = Address{ .bytes = [_]u8{0xFF} ** 20 },
-        .beneficiary = Address{ .bytes = [_]u8{0xAA} ** 20 },
+        .contract = Address{ .bytes = @as([20]u8, @splat(0xFF)) },
+        .beneficiary = Address{ .bytes = @as([20]u8, @splat(0xAA)) },
     };
 
     try std.testing.expectEqual(ZERO_ADDRESS, selfdestruct1.contract);
     try std.testing.expectEqual(ZERO_ADDRESS, selfdestruct1.beneficiary);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xFF} ** 20 }, selfdestruct2.contract);
-    try std.testing.expectEqual(Address{ .bytes = [_]u8{0xAA} ** 20 }, selfdestruct2.beneficiary);
+    try std.testing.expectEqual(Address{ .bytes = @as([20]u8, @splat(0xFF)) }, selfdestruct2.contract);
+    try std.testing.expectEqual(Address{ .bytes = @as([20]u8, @splat(0xAA)) }, selfdestruct2.beneficiary);
 }
 
 test "call result toOwnedResult basic" {
@@ -912,7 +938,7 @@ test "call result toOwnedResult with logs" {
     const logs = try allocator.alloc(Log, 1);
     defer allocator.free(logs);
     logs[0] = Log{
-        .address = .{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 },
+        .address = .{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) },
         .topics = topics,
         .data = data,
     };
@@ -991,7 +1017,7 @@ test "call result toOwnedResult with all fields" {
     const logs = try allocator.alloc(Log, 1);
     defer allocator.free(logs);
     logs[0] = Log{
-        .address = .{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 },
+        .address = .{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) },
         .topics = topics,
         .data = log_data,
     };
@@ -1001,29 +1027,29 @@ test "call result toOwnedResult with all fields" {
     const selfdestructs = try allocator.alloc(SelfDestructRecord, 1);
     defer allocator.free(selfdestructs);
     selfdestructs[0] = .{
-        .contract = .{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 },
-        .beneficiary = .{ .bytes = [_]u8{0x33} ++ [_]u8{0} ** 19 },
+        .contract = .{ .bytes = [_]u8{0x22} ++ @as([19]u8, @splat(0)) },
+        .beneficiary = .{ .bytes = [_]u8{0x33} ++ @as([19]u8, @splat(0)) },
     };
     result.selfdestructs = selfdestructs;
 
     // Add accessed addresses
     const addresses = try allocator.alloc(Address, 2);
     defer allocator.free(addresses);
-    addresses[0] = .{ .bytes = [_]u8{0x44} ++ [_]u8{0} ** 19 };
-    addresses[1] = .{ .bytes = [_]u8{0x55} ++ [_]u8{0} ** 19 };
+    addresses[0] = .{ .bytes = [_]u8{0x44} ++ @as([19]u8, @splat(0)) };
+    addresses[1] = .{ .bytes = [_]u8{0x55} ++ @as([19]u8, @splat(0)) };
     result.accessed_addresses = addresses;
 
     // Add accessed storage
     const storage = try allocator.alloc(StorageAccess, 1);
     defer allocator.free(storage);
     storage[0] = .{
-        .address = .{ .bytes = [_]u8{0x66} ++ [_]u8{0} ** 19 },
+        .address = .{ .bytes = [_]u8{0x66} ++ @as([19]u8, @splat(0)) },
         .slot = 0x100,
     };
     result.accessed_storage = storage;
 
     // Add created address
-    result.created_address = .{ .bytes = [_]u8{0x77} ++ [_]u8{0} ** 19 };
+    result.created_address = .{ .bytes = [_]u8{0x77} ++ @as([19]u8, @splat(0)) };
 
     // Create owned copy
     const owned = try result.toOwnedResult(allocator);
@@ -1038,7 +1064,7 @@ test "call result toOwnedResult with all fields" {
     try testing.expectEqual(@as(usize, 1), owned.selfdestructs.len);
     try testing.expectEqual(@as(usize, 2), owned.accessed_addresses.len);
     try testing.expectEqual(@as(usize, 1), owned.accessed_storage.len);
-    try testing.expectEqual(Address{ .bytes = [_]u8{0x77} ++ [_]u8{0} ** 19 }, owned.created_address.?);
+    try testing.expectEqual(Address{ .bytes = [_]u8{0x77} ++ @as([19]u8, @splat(0)) }, owned.created_address.?);
 
     // Verify deep copies
     try testing.expect(result.output.ptr != owned.output.ptr);

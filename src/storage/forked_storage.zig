@@ -95,13 +95,13 @@ pub const ForkedStorage = struct {
         self.stats.rpc_calls += 1;
         
         const proof = try self.rpc.getProof(address, &.{});
-        const code = if (!std.mem.eql(u8, &proof.codeHash, &([_]u8{0} ** 32)))
+        const code = if (!std.mem.eql(u8, &proof.codeHash, &(@as([32]u8, @splat(0)))))
             try self.rpc.getCode(address)
         else
             &[_]u8{};
         
         // Store code if present
-        var code_hash = proof.codeHash;
+        const code_hash = proof.codeHash;
         if (code.len > 0) {
             const code_copy = try self.allocator.dupe(u8, code);
             try self.hot.putCode(code_hash, code_copy);
@@ -231,7 +231,7 @@ pub const ForkedStorage = struct {
     
     pub fn get_code_by_address(self: *Self, address: [20]u8) ![]const u8 {
         const account = (try self.get_account(address)) orelse return &.{};
-        if (std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
+        if (std.mem.eql(u8, &account.code_hash, &(@as([32]u8, @splat(0))))) {
             return &.{};
         }
         return self.get_code(account.code_hash);
@@ -252,7 +252,7 @@ pub const ForkedStorage = struct {
     pub fn get_state_root(self: *Self) ![32]u8 {
         _ = self;
         // Return a deterministic state root for forked mode
-        return [_]u8{0xFF} ** 32;
+        return @as([32]u8, @splat(0xFF));
     }
     
     pub fn commit_changes(self: *Self) ![32]u8 {
@@ -315,12 +315,12 @@ test "ForkedStorage cache hit flow" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const test_addr: [20]u8 = [_]u8{0x11} ** 20;
+    const test_addr: [20]u8 = @as([20]u8, @splat(0x11));
     const test_account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0x22} ** 32,
-        .storage_root = [_]u8{0x33} ** 32,
+        .code_hash = @as([32]u8, @splat(0x22)),
+        .storage_root = @as([32]u8, @splat(0x33)),
     };
 
     // Put account in hot cache
@@ -339,7 +339,7 @@ test "ForkedStorage cache miss requires RPC" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const test_addr: [20]u8 = [_]u8{0x99} ** 20;
+    const test_addr: [20]u8 = @as([20]u8, @splat(0x99));
 
     // Cache miss should return null
     const retrieved = hot.getAccount(test_addr);
@@ -352,7 +352,7 @@ test "ForkedStorage storage cache operations" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const test_addr: [20]u8 = [_]u8{0xAA} ** 20;
+    const test_addr: [20]u8 = @as([20]u8, @splat(0xAA));
     const slot: u256 = 42;
     const value: u256 = 9999;
 
@@ -399,12 +399,12 @@ test "ForkedStorage account deletion" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const test_addr: [20]u8 = [_]u8{0xBB} ** 20;
+    const test_addr: [20]u8 = @as([20]u8, @splat(0xBB));
     const test_account = Account{
         .balance = 500,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
 
     // Add account
@@ -428,13 +428,13 @@ test "ForkedStorage multiple accounts" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr1: [20]u8 = [_]u8{0x01} ** 20;
-    const addr2: [20]u8 = [_]u8{0x02} ** 20;
-    const addr3: [20]u8 = [_]u8{0x03} ** 20;
+    const addr1: [20]u8 = @as([20]u8, @splat(0x01));
+    const addr2: [20]u8 = @as([20]u8, @splat(0x02));
+    const addr3: [20]u8 = @as([20]u8, @splat(0x03));
 
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
-    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
-    const account3 = Account{ .balance = 300, .nonce = 3, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
+    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
+    const account3 = Account{ .balance = 300, .nonce = 3, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     try hot.putAccount(addr1, account1);
     try hot.putAccount(addr2, account2);
@@ -460,7 +460,7 @@ test "ForkedStorage storage slots per address" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0xCC} ** 20;
+    const addr: [20]u8 = @as([20]u8, @splat(0xCC));
 
     // Add multiple storage slots for same address
     try hot.putStorage(addr, 0, 100);
@@ -482,9 +482,9 @@ test "ForkedStorage account overwrite" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0xDD} ** 20;
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
-    const account2 = Account{ .balance = 500, .nonce = 10, .code_hash = [_]u8{1} ** 32, .storage_root = [_]u8{1} ** 32 };
+    const addr: [20]u8 = @as([20]u8, @splat(0xDD));
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
+    const account2 = Account{ .balance = 500, .nonce = 10, .code_hash = @as([32]u8, @splat(1)), .storage_root = @as([32]u8, @splat(1)) };
 
     // Put first account
     try hot.putAccount(addr, account1);
@@ -502,7 +502,7 @@ test "ForkedStorage storage overwrite" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0xEE} ** 20;
+    const addr: [20]u8 = @as([20]u8, @splat(0xEE));
     const slot: u256 = 5;
 
     // Set initial value
@@ -520,8 +520,8 @@ test "ForkedStorage zero balance account" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0xFF} ** 20;
-    const account = Account{ .balance = 0, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const addr: [20]u8 = @as([20]u8, @splat(0xFF));
+    const account = Account{ .balance = 0, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     try hot.putAccount(addr, account);
 
@@ -537,7 +537,7 @@ test "ForkedStorage zero storage value" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0x55} ** 20;
+    const addr: [20]u8 = @as([20]u8, @splat(0x55));
     const slot: u256 = 10;
 
     // Zero is a valid storage value
@@ -574,7 +574,7 @@ test "ForkedStorage large storage slots" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0x77} ** 20;
+    const addr: [20]u8 = @as([20]u8, @splat(0x77));
 
     // Test with large slot numbers
     const slot_max: u256 = std.math.maxInt(u256);
@@ -593,8 +593,8 @@ test "ForkedStorage mixed operations" {
     var hot = HotStorage.init(allocator);
     defer hot.deinit();
 
-    const addr: [20]u8 = [_]u8{0x88} ** 20;
-    const account = Account{ .balance = 777, .nonce = 7, .code_hash = [_]u8{0x99} ** 32, .storage_root = [_]u8{0x88} ** 32 };
+    const addr: [20]u8 = @as([20]u8, @splat(0x88));
+    const account = Account{ .balance = 777, .nonce = 7, .code_hash = @as([32]u8, @splat(0x99)), .storage_root = @as([32]u8, @splat(0x88)) };
 
     // Add account
     try hot.putAccount(addr, account);

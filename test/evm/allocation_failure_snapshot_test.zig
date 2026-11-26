@@ -63,19 +63,16 @@ const FailingAllocator = struct {
     };
 };
 
+// Each test fails the n-th allocation of the call for n = 0, 1, 2, ... until the
+// call no longer runs out of memory. Every failing run must leave the
+// pre-call state untouched and report no side effects.
+const max_failure_points = 10_000;
+
 test "snapshot should be reverted on allocation failure during self-destruct extraction" {
     const base_allocator = testing.allocator;
-
-    // Set up addresses
-    const contract_addr = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
-    const beneficiary = Address.fromHex("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd") catch unreachable;
-    const caller_address = Address.fromHex("0x1111111111111111111111111111111111111111") catch unreachable;
-
-    // Create EVM database
-    var database = evm.Database.init(base_allocator);
-    defer database.deinit();
-
-    // Create block info and transaction context
+    const contract_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
+    const beneficiary = try Address.fromHex("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd");
+    const caller_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     const block_info = evm.BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -83,107 +80,82 @@ test "snapshot should be reverted on allocation failure during self-destruct ext
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
-
-    // Create transaction context
     const tx_context = evm.TransactionContext{
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-
-    // Create failing allocator
-    var failing_alloc = FailingAllocator.init(base_allocator);
-    const allocator = failing_alloc.allocator();
-
-    // Create EVM instance with CANCUN hardfork (with EIP-6780)
-    var evm_instance = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
-    defer evm_instance.deinit();
-
-    // Create bytecode: PUSH20 beneficiary, SELFDESTRUCT
-    const bytecode = [_]u8{0x73} ++ beneficiary.bytes ++ [_]u8{0xff};
-
-    // Store bytecode and get code hash
-    const code_hash = try database.set_code(&bytecode);
-
-    // Deploy contract with balance and the bytecode
-    try database.set_account(contract_addr.bytes, .{
-        .balance = 1000,
-        .nonce = 0,
-        .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
-    });
-
-    // Create caller account with balance
-    const caller_account = evm.Account{
-        .balance = 1_000_000_000,
-        .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
-        .delegated_address = null,
-    };
-    try database.set_account(caller_address.bytes, caller_account);
-
-    // Store initial storage value to verify snapshot reversion
     const storage_key: u256 = 0x0101010101010101010101010101010101010101010101010101010101010101;
     const initial_value: u256 = 0x4242424242424242424242424242424242424242424242424242424242424242;
-    try database.set_storage(contract_addr.bytes, storage_key, initial_value);
+    // PUSH20 beneficiary, SELFDESTRUCT
+    const bytecode = [_]u8{0x73} ++ beneficiary.bytes ++ [_]u8{0xff};
 
-    // Get initial balance
-    const initial_balance = (try database.get_account(contract_addr.bytes)).?.balance;
+    var failures: usize = 0;
+    var n: usize = 0;
+    while (n < max_failure_points) : (n += 1) {
+        var database = evm.Database.init(base_allocator);
+        defer database.deinit();
+        const code_hash = try database.set_code(&bytecode);
+        try database.set_account(contract_addr.bytes, .{
+            .balance = 1000,
+            .nonce = 0,
+            .code_hash = code_hash,
+            .storage_root = @as([32]u8, @splat(0)),
+        });
+        try database.set_account(caller_address.bytes, .{
+            .balance = 1_000_000_000,
+            .nonce = 0,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
+            .delegated_address = null,
+        });
+        try database.set_storage(contract_addr.bytes, storage_key, initial_value);
 
-    // Set up allocator to fail deterministically during call execution/extraction
-    failing_alloc.fail_after_n = failing_alloc.allocation_count + 2;
+        var failing_alloc = FailingAllocator.init(base_allocator);
+        // LONDON: SELFDESTRUCT destroys a pre-existing contract (no EIP-6780).
+        var evm_instance = try evm.Evm(.{ .eips = .{ .hardfork = .LONDON } }).init(failing_alloc.allocator(), &database, block_info, tx_context, 0, caller_address);
+        defer evm_instance.deinit();
 
-    // Execute call to trigger SELFDESTRUCT
-    const call_params = evm.CallParams{
-        .call = .{
+        failing_alloc.allocation_count = 0;
+        failing_alloc.fail_after_n = n;
+        var result = evm_instance.call(.{ .call = .{
             .caller = caller_address,
             .to = contract_addr,
             .value = 0,
             .input = &[_]u8{},
             .gas = 100_000,
-        },
-    };
+        } });
+        defer result.deinit(base_allocator);
+        const exhausted = failing_alloc.allocation_count > n;
+        failing_alloc.fail_after_n = std.math.maxInt(usize);
 
-    var result = evm_instance.call(call_params);
-    defer result.deinit(base_allocator);
+        if (!exhausted) {
+            // Allocation n was never requested: the call ran to completion.
+            try testing.expect(result.success);
+            try testing.expectEqual(@as(usize, 1), result.selfdestructs.len);
+            break;
+        }
+        if (result.success) continue;
+        failures += 1;
 
-    // The call should fail due to allocation failure
-    try testing.expect(!result.success);
-
-    // Verify that the snapshot was reverted:
-    // 1. Contract should still exist
-    const account_after = try database.get_account(contract_addr.bytes);
-    try testing.expect(account_after != null);
-
-    // 2. Balance should be unchanged
-    try testing.expect(account_after.?.balance == initial_balance);
-
-    // 3. Storage should be unchanged
-    const storage_after = try database.get_storage(contract_addr.bytes, storage_key);
-    try testing.expect(storage_after == initial_value);
-
-    // 4. No self-destructs should be recorded
-    try testing.expect(result.selfdestructs.len == 0);
+        const account_after = (try database.get_account(contract_addr.bytes)).?;
+        try testing.expectEqual(@as(u256, 1000), account_after.balance);
+        try testing.expectEqual(initial_value, try database.get_storage(contract_addr.bytes, storage_key));
+        try testing.expectEqual(@as(usize, 0), result.selfdestructs.len);
+    }
+    try testing.expect(n < max_failure_points);
+    try testing.expect(failures > 0);
 }
 
 test "snapshot should be reverted on allocation failure during log extraction" {
     const base_allocator = testing.allocator;
-
-    // Set up addresses
-    const contract_addr = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
-    const caller_address = Address.fromHex("0x1111111111111111111111111111111111111111") catch unreachable;
-
-    // Create EVM database
-    var database = evm.Database.init(base_allocator);
-    defer database.deinit();
-
-    // Create block info and transaction context
+    const contract_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
+    const caller_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     const block_info = evm.BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -191,107 +163,72 @@ test "snapshot should be reverted on allocation failure during log extraction" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
-
-    // Create transaction context
     const tx_context = evm.TransactionContext{
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-
-    // Create failing allocator
-    var failing_alloc = FailingAllocator.init(base_allocator);
-    const allocator = failing_alloc.allocator();
-
-    // Create EVM instance
-    var evm_instance = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
-    defer evm_instance.deinit();
-
-    // Create bytecode that emits a log: LOG0 with some data
-    const bytecode = [_]u8{
-        // PUSH4 data
-        0x63, 0x12, 0x34, 0x56, 0x78,
-        // PUSH1 0 (memory offset)
-        0x60, 0x00,
-        // MSTORE
-        0x52,
-        // PUSH1 4 (size)
-        0x60, 0x04,
-        // PUSH1 0 (offset)
-        0x60, 0x00,
-        // LOG0
-        0xA0,
-        // STOP
-        0x00,
-    };
-
-    // Store bytecode and get code hash
-    const code_hash = try database.set_code(&bytecode);
-
-    // Deploy contract
-    try database.set_account(contract_addr.bytes, .{
-        .balance = 1000,
-        .nonce = 0,
-        .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
-    });
-
-    // Create caller account with balance
-    const caller_account = evm.Account{
-        .balance = 1_000_000_000,
-        .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
-        .delegated_address = null,
-    };
-    try database.set_account(caller_address.bytes, caller_account);
-
-    // Store initial storage value to verify snapshot reversion
     const storage_key: u256 = 0x0101010101010101010101010101010101010101010101010101010101010101;
     const initial_value: u256 = 0x4242424242424242424242424242424242424242424242424242424242424242;
+    // PUSH4 0x12345678, PUSH1 0, MSTORE, PUSH1 4, PUSH1 0, LOG0, STOP
+    const bytecode = [_]u8{ 0x63, 0x12, 0x34, 0x56, 0x78, 0x60, 0x00, 0x52, 0x60, 0x04, 0x60, 0x00, 0xA0, 0x00 };
 
-    try database.set_storage(contract_addr.bytes, storage_key, initial_value);
+    var failures: usize = 0;
+    var n: usize = 0;
+    while (n < max_failure_points) : (n += 1) {
+        var database = evm.Database.init(base_allocator);
+        defer database.deinit();
+        const code_hash = try database.set_code(&bytecode);
+        try database.set_account(contract_addr.bytes, .{
+            .balance = 1000,
+            .nonce = 0,
+            .code_hash = code_hash,
+            .storage_root = @as([32]u8, @splat(0)),
+        });
+        try database.set_account(caller_address.bytes, .{
+            .balance = 1_000_000_000,
+            .nonce = 0,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
+            .delegated_address = null,
+        });
+        try database.set_storage(contract_addr.bytes, storage_key, initial_value);
 
-    // Get initial nonce
-    const initial_nonce = (try database.get_account(contract_addr.bytes)).?.nonce;
+        var failing_alloc = FailingAllocator.init(base_allocator);
+        var evm_instance = try evm.Evm(.{}).init(failing_alloc.allocator(), &database, block_info, tx_context, 0, caller_address);
+        defer evm_instance.deinit();
 
-    // Set up allocator to fail deterministically during call execution/extraction
-    failing_alloc.fail_after_n = failing_alloc.allocation_count + 2;
-
-    // Execute call to trigger LOG
-    const call_params = evm.CallParams{
-        .call = .{
+        failing_alloc.allocation_count = 0;
+        failing_alloc.fail_after_n = n;
+        var result = evm_instance.call(.{ .call = .{
             .caller = caller_address,
             .to = contract_addr,
             .value = 0,
             .input = &[_]u8{},
             .gas = 100_000,
-        },
-    };
+        } });
+        defer result.deinit(base_allocator);
+        const exhausted = failing_alloc.allocation_count > n;
+        failing_alloc.fail_after_n = std.math.maxInt(usize);
 
-    var result = evm_instance.call(call_params);
-    defer result.deinit(base_allocator);
+        if (!exhausted) {
+            try testing.expect(result.success);
+            try testing.expectEqual(@as(usize, 1), result.logs.len);
+            break;
+        }
+        if (result.success) continue;
+        failures += 1;
 
-    // The call should fail due to allocation failure
-    try testing.expect(!result.success);
-
-    // Verify that the snapshot was reverted:
-    // 1. Contract should still exist with unchanged state
-    const account_after = try database.get_account(contract_addr.bytes);
-    try testing.expect(account_after != null);
-
-    // 2. Nonce should be unchanged
-    try testing.expect(account_after.?.nonce == initial_nonce);
-
-    // 3. Storage should be unchanged
-    const storage_after = try database.get_storage(contract_addr.bytes, storage_key);
-    try testing.expect(storage_after == initial_value);
-
-    // 4. No logs should be recorded
-    try testing.expect(result.logs.len == 0);
+        const account_after = (try database.get_account(contract_addr.bytes)).?;
+        try testing.expectEqual(@as(u64, 0), account_after.nonce);
+        try testing.expectEqual(initial_value, try database.get_storage(contract_addr.bytes, storage_key));
+        try testing.expectEqual(@as(usize, 0), result.logs.len);
+    }
+    try testing.expect(n < max_failure_points);
+    try testing.expect(failures > 0);
 }

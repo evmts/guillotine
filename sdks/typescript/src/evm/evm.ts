@@ -18,6 +18,7 @@ import { Address } from '../primitives/address.js'
 import { Bytes } from '../primitives/bytes.js'
 import { U256 } from '../primitives/u256.js'
 import {
+	decodeUtf8,
 	ExecutionResult,
 	type LogEntry,
 	type SelfDestructRecord,
@@ -32,8 +33,8 @@ export interface BlockInfo {
 	gasLimit?: bigint
 	coinbase?: Address
 	baseFee?: bigint
-	/** 0-65535: the native transaction context stores chain id as u16. */
-	chainId?: bigint
+	/** 0 to 2^64-1 as a bigint, or a non-negative safe integer number. Defaults to 1. */
+	chainId?: bigint | number
 	difficulty?: bigint
 	/** Exactly 32 bytes. */
 	prevRandao?: Bytes
@@ -76,7 +77,6 @@ export interface CreateOptions {
 }
 
 const U64_MAX = (1n << 64n) - 1n
-const U16_MAX = 0xffffn
 
 // LP64 layouts of the extern structs in src/evm_c_api.zig (checked by sdks/c/tests/simple_test.c).
 const BLOCK_INFO_SIZE = 104
@@ -95,6 +95,64 @@ function u64(name: string, value: bigint, max: bigint = U64_MAX): bigint {
 	return value
 }
 
+function chainId(value: bigint | number): bigint {
+	if (typeof value === 'number') {
+		if (!Number.isSafeInteger(value) || value < 0) {
+			throw GuillotineError.invalidValue(
+				`chainId must be an integer between 0 and ${Number.MAX_SAFE_INTEGER} when given as a number (use a bigint up to ${U64_MAX}), got ${value}`,
+			)
+		}
+		return BigInt(value)
+	}
+	if (typeof value !== 'bigint') {
+		throw GuillotineError.invalidValue(`chainId must be a bigint or number, got ${typeof value}`)
+	}
+	return u64('chainId', value)
+}
+
+/**
+ * Native handle shared by a `GuillotineEvm` and the finalization registry. It holds no
+ * reference to the wrapper, so an unreachable wrapper can be collected and its handle destroyed.
+ */
+interface NativeHandle {
+	readonly id: number
+	readonly native: NativeSymbols
+	readonly tracing: boolean
+	handle: Pointer | null
+}
+
+const liveHandles = new Set<number>()
+let nextHandleId = 1
+let spuriousFinalizations = 0
+
+/** Destroy the native handle once. Returns false if it was already released. */
+function release(state: NativeHandle): boolean {
+	const handle = state.handle
+	if (handle === null) return false
+	state.handle = null
+	liveHandles.delete(state.id)
+	if (state.tracing) {
+		state.native.guillotine_evm_destroy_tracing(handle)
+	} else {
+		state.native.guillotine_evm_destroy(handle)
+	}
+	return true
+}
+
+// Safety net for EVMs dropped without dispose(). dispose() unregisters first, and release()
+// clears the handle before destroying it, so a handle is never destroyed twice.
+const finalizer = new FinalizationRegistry<NativeHandle>((state) => {
+	if (!release(state)) spuriousFinalizations++
+})
+
+/**
+ * Internal diagnostics for tests: ids of native handles not yet destroyed, and the number of
+ * finalizer callbacks that found their handle already released (always 0 unless unregister failed).
+ */
+export function nativeHandleStats(): { live: ReadonlySet<number>; spuriousFinalizations: number } {
+	return { live: new Set(liveHandles), spuriousFinalizations }
+}
+
 function cause(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error))
 }
@@ -102,16 +160,20 @@ function cause(error: unknown): Error {
 /**
  * A Guillotine EVM instance backed by the native `libguillotine_ffi` library through Bun FFI.
  * Each instance owns separate state. Release it with `dispose()`, `close()` or a `using` declaration.
+ * An instance that becomes unreachable without being released is destroyed when it is garbage
+ * collected; do not rely on that timing.
  */
 export class GuillotineEvm implements Disposable {
-	private handle: Pointer | null
+	private readonly state: NativeHandle
 	private readonly native: NativeSymbols
 	readonly tracing: boolean
 
 	private constructor(native: NativeSymbols, handle: Pointer, tracing: boolean) {
 		this.native = native
-		this.handle = handle
 		this.tracing = tracing
+		this.state = { id: nextHandleId++, native, tracing, handle }
+		liveHandles.add(this.state.id)
+		finalizer.register(this, this.state, this)
 	}
 
 	/** Create an EVM with the given block context. */
@@ -123,7 +185,7 @@ export class GuillotineEvm implements Disposable {
 		view.setBigUint64(16, u64('gasLimit', blockInfo.gasLimit ?? 30_000_000n), true)
 		block.set((blockInfo.coinbase ?? Address.zero()).toBytes(), 24)
 		view.setBigUint64(48, u64('baseFee', blockInfo.baseFee ?? 0n), true)
-		view.setBigUint64(56, u64('chainId', blockInfo.chainId ?? 1n, U16_MAX), true)
+		view.setBigUint64(56, chainId(blockInfo.chainId ?? 1n), true)
 		view.setBigUint64(64, u64('difficulty', blockInfo.difficulty ?? 0n), true)
 		if (blockInfo.prevRandao !== undefined) {
 			if (blockInfo.prevRandao.length() !== 32) {
@@ -145,7 +207,7 @@ export class GuillotineEvm implements Disposable {
 
 	/** True until `dispose()` or `close()` releases the native handle. */
 	get isOpen(): boolean {
-		return this.handle !== null
+		return this.state.handle !== null
 	}
 
 	/** Execute a message call or contract creation and commit its state changes. */
@@ -253,14 +315,9 @@ export class GuillotineEvm implements Disposable {
 
 	/** Release the native handle. Safe to call more than once. */
 	dispose(): void {
-		const handle = this.handle
-		if (handle === null) return
-		this.handle = null
-		if (this.tracing) {
-			this.native.guillotine_evm_destroy_tracing(handle)
-		} else {
-			this.native.guillotine_evm_destroy(handle)
-		}
+		if (this.state.handle === null) return
+		finalizer.unregister(this)
+		release(this.state)
 	}
 
 	/** Alias of `dispose()`. */
@@ -273,8 +330,9 @@ export class GuillotineEvm implements Disposable {
 	}
 
 	private open(): Pointer {
-		if (this.handle === null) throw GuillotineError.vmNotInitialized('EVM instance is not initialized: it was closed')
-		return this.handle
+		const handle = this.state.handle
+		if (handle === null) throw GuillotineError.vmNotInitialized('EVM instance is not initialized: it was closed')
+		return handle
 	}
 
 	private requireMainnet(operation: string): void {
@@ -329,7 +387,7 @@ function readResult(result: Pointer): ExecutionResult {
 	const gasLeft = readU64(result, 8)
 	const output = Bytes.fromBytes(copyNative(readPointer(result, 16), 0, readSize(result, 24)))
 	const errorPtr = readPointer(result, 32)
-	const nativeError = errorPtr === 0 ? '' : readCString(errorPtr)
+	const nativeError = errorPtr === 0 ? '' : readCString(errorPtr, 'Native error message')
 	const errorMessage = success || nativeError === '' ? null : nativeError
 
 	const logs: LogEntry[] = []
@@ -381,9 +439,7 @@ function readResult(result: Pointer): ExecutionResult {
 
 	const traceLen = readSize(result, 136)
 	const traceJson =
-		traceLen === 0
-			? null
-			: new TextDecoder('utf-8', { fatal: true }).decode(copyNative(readPointer(result, 128), 0, traceLen))
+		traceLen === 0 ? null : decodeUtf8(copyNative(readPointer(result, 128), 0, traceLen), 'Native trace JSON')
 
 	return new ExecutionResult(
 		success,

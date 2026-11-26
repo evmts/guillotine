@@ -9,7 +9,7 @@ test "differential: environmental opcodes coverage" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // small helper
@@ -85,13 +85,8 @@ test "differential: environmental opcodes coverage" {
     try bc.append(allocator, 0x60);
     try bc.append(allocator, 0x52);
 
-    // EXTCODEHASH(self) -> mstore 0x180
-    try bc.append(allocator, 0x30); // ADDRESS
-    try bc.append(allocator, 0x3f); // EXTCODEHASH
-    try bc.append(allocator, 0x61);
-    try bc.append(allocator, 0x01);
-    try bc.append(allocator, 0x80);
-    try bc.append(allocator, 0x52);
+    // EXTCODEHASH is checked in "EXTCODEHASH of self is keccak256 of its code":
+    // MinimalEvm returns keccak256("") for every account.
 
     // RETURN 0x200 bytes from 0x00
     try bc.append(allocator, 0x61);
@@ -101,4 +96,16 @@ test "differential: environmental opcodes coverage" {
     try bc.append(allocator, 0xf3);
 
     try testor.test_bytecode(bc.items);
+}
+
+test "EXTCODEHASH of self is keccak256 of its code" {
+    const allocator = testing.allocator;
+    var testor = try DifferentialTestor.init(allocator);
+    defer testor.deinit();
+
+    // ADDRESS EXTCODEHASH PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+    const bytecode = [_]u8{ 0x30, 0x3f, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+    var expected: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&bytecode, &expected, .{});
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }

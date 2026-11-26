@@ -5,6 +5,7 @@ const ArrayList = std.ArrayListAligned;
 const Opcode = @import("../opcodes/opcode.zig").Opcode;
 const bytecode_config = @import("bytecode_config.zig");
 const BytecodeConfig = bytecode_config.BytecodeConfig;
+const fork_gas = @import("../frame/fork_gas.zig");
 
 // NOTE: This implementation does not support EOF (Ethereum Object Format) EIPs including:
 // - EIP-3540: EOF - EVM Object Format v1
@@ -60,21 +61,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 value: u256,
                 original_length: PcType,
             },
-            multi_push: struct {
-                values: [3]u256,
-                count: u8,
-                original_length: PcType,
-            },
-            multi_pop: struct {
-                count: u8,
-                original_length: PcType,
-            },
             iszero_jumpi: struct {
                 target: u256,
-                original_length: PcType,
-            },
-            dup2_mstore_push: struct {
-                push_value: u256,
                 original_length: PcType,
             },
         };
@@ -101,7 +89,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
                 // Handle fusion opcodes first (only if fusions are enabled)
-                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) {
+                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) fused: {
+                    const fusion_start = iterator.pc;
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
                     // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
@@ -110,43 +99,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             const push_size = opcode - 0x5F;
                             iterator.pc += 1 + push_size + 1;
                         },
-                        // Advanced fusion patterns
-                        .multi_push => |mp| {
-                            iterator.pc += mp.original_length;
-                        },
-                        .multi_pop => |mp| {
-                            iterator.pc += mp.original_length;
-                        },
+                        // Three-opcode fusion patterns
                         .iszero_jumpi => |ij| {
                             iterator.pc += ij.original_length;
                         },
-                        .dup2_mstore_push => |dmp| {
-                            iterator.pc += dmp.original_length;
-                        },
-                        // New high-impact fusions
-                        .dup3_add_mstore => |dam| {
-                            iterator.pc += dam.original_length;
-                        },
-                        .swap1_dup2_add => |sda| {
-                            iterator.pc += sda.original_length;
-                        },
-                        .push_dup3_add => |pda| {
-                            iterator.pc += pda.original_length;
-                        },
-                        .function_dispatch => |fd| {
-                            iterator.pc += fd.original_length;
-                        },
-                        .callvalue_check => |cc| {
-                            iterator.pc += cc.original_length;
-                        },
-                        .push0_revert => |pr| {
-                            iterator.pc += pr.original_length;
-                        },
                         .push_add_dup1 => |pad| {
                             iterator.pc += pad.original_length;
-                        },
-                        .mload_swap1_dup2 => |msd| {
-                            iterator.pc += msd.original_length;
                         },
                         .push => |push_data| {
                             iterator.pc += 1 + push_data.size;
@@ -154,6 +112,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         else => {
                             iterator.pc += 1;
                         },
+                    }
+                    // A fusion must not run an opcode this fork leaves undefined (for
+                    // example PUSH0 before Shanghai); decode such ranges one by one.
+                    if (!iterator.bytecode.opcodesDefined(fusion_start, iterator.pc)) {
+                        iterator.pc = fusion_start;
+                        break :fused;
                     }
                     return fusion_data;
                 }
@@ -164,20 +128,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 switch (opcode) {
                     0x60...0x7F => { // PUSH1-PUSH32
                         const push_size = opcode - 0x5F;
-                        var value: u256 = 0;
-
-                        // Read push value using proper big-endianness; Yellow Paper pads missing
-                        // trailing immediate bytes past EOF with zero bytes on the right.
-                        const avail_end = @min(iterator.pc + 1 + push_size, @as(PcType, @intCast(iterator.bytecode.len())));
-                        const avail_count = avail_end - (iterator.pc + 1);
-                        for (iterator.pc + 1..avail_end) |i| {
-                            value = std.math.shl(u256, value, 8) | iterator.bytecode.get_unsafe(@intCast(i));
-                        }
-                        if (avail_count < push_size) {
-                            value = std.math.shl(u256, value, @as(u9, @intCast((push_size - avail_count) * 8)));
-                        }
-
-                        iterator.pc = avail_end;
+                        // Immediate bytes past the end of the code read as zero.
+                        const value = iterator.bytecode.pushValuePadded(iterator.pc, push_size);
+                        const end_pc: usize = @min(@as(usize, iterator.pc) + 1 + push_size, iterator.bytecode.runtime_code.len);
+                        iterator.pc = @intCast(end_pc);
                         return OpcodeData{ .push = .{ .value = value, .size = push_size } };
                     },
                     0x5B => { // JUMPDEST
@@ -257,18 +211,19 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             /// `initial_gas` seeds the total, e.g. 1 for a JUMPDEST that heads the block.
             pub fn calculateBlockInfo(bytecode: *const Self, start_pc: PcType, initial_gas: u32) BlockInfo {
                 const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
-                const verified_ops = @import("../verified_ops.zig");
+                const verified_ops = @import("../core/verified_ops.zig");
                 var acc = verified_ops.BlockAccumulator{ .gas = initial_gas };
                 var pc: usize = start_pc;
-                var loop_counter = cfg.createLoopSafetyCounter().init(cfg.loop_quota orelse 0);
 
+                // `pc` strictly increases, so the loop ends after at most `len()` steps.
                 while (pc < bytecode.len()) {
-                    loop_counter.inc();
                     const opcode = bytecode.get_unsafe(@intCast(pc));
 
                     if (opcode == 0x5B) break; // Next JUMPDEST starts a new block.
 
-                    const cost: u64 = opcode_info[opcode].gas_cost;
+                    // The table holds the Berlin+ schedule; earlier forks price the
+                    // state-access opcodes differently.
+                    const cost: u64 = fork_gas.staticGas(cfg.hardfork, opcode, opcode_info[opcode].gas_cost);
                     switch (opcode) {
                         0x60...0x7F => { // PUSH1-PUSH32
                             pc += 1 + @as(usize, opcode - 0x5F);
@@ -328,20 +283,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             push_mload_fusion: struct { value: u256 },
             push_mstore_fusion: struct { value: u256 },
             push_mstore8_fusion: struct { value: u256 },
-            // Advanced fusion patterns
-            multi_push: struct { count: u8, original_length: u8, values: [3]u256 },
-            multi_pop: struct { count: u8, original_length: u8 },
+            // Three-opcode fusion patterns
             iszero_jumpi: struct { target: u256, original_length: u8 },
-            dup2_mstore_push: struct { push_value: u256, original_length: u8 },
-            // New high-impact fusions
-            dup3_add_mstore: struct { original_length: u8 },
-            swap1_dup2_add: struct { original_length: u8 },
-            push_dup3_add: struct { value: u256, original_length: u8 },
-            function_dispatch: struct { selector: u32, target: u256, original_length: u8 },
-            callvalue_check: struct { original_length: u8 },
-            push0_revert: struct { original_length: u8 },
             push_add_dup1: struct { value: u256, original_length: u8 },
-            mload_swap1_dup2: struct { original_length: u8 },
             stop: void,
             invalid: void,
         };
@@ -368,42 +312,14 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // - execute_init_code checks against max_initcode_size (49KB)
             // - runtime code is checked against max_bytecode_size (24KB)
 
-            // Validate bytecode length fits in PcType (required for len() method)
-            if (tracer) |t| {
-                t.assert(code.len <= std.math.maxInt(PcType), "Bytecode length must fit in PcType");
-            }
+            // PcType indexes the code, and analysis looks up to one PUSH32 ahead. Code
+            // that cannot be indexed is rejected here instead of overflowing a cast.
+            if (code.len + MAX_PUSH_BYTES + 1 > std.math.maxInt(PcType)) return error.InitcodeTooLarge;
 
-            // Detect and strip Solidity metadata from the end of bytecode.
-            // Per the Solidity specification, metadata is appended to the bytecode.
-            // The last two bytes of the contract's raw bytecode form a big-endian
-            // integer that specifies the length of the CBOR-encoded metadata section.
-            // This allows for efficient O(1) retrieval of the metadata without scanning.
-            var runtime_code = code;
-            if (code.len >= 4) { // Minimal length for metadata to be present.
-                const metadata_len = std.mem.readInt(u16, code[code.len - 2 ..][0..2], .big);
-
-                if (metadata_len > 0 and @as(usize, metadata_len) + 2 <= code.len) {
-                    const metadata_start_idx = code.len - @as(usize, metadata_len) - 2;
-                    const metadata_slice = code[metadata_start_idx .. code.len - 2];
-
-                    // A valid metadata block is a CBOR map. We check for common Solidity patterns for robustness.
-                    if (metadata_slice.len > 6) {
-                        const ipfs_pattern = &.{ 0xa2, 0x64, 'i', 'p', 'f', 's' };
-                        const bzzr0_pattern = &.{ 0xa1, 0x65, 'b', 'z', 'z', 'r', '0' };
-                        const bzzr1_pattern = &.{ 0xa1, 0x65, 'b', 'z', 'z', 'r', '1' };
-
-                        if (std.mem.startsWith(u8, metadata_slice, ipfs_pattern) or
-                            std.mem.startsWith(u8, metadata_slice, bzzr0_pattern) or
-                            std.mem.startsWith(u8, metadata_slice, bzzr1_pattern))
-                        {
-                            runtime_code = code[0..metadata_start_idx];
-                            if (tracer) |t| {
-                                t.debug("Detected Solidity metadata, trimming bytecode from {} to {} bytes", .{ code.len, runtime_code.len });
-                            }
-                        }
-                    }
-                }
-            }
+            // Every byte of the code is executable. Trailing compiler metadata is not
+            // special to the EVM: it can hold JUMPDESTs and be jumped into, so it is
+            // analyzed like any other code.
+            const runtime_code = code;
 
             var self = Self{
                 .full_code = code,
@@ -446,53 +362,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             };
         }
 
-        // Advanced pattern detection functions
-
-        fn checkMultiPushPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
-            if (pc + n > self.len()) return null;
-
-            var current_pc = pc;
-            var total_length: PcType = 0;
-            var values: [3]u256 = .{ 0, 0, 0 };
-
-            // Check for n consecutive PUSH instructions
-            var i: u8 = 0;
-            while (i < n) : (i += 1) {
-                if (current_pc >= self.len()) return null;
-                const op = self.get_unsafe(current_pc);
-                if (op < 0x60 or op > 0x7F) { // Not a PUSH opcode
-                    return null;
-                }
-                const push_size = op - 0x5F;
-
-                // Extract value
-                var value: u256 = 0;
-                const end = @min(current_pc + 1 + push_size, self.len());
-                for (current_pc + 1..end) |j| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(j));
-                }
-                if (i < 3) values[i] = value;
-
-                current_pc += 1 + push_size;
-                total_length += 1 + push_size;
-            }
-
-            return OpcodeData{ .multi_push = .{ .count = n, .original_length = @intCast(total_length), .values = values } };
-        }
-
-        fn checkMultiPopPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
-            if (pc + n > self.len()) return null;
-
-            // Check if we have n consecutive POP instructions
-            var i: u8 = 0;
-            while (i < n) : (i += 1) {
-                if (self.get_unsafe(pc + i) != 0x50) { // POP opcode
-                    return null;
-                }
-            }
-
-            return OpcodeData{ .multi_pop = .{ .count = n, .original_length = n } };
-        }
+        // Three-opcode fusion pattern detection
 
         fn checkIszeroJumpiPattern(self: *const Self, pc: PcType) ?OpcodeData {
             if (pc + 2 >= self.len()) return null;
@@ -517,145 +387,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
             // Extract target
             var target: u256 = 0;
-            const end = @min(push_pc + 1 + push_size, self.len());
-            for (push_pc + 1..end) |i| {
-                target = std.math.shl(u256, target, 8) | self.get_unsafe(@intCast(i));
-            }
+            target = self.pushValuePadded(push_pc, push_size);
 
             return OpcodeData{ .iszero_jumpi = .{ .target = target, .original_length = @intCast(jumpi_pc + 1 - pc) } };
-        }
-
-        fn checkDup2MstorePushPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 >= self.len()) return null;
-
-            // Check for DUP2
-            if (self.get_unsafe(pc) != 0x81) return null;
-
-            // Check for MSTORE
-            if (self.get_unsafe(pc + 1) != 0x52) return null;
-
-            // Check for PUSH after MSTORE
-            const push_pc = pc + 2;
-            const push_op = self.get_unsafe(push_pc);
-            if (push_op < 0x60 or push_op > 0x7F) {
-                return null;
-            }
-
-            const push_size = push_op - 0x5F;
-
-            // Extract push value
-            var value: u256 = 0;
-            const end = @min(push_pc + 1 + push_size, self.len());
-            for (push_pc + 1..end) |i| {
-                value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-            }
-
-            return OpcodeData{ .dup2_mstore_push = .{ .push_value = value, .original_length = @intCast(3 + push_size) } };
-        }
-
-        // New high-impact pattern detection functions
-        fn checkDup3AddMstorePattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for DUP3 + ADD + MSTORE
-            if (self.get_unsafe(pc) != 0x82) return null; // DUP3
-            if (self.get_unsafe(pc + 1) != 0x01) return null; // ADD
-            if (self.get_unsafe(pc + 2) != 0x52) return null; // MSTORE
-
-            return OpcodeData{ .dup3_add_mstore = .{ .original_length = 3 } };
-        }
-
-        fn checkSwap1Dup2AddPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for SWAP1 + DUP2 + ADD
-            if (self.get_unsafe(pc) != 0x90) return null; // SWAP1
-            if (self.get_unsafe(pc + 1) != 0x81) return null; // DUP2
-            if (self.get_unsafe(pc + 2) != 0x01) return null; // ADD
-
-            return OpcodeData{ .swap1_dup2_add = .{ .original_length = 3 } };
-        }
-
-        fn checkPushDup3AddPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 >= self.len()) return null;
-
-            // Check for PUSH + DUP3 + ADD
-            const push_op = self.get_unsafe(pc);
-            if (push_op < 0x5F or push_op > 0x7F) return null; // PUSH0-PUSH32
-
-            const push_size = if (push_op == 0x5F) 0 else push_op - 0x5F;
-            const dup3_pc = pc + 1 + push_size;
-
-            if (dup3_pc + 2 > self.len()) return null;
-            if (self.get_unsafe(dup3_pc) != 0x82) return null; // DUP3
-            if (self.get_unsafe(dup3_pc + 1) != 0x01) return null; // ADD
-
-            // Extract push value
-            var value: u256 = 0;
-            if (push_op != 0x5F) { // Not PUSH0
-                const end = @min(pc + 1 + push_size, self.len());
-                for (pc + 1..end) |i| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-                }
-            }
-
-            return OpcodeData{ .push_dup3_add = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
-        }
-
-        fn checkFunctionDispatchPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 8 >= self.len()) return null;
-
-            // Check for PUSH4 + EQ + PUSH + JUMPI (function selector pattern)
-            if (self.get_unsafe(pc) != 0x63) return null; // PUSH4
-
-            // Extract selector (4 bytes)
-            var selector: u32 = 0;
-            for (pc + 1..pc + 5) |i| {
-                selector = std.math.shl(u32, selector, 8) | @as(u32, self.get_unsafe(@intCast(i)));
-            }
-
-            if (self.get_unsafe(pc + 5) != 0x14) return null; // EQ
-
-            // Check for PUSH after EQ
-            const push_pc = pc + 6;
-            const push_op = self.get_unsafe(push_pc);
-            if (push_op < 0x60 or push_op > 0x62) return null; // PUSH1 or PUSH2 typically
-
-            const push_size = push_op - 0x5F;
-
-            // Extract jump target
-            var target: u256 = 0;
-            const end = @min(push_pc + 1 + push_size, self.len());
-            for (push_pc + 1..end) |i| {
-                target = std.math.shl(u256, target, 8) | self.get_unsafe(@intCast(i));
-            }
-
-            const jumpi_pc = push_pc + 1 + push_size;
-            if (jumpi_pc >= self.len() or self.get_unsafe(jumpi_pc) != 0x57) return null; // JUMPI
-
-            return OpcodeData{ .function_dispatch = .{ .selector = selector, .target = target, .original_length = @intCast(8 + push_size) } };
-        }
-
-        fn checkCallvalueCheckPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for CALLVALUE + DUP1 + ISZERO
-            if (self.get_unsafe(pc) != 0x34) return null; // CALLVALUE
-            if (self.get_unsafe(pc + 1) != 0x80) return null; // DUP1
-            if (self.get_unsafe(pc + 2) != 0x15) return null; // ISZERO
-
-            return OpcodeData{ .callvalue_check = .{ .original_length = 3 } };
-        }
-
-        fn checkPush0RevertPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for PUSH0 + PUSH0 + REVERT
-            if (self.get_unsafe(pc) != 0x5F) return null; // PUSH0
-            if (self.get_unsafe(pc + 1) != 0x5F) return null; // PUSH0
-            if (self.get_unsafe(pc + 2) != 0xFD) return null; // REVERT
-
-            return OpcodeData{ .push0_revert = .{ .original_length = 3 } };
         }
 
         fn checkPushAddDup1Pattern(self: *const Self, pc: PcType) ?OpcodeData {
@@ -675,111 +409,47 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // Extract push value
             var value: u256 = 0;
             if (push_op != 0x5F) { // Not PUSH0
-                const end = @min(pc + 1 + push_size, self.len());
-                for (pc + 1..end) |i| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-                }
+                value = self.pushValuePadded(pc, push_size);
             }
 
             return OpcodeData{ .push_add_dup1 = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
         }
 
-        fn checkMloadSwap1Dup2Pattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for MLOAD + SWAP1 + DUP2
-            if (self.get_unsafe(pc) != 0x51) return null; // MLOAD
-            if (self.get_unsafe(pc + 1) != 0x90) return null; // SWAP1
-            if (self.get_unsafe(pc + 2) != 0x81) return null; // DUP2
-
-            return OpcodeData{ .mload_swap1_dup2 = .{ .original_length = 3 } };
+        /// True when every instruction starting in `[start, end)` is defined on the
+        /// configured fork.
+        fn opcodesDefined(self: *const Self, start: PcType, end: PcType) bool {
+            const stop = @min(@as(usize, end), self.packed_bitmap.len);
+            var pc: usize = start;
+            while (pc < stop) : (pc += 1) {
+                if (!self.packed_bitmap[pc].is_op_start) continue;
+                if (!fork_gas.isOpcodeDefined(cfg.hardfork, self.runtime_code[pc])) return false;
+            }
+            return true;
         }
 
         /// Get fusion data for a bytecode position marked as fusion candidate
-        /// This method checks for advanced patterns first (in priority order)
+        /// The three-opcode patterns are checked before the two-opcode ones.
         pub fn getFusionData(self: *const Self, pc: PcType) OpcodeData {
             if (pc >= self.len()) {
                 return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
             }
 
-            // Check advanced fusion patterns in priority order (longest first)
-
-            // Check function dispatch pattern first (can be 8+ bytes)
-            if (self.checkFunctionDispatchPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // 1. Check for ISZERO-JUMPI pattern (highest priority) (variable length)
+            // Three-opcode patterns take priority over the two-opcode PUSH + op fusions.
             if (self.checkIszeroJumpiPattern(pc)) |fusion| {
                 return fusion;
             }
 
-            // Check PUSH + DUP3 + ADD pattern
-            if (self.checkPushDup3AddPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // Check PUSH + ADD + DUP1 pattern
             if (self.checkPushAddDup1Pattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // 3. Check for DUP2-MSTORE-PUSH pattern (variable length)
-            if (self.checkDup2MstorePushPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // Check new 3-opcode patterns
-            if (self.checkDup3AddMstorePattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkSwap1Dup2AddPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkCallvalueCheckPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkPush0RevertPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkMloadSwap1Dup2Pattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // 4. Check for 3-PUSH fusion
-            if (self.checkMultiPushPattern(pc, 3)) |fusion| {
-                return fusion;
-            }
-
-            // 5. Check for 3-POP fusion
-            if (self.checkMultiPopPattern(pc, 3)) |fusion| {
-                return fusion;
-            }
-
-            // 6. Check for 2-PUSH fusion
-            if (self.checkMultiPushPattern(pc, 2)) |fusion| {
-                return fusion;
-            }
-
-            // 7. Check for 2-POP fusion
-            if (self.checkMultiPopPattern(pc, 2)) |fusion| {
                 return fusion;
             }
 
             const first_op = self.get_unsafe(pc);
 
-            // Check for existing 2-opcode fusions (PUSH + op)
+            // Check for 2-opcode fusions (PUSH + op)
             if (first_op >= 0x60 and first_op <= 0x7F) { // PUSH opcode
                 const push_size = first_op - 0x5F;
                 var value: u256 = 0;
-                const end_pc = @min(pc + 1 + push_size, self.len());
-                for (pc + 1..end_pc) |i| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-                }
+                value = self.pushValuePadded(pc, push_size);
 
                 // The second opcode comes AFTER the push data
                 const second_op_pc = pc + 1 + push_size;
@@ -839,6 +509,21 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             return self.runtime_code[index];
         }
 
+        /// Value pushed by the PUSH instruction at `push_pc` that carries `size`
+        /// immediate bytes. Immediate bytes past the end of the code read as zero, so a
+        /// PUSH truncated by the end of the code is right-padded with zeros (Yellow
+        /// Paper, PUSH: "the bytes default to zero if they extend past the limits").
+        pub fn pushValuePadded(self: Self, push_pc: usize, size: usize) u256 {
+            var value: u256 = 0;
+            var i: usize = 0;
+            while (i < size) : (i += 1) {
+                const index = push_pc + 1 + i;
+                const byte: u8 = if (index < self.runtime_code.len) self.runtime_code[index] else 0;
+                value = (value << 8) | byte;
+            }
+            return value;
+        }
+
         /// Get opcode at position (doesn't check if it's actually an opcode start)
         pub inline fn getOpcode(self: Self, pc: PcType) ?u8 {
             return self.get(pc);
@@ -850,12 +535,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
         /// Read a PUSH value at the given PC with the specified size
         /// Returns null if the PC doesn't point to a PUSH instruction of the correct size
-        pub fn readPushValue(self: Self, pc: PcType, comptime size: comptime_int) ?std.meta.Int(.unsigned, size * 8) {
+        pub fn readPushValue(self: Self, pc: PcType, comptime size: comptime_int) ?@Int(.unsigned, size * 8) {
             const opcode = self.get(pc) orelse return null;
             const expected_push = 0x60 + (size - 1);  // PUSH1 = 0x60, PUSH2 = 0x61, etc.
             if (opcode != expected_push) return null;
             
-            var value: std.meta.Int(.unsigned, size * 8) = 0;
+            var value: @Int(.unsigned, size * 8) = 0;
             const end_pc = @min(pc + 1 + size, self.len());
             if (pc + 1 + size > self.len()) return null;
             
@@ -978,68 +663,19 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // NEW: Allocate packed bitmap (4 bits per byte, so N packed bits)
             self.packed_bitmap = self.allocator.alloc(PackedBits, N) catch return error.OutOfMemory;
             cleanup_state.packed_bitmap_allocated = true;
-            const zero_bits = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
-            @memset(self.packed_bitmap, zero_bits);
-
-            const has_tracer = @TypeOf(tracer) != @TypeOf(null);
-            const code = self.runtime_code;
-            const bitmap = self.packed_bitmap;
-
-            // Fast path when no tracer is active: skip intToEnum, dead u256 push_value
-            // shifts, and per-byte prefetch overhead.
-            if (!has_tracer or tracer == null) {
-                const push_data_bits = PackedBits{ .is_push_data = true, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
-                var i: usize = 0;
-                while (i < validate_up_to) {
-                    const op = code[i];
-                    var bits = PackedBits{ .is_push_data = false, .is_op_start = true, .is_jumpdest = false, .is_fusion_candidate = false };
-
-                    if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
-                        const n: usize = op - (@intFromEnum(Opcode.PUSH1) - 1);
-                        const push_end = @min(i + 1 + n, validate_up_to);
-                        if (comptime fusions_enabled) {
-                            if (i + 1 + n < validate_up_to) {
-                                const next_op = code[push_end];
-                                const is_fusable = switch (next_op) {
-                                    @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI), @intFromEnum(Opcode.MLOAD), @intFromEnum(Opcode.MSTORE), @intFromEnum(Opcode.MSTORE8) => true,
-                                    else => false,
-                                };
-                                if (is_fusable) bits.is_fusion_candidate = true;
-                            }
-                        }
-                        bitmap[i] = bits;
-                        @memset(bitmap[i + 1 .. push_end], push_data_bits);
-                        i = push_end;
-                        continue;
-                    }
-
-                    if (op == @intFromEnum(Opcode.JUMPDEST)) {
-                        bits.is_jumpdest = true;
-                    } else if (comptime fusions_enabled) {
-                        if (op == @intFromEnum(Opcode.ISZERO)) {
-                            const push_pc = i + 1;
-                            if (push_pc < validate_up_to) {
-                                const push_op = code[push_pc];
-                                if (push_op >= @intFromEnum(Opcode.PUSH1) and push_op <= @intFromEnum(Opcode.PUSH32)) {
-                                    const push_size: usize = push_op - (@intFromEnum(Opcode.PUSH1) - 1);
-                                    const jumpi_pc = push_pc + 1 + push_size;
-                                    if (jumpi_pc < validate_up_to and code[jumpi_pc] == @intFromEnum(Opcode.JUMPI)) {
-                                        bits.is_fusion_candidate = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    bitmap[i] = bits;
-                    i += 1;
-                }
-                return;
+            // Initialize all packed bits to false
+            for (self.packed_bitmap) |*packed_bits| {
+                packed_bits.* = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
             }
 
-            // Traced path: emit full bytecode analysis tracer events.
+            // Single pass: validate opcodes, mark bitmaps, detect JUMPDEST and fusions
+            // Track state for immediate jump validation
             var last_push_value: ?u256 = null;
             var last_push_end: PcType = 0;
+
+            // Collect immediate jumps to validate after first pass
+            var immediate_jumps = std.ArrayList(PcType).empty;
+            defer immediate_jumps.deinit(self.allocator);
 
             var opcode_count: usize = 0;
             var jumpdest_count: usize = 0;
@@ -1047,13 +683,24 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             while (i < validate_up_to) {
                 @branchHint(.likely);
 
+                // Prefetch ahead for better cache performance on large bytecode
+                if (@as(usize, i) + PREFETCH_DISTANCE < validate_up_to) {
+                    @prefetch(&self.runtime_code[@as(usize, i) + PREFETCH_DISTANCE], .{
+                        .rw = .read,
+                        .locality = 3, // Low temporal locality
+                        .cache = .data,
+                    });
+                }
+
                 // Mark operation start
                 self.packed_bitmap[i].is_op_start = true;
 
                 const op = self.runtime_code[i];
 
                 // Validate opcode - undefined opcodes are valid but treated as INVALID
-                const opcode_enum = std.meta.intToEnum(Opcode, op) catch blk: {
+                const opcode_enum = std.enums.fromInt(Opcode, op) orelse blk: {
+                    // Undefined opcodes are valid in EVM - they execute as INVALID operation
+                    // which consumes all gas and reverts. We'll treat them as INVALID (0xFE)
                     if (tracer) |t| {
                         t.onInvalidOpcode(@intCast(i), op);
                     }
@@ -1066,12 +713,15 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     self.packed_bitmap[i].is_jumpdest = true;
                     jumpdest_count += 1;
                     if (tracer) |t| {
+                        // Calculate gas cost for this JUMPDEST's basic block
+                        // (simplified for now - actual gas calculation happens during schedule build)
                         t.onJumpdestFound(@intCast(i), 1);
                     }
                 }
 
                 // Check for fusion candidates if enabled
                 if (comptime fusions_enabled) {
+                    // Check for ISZERO+PUSH+JUMPI pattern
                     if (op == @intFromEnum(Opcode.ISZERO)) {
                         const push_pc = i + 1;
                         if (push_pc < validate_up_to) {
@@ -1080,6 +730,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                                 const push_size: PcType = push_op - (@intFromEnum(Opcode.PUSH1) - 1);
                                 const jumpi_pc = push_pc + 1 + push_size;
                                 if (jumpi_pc < validate_up_to and self.runtime_code[jumpi_pc] == @intFromEnum(Opcode.JUMPI)) {
+                                    // Mark ISZERO as fusion candidate for ISZERO+PUSH+JUMPI pattern
                                     self.packed_bitmap[i].is_fusion_candidate = true;
                                     if (tracer) |t| {
                                         t.debug("Marked ISZERO at PC {} as fusion candidate for ISZERO+PUSH+JUMPI pattern", .{i});
@@ -1088,13 +739,16 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             }
                         }
                     }
-
+                    
+                    // Check if this is a PUSH that could be part of a fusion
                     if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
                         const push_size: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                         const next_op_idx = i + 1 + push_size;
 
+                        // Ensure we can read the next opcode
                         if (next_op_idx < validate_up_to) {
                             const next_op = self.runtime_code[next_op_idx];
+                            // Check for fusable patterns
                             const is_fusable = switch (next_op) {
                                 @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI), @intFromEnum(Opcode.MLOAD), @intFromEnum(Opcode.MSTORE), @intFromEnum(Opcode.MSTORE8) => true,
                                 else => false,
@@ -1112,53 +766,69 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     @intFromEnum(opcode_enum) <= @intFromEnum(Opcode.PUSH32))
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
-                    const push_end = @min(i + 1 + n, validate_up_to);
-                    const avail_n = push_end - (i + 1);
 
-                    if (avail_n < n) {
+                    // A PUSH whose immediate bytes run past the end of the code is valid:
+                    // the missing bytes read as zero. Only the bytes that exist are marked
+                    // as push data, and analysis ends at the end of the code.
+                    const available: PcType = @intCast(@min(@as(usize, n), validate_up_to - @as(usize, i) - 1));
+                    if (available < n) {
                         if (tracer) |t| {
-                            t.onTruncatedPush(@intCast(i), @intCast(n), avail_n);
+                            t.onTruncatedPush(@intCast(i), @intCast(n), available);
                         }
                     }
 
+                    // Extract push value for fusion detection (only if fusions enabled)
                     var push_value: u256 = 0;
                     if (comptime fusions_enabled) {
-                        var byte_idx: PcType = 0;
-                        while (byte_idx < avail_n) : (byte_idx += 1) {
-                            push_value = std.math.shl(u256, push_value, 8) | self.runtime_code[i + 1 + byte_idx];
-                        }
-                        if (avail_n < n) {
-                            push_value = std.math.shl(u256, push_value, @as(u9, @intCast((n - avail_n) * 8)));
-                        }
+                        push_value = self.pushValuePadded(i, n);
                     }
 
-                    @memset(self.packed_bitmap[i + 1 .. push_end], PackedBits{ .is_push_data = true, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false });
+                    // Mark push data bytes
+                    var j: PcType = 0;
+                    while (j < available) : (j += 1) {
+                        const idx = i + 1 + j;
+                        self.packed_bitmap[idx].is_push_data = true;
+                    }
 
+                    const push_end = i + 1 + available;
+
+                    // ONLY check for immediate jump patterns if fusions are enabled
+                    // This is for optimization purposes, not correctness validation
                     if (comptime fusions_enabled) {
                         if (push_end < validate_up_to) {
                             const next_op = self.runtime_code[push_end];
 
+                            // Case 1: PUSH + JUMP (for fusion optimization)
                             if (next_op == @intFromEnum(Opcode.JUMP)) {
                                 if (tracer) |t| {
                                     t.debug("Detected PUSH + JUMP fusion opportunity at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
                                 }
-                            } else if (push_end < validate_up_to and next_op == @intFromEnum(Opcode.JUMPI) and
+                                // Note: We do NOT validate jump targets here - that happens at runtime
+                                // This is only for marking fusion opportunities
+                            }
+
+                            // Case 2: PUSH + JUMPI (check if previous was also a PUSH)
+                            else if (push_end < validate_up_to and next_op == @intFromEnum(Opcode.JUMPI) and
                                 last_push_value != null and
                                 last_push_end == i)
                             {
+                                // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
                                 const jump_dest = last_push_value.?;
                                 if (tracer) |t| {
                                     t.debug("Detected PUSH + PUSH + JUMPI fusion opportunity at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
                                 }
+                                // Note: We do NOT validate jump targets here - that happens at runtime
                             }
                         }
 
+                        // Update state for next iteration
                         last_push_value = push_value;
                         last_push_end = push_end;
                     }
 
                     i = push_end;
                 } else {
+                    // Reset state when we see non-PUSH opcodes (unless it's JUMPI)
                     if (op != @intFromEnum(Opcode.JUMPI) and op != @intFromEnum(Opcode.JUMP)) {
                         last_push_value = null;
                         last_push_end = 0;
@@ -1166,6 +836,11 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     i += 1;
                 }
             }
+            // Note: We do NOT validate immediate jumps during bytecode initialization because:
+            // 1. Not all PUSH+JUMP patterns in bytecode are actually executed (dead code, data sections)
+            // 2. The EVM spec requires jump validation at execution time, not initialization time
+            // 3. Validating jumps here would reject valid contracts that contain unreachable PUSH+JUMP patterns
+            // The immediate jump detection above is ONLY for fusion optimization, not correctness validation.
 
             // Notify tracer of analysis completion
             if (tracer) |t| {
@@ -1204,7 +879,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const bg_magenta = "\x1b[45m";
             };
 
-            var output = std.ArrayListAligned(u8, null){};
+            var output = std.ArrayListAligned(u8, null).empty;
             defer output.deinit(allocator);
 
             // Add new colors for different instruction categories
@@ -1225,21 +900,21 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             };
 
             // Header with improved styling
-            try output.writer(allocator).print("\n{s}╔══════════════════════════════════════╗{s}\n", .{ Colors.bright_cyan, Colors.reset });
-            try output.writer(allocator).print("{s}║     EVM Bytecode Disassembly         ║{s}\n", .{ Colors.bright_cyan, Colors.reset });
-            try output.writer(allocator).print("{s}╚══════════════════════════════════════╝{s}\n\n", .{ Colors.bright_cyan, Colors.reset });
+            try output.print(allocator, "\n{s}╔══════════════════════════════════════╗{s}\n", .{ Colors.bright_cyan, Colors.reset });
+            try output.print(allocator, "{s}║     EVM Bytecode Disassembly         ║{s}\n", .{ Colors.bright_cyan, Colors.reset });
+            try output.print(allocator, "{s}╚══════════════════════════════════════╝{s}\n\n", .{ Colors.bright_cyan, Colors.reset });
 
-            try output.writer(allocator).print("{s}📊 Length: {s}{}{s} bytes{s}\n", .{ Colors.dim, Colors.bright_white, self.runtime_code.len, Colors.dim, Colors.reset });
-            try output.writer(allocator).print("{s}📍 Legend: {s}{s}●{s}=JUMPDEST  {s}{s}⚡{s}=Fusion  {s}✗{s}=Invalid Jump{s}\n\n", .{ Colors.dim, InstructionColors.jumpdest_bg, Colors.black, Colors.reset, Colors.bg_green, Colors.black, Colors.reset, Colors.bg_red, Colors.reset, Colors.reset });
+            try output.print(allocator, "{s}📊 Length: {s}{}{s} bytes{s}\n", .{ Colors.dim, Colors.bright_white, self.runtime_code.len, Colors.dim, Colors.reset });
+            try output.print(allocator, "{s}📍 Legend: {s}{s}●{s}=JUMPDEST  {s}{s}⚡{s}=Fusion  {s}✗{s}=Invalid Jump{s}\n\n", .{ Colors.dim, InstructionColors.jumpdest_bg, Colors.black, Colors.reset, Colors.bg_green, Colors.black, Colors.reset, Colors.bg_red, Colors.reset, Colors.reset });
 
             // Column headers with stack depth
-            try output.writer(allocator).print("{s} #   | PC   | Stack | Hex                     | Opcode         | Jump      | Details{s}\n", .{ Colors.bold, Colors.reset });
-            try output.writer(allocator).print("{s}-----|------|-------|-------------------------|----------------|-----------|-------------------------------------------{s}\n", .{ Colors.dim, Colors.reset });
+            try output.print(allocator, "{s} #   | PC   | Stack | Hex                     | Opcode         | Jump      | Details{s}\n", .{ Colors.bold, Colors.reset });
+            try output.print(allocator, "{s}-----|------|-------|-------------------------|----------------|-----------|-------------------------------------------{s}\n", .{ Colors.dim, Colors.reset });
 
             // First pass: collect all JUMPs, JUMPIs and their targets
-            var jump_map = std.ArrayList(struct { from_pc: PcType, to_pc: ?PcType, is_conditional: bool, line_from: u32, line_to: ?u32 }){};
+            var jump_map = std.ArrayList(struct { from_pc: PcType, to_pc: ?PcType, is_conditional: bool, line_from: u32, line_to: ?u32 }).empty;
             defer jump_map.deinit(allocator);
-            var line_pc_map = std.ArrayList(struct { pc: PcType, line: u32 }){};
+            var line_pc_map = std.ArrayList(struct { pc: PcType, line: u32 }).empty;
             defer line_pc_map.deinit(allocator);
 
             // First pass - build line/pc mapping
@@ -1394,7 +1069,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 if (is_new_block) {
                     // Add blank line between blocks for visual separation (except for first block)
                     if (pc > 0) {
-                        try output.writer(allocator).print("\n", .{});
+                        try output.print(allocator, "\n", .{});
                     }
                     if (pc == 0) {
                         block_start_pc = 0;
@@ -1410,27 +1085,27 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     const block_info = analyzeBlock(&self, block_start_pc);
 
                     // Format block header with gas, stack requirements, and length
-                    try output.writer(allocator).print("{s}[Block {}]{s} ", .{
+                    try output.print(allocator, "{s}[Block {}]{s} ", .{
                         "\x1b[38;5;240m", // Very muted gray color
                         current_block,
                         Colors.reset,
                     });
 
                     // Add block analysis info
-                    try output.writer(allocator).print("{s}gas: {}{s} ", .{
+                    try output.print(allocator, "{s}gas: {}{s} ", .{
                         Colors.dim,
                         block_info.gas,
                         Colors.reset,
                     });
 
-                    try output.writer(allocator).print("{s}stack: [{}, {}]{s} ", .{
+                    try output.print(allocator, "{s}stack: [{}, {}]{s} ", .{
                         Colors.dim,
                         block_info.min_stack,
                         block_info.max_stack,
                         Colors.reset,
                     });
 
-                    try output.writer(allocator).print("{s}len: {}{s}\n", .{
+                    try output.print(allocator, "{s}len: {}{s}\n", .{
                         Colors.dim,
                         block_info.length,
                         Colors.reset,
@@ -1438,7 +1113,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                     // Add green "Begin" marker for JUMPDEST blocks
                     if (self.isValidJumpDest(block_start_pc)) {
-                        try output.writer(allocator).print("{s}{s} Begin {s}\n", .{
+                        try output.print(allocator, "{s}{s} Begin {s}\n", .{
                             Colors.bg_green,
                             Colors.black,
                             Colors.reset,
@@ -1447,14 +1122,14 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 }
 
                 // Line number
-                try output.writer(allocator).print("{s}{d:4}{s} | ", .{ Colors.dim, line_num, Colors.reset });
+                try output.print(allocator, "{s}{d:4}{s} | ", .{ Colors.dim, line_num, Colors.reset });
 
                 // PC address column (decimal)
-                try output.writer(allocator).print("{s}{d:4}{s} | ", .{ Colors.cyan, pc, Colors.reset });
+                try output.print(allocator, "{s}{d:4}{s} | ", .{ Colors.cyan, pc, Colors.reset });
 
                 // Stack depth column
                 const stack_color = if (stack_depth < 0) Colors.red else if (stack_depth > 10) Colors.yellow else Colors.dim;
-                try output.writer(allocator).print("{s}{d:5}{s} | ", .{ stack_color, stack_depth, Colors.reset });
+                try output.print(allocator, "{s}{d:5}{s} | ", .{ stack_color, stack_depth, Colors.reset });
 
                 // Check if this is a jump destination or fusion candidate
                 const is_jumpdest = self.isValidJumpDest(pc);
@@ -1471,42 +1146,42 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         break :blk 1;
                     }
                 };
-                var hex_output = std.ArrayListAligned(u8, null){};
+                var hex_output = std.ArrayListAligned(u8, null).empty;
                 defer hex_output.deinit(allocator);
 
                 // Format the raw hex bytes first
                 for (0..instruction_size) |i| {
                     if (pc + i < self.runtime_code.len) {
-                        try hex_output.writer(allocator).print("{x:0>2}", .{self.runtime_code[pc + i]});
-                        if (i + 1 < instruction_size) try hex_output.writer(allocator).print(" ", .{});
+                        try hex_output.print(allocator, "{x:0>2}", .{self.runtime_code[pc + i]});
+                        if (i + 1 < instruction_size) try hex_output.print(allocator, " ", .{});
                     }
                 }
 
                 // Format the hex column with proper padding and optional markers
                 if (is_jumpdest) {
                     // JUMPDEST marker - emoji takes ~2 display columns, so reduce padding by 2
-                    try output.writer(allocator).print("{s}{s}●{s} {s}{s:<21}{s} | ", .{ InstructionColors.jumpdest_bg, Colors.black, Colors.reset, Colors.dim, hex_output.items, Colors.reset });
+                    try output.print(allocator, "{s}{s}●{s} {s}{s:<21}{s} | ", .{ InstructionColors.jumpdest_bg, Colors.black, Colors.reset, Colors.dim, hex_output.items, Colors.reset });
                 } else if (is_fusion) {
                     // Fusion marker - emoji takes ~2 display columns, so reduce padding by 2
-                    try output.writer(allocator).print("{s}{s}⚡{s} {s}{s:<20}{s} | ", .{ Colors.bg_green, Colors.black, Colors.reset, Colors.dim, hex_output.items, Colors.reset });
+                    try output.print(allocator, "{s}{s}⚡{s} {s}{s:<20}{s} | ", .{ Colors.bg_green, Colors.black, Colors.reset, Colors.dim, hex_output.items, Colors.reset });
                 } else {
                     // No marker, full width for hex bytes
-                    try output.writer(allocator).print("{s}{s:<23}{s} | ", .{ Colors.dim, hex_output.items, Colors.reset });
+                    try output.print(allocator, "{s}{s:<23}{s} | ", .{ Colors.dim, hex_output.items, Colors.reset });
                 }
 
                 // Parse and format the opcode name ONLY (no values)
-                if (std.meta.intToEnum(Opcode, opcode_byte)) |opcode| {
+                if (std.enums.fromInt(Opcode, opcode_byte)) |opcode| {
                     // Store push value for later use in details column
                     var push_value: ?u256 = null;
 
                     switch (opcode) {
                         .PUSH0 => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.push, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.push, @tagName(opcode), Colors.reset });
                             push_value = 0;
                         },
                         .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
                             const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.push, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.push, @tagName(opcode), Colors.reset });
 
                             // Extract push value for details column
                             var value: u256 = 0;
@@ -1519,49 +1194,49 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             }
                         },
                         .JUMPDEST => {
-                            try output.writer(allocator).print("{s}{s}{s:<14}{s}", .{ InstructionColors.jumpdest_bg, Colors.black, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s}{s:<14}{s}", .{ InstructionColors.jumpdest_bg, Colors.black, @tagName(opcode), Colors.reset });
                         },
                         .JUMP => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.jump_yellow, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.jump_yellow, @tagName(opcode), Colors.reset });
                         },
                         .JUMPI => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.jump_gold, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.jump_gold, @tagName(opcode), Colors.reset });
                         },
                         .STOP, .RETURN, .REVERT, .INVALID, .SELFDESTRUCT => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.flow_control, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.flow_control, @tagName(opcode), Colors.reset });
                         },
                         .ADD, .SUB, .MUL, .DIV, .SDIV, .MOD, .SMOD, .ADDMOD, .MULMOD, .EXP, .SIGNEXTEND => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.arithmetic, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.arithmetic, @tagName(opcode), Colors.reset });
                         },
                         .LT, .GT, .SLT, .SGT, .EQ, .ISZERO => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.comparison, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.comparison, @tagName(opcode), Colors.reset });
                         },
                         .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR, .CLZ => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.bitwise, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.bitwise, @tagName(opcode), Colors.reset });
                         },
                         .MLOAD, .MSTORE, .MSTORE8, .MSIZE, .MCOPY => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.memory, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.memory, @tagName(opcode), Colors.reset });
                         },
                         .SLOAD, .SSTORE, .TLOAD, .TSTORE => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.storage, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.storage, @tagName(opcode), Colors.reset });
                         },
                         .POP, .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8, .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16, .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8, .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16 => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.stack, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.stack, @tagName(opcode), Colors.reset });
                         },
                         .ADDRESS, .BALANCE, .ORIGIN, .CALLER, .CALLVALUE, .CALLDATALOAD, .CALLDATASIZE, .CALLDATACOPY, .CODESIZE, .CODECOPY, .GASPRICE, .EXTCODESIZE, .EXTCODECOPY, .RETURNDATASIZE, .RETURNDATACOPY, .EXTCODEHASH, .BLOCKHASH, .COINBASE, .TIMESTAMP, .NUMBER, .DIFFICULTY, .GASLIMIT, .CHAINID, .SELFBALANCE, .BASEFEE, .BLOBHASH, .BLOBBASEFEE, .PC, .GAS, .CREATE, .CREATE2, .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4, .KECCAK256 => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.system, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.system, @tagName(opcode), Colors.reset });
                         },
                         else => {
-                            try output.writer(allocator).print("{s}{s:<14}{s}", .{ Colors.white, @tagName(opcode), Colors.reset });
+                            try output.print(allocator, "{s}{s:<14}{s}", .{ Colors.white, @tagName(opcode), Colors.reset });
                         },
                     }
 
                     // Now handle the rest of the columns
                     // Jump visualization column
-                    try output.writer(allocator).print(" | ", .{});
+                    try output.print(allocator, " | ", .{});
 
                     // Check if this line has a jump connection
-                    var jump_visual = std.ArrayListAligned(u8, null){};
+                    var jump_visual = std.ArrayListAligned(u8, null).empty;
                     defer jump_visual.deinit(allocator);
 
                     // Find if this line is part of a jump
@@ -1572,12 +1247,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                                 if (jump.line_to) |target_line| {
                                     const color = if (jump.is_conditional) InstructionColors.jump_gold else InstructionColors.jump_yellow;
                                     if (target_line > line_num) {
-                                        try jump_visual.writer(allocator).print("{s}┐→{d}{s}", .{ color, target, Colors.reset });
+                                        try jump_visual.print(allocator, "{s}┐→{d}{s}", .{ color, target, Colors.reset });
                                     } else {
-                                        try jump_visual.writer(allocator).print("{s}┘→{d}{s}", .{ color, target, Colors.reset });
+                                        try jump_visual.print(allocator, "{s}┘→{d}{s}", .{ color, target, Colors.reset });
                                     }
                                 } else {
-                                    try jump_visual.writer(allocator).print("{s}→?{s}", .{ Colors.red, Colors.reset });
+                                    try jump_visual.print(allocator, "{s}→?{s}", .{ Colors.red, Colors.reset });
                                 }
                             }
                             break; // Found the jump from this line
@@ -1590,26 +1265,26 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                                 if (self.isValidJumpDest(pc)) {
                                     // Valid jump destination
                                     const color = InstructionColors.jumpdest_bg;
-                                    try jump_visual.writer(allocator).print("{s}←●{s}", .{ color, Colors.reset });
+                                    try jump_visual.print(allocator, "{s}←●{s}", .{ color, Colors.reset });
                                 } else {
                                     // INVALID jump destination! This is a bug!
-                                    try jump_visual.writer(allocator).print("{s}←✗{s}", .{ Colors.bg_red, Colors.reset });
+                                    try jump_visual.print(allocator, "{s}←✗{s}", .{ Colors.bg_red, Colors.reset });
                                 }
                                 break;
                             }
                         }
                     }
 
-                    try output.writer(allocator).print("{s:<10}| ", .{jump_visual.items});
+                    try output.print(allocator, "{s:<10}| ", .{jump_visual.items});
 
                     // Details column
                     if (push_value) |value| {
                         // Show push value in details
-                        try output.writer(allocator).print("{s}0x{x}{s}", .{ Colors.bright_magenta, value, Colors.reset });
+                        try output.print(allocator, "{s}0x{x}{s}", .{ Colors.bright_magenta, value, Colors.reset });
                         if (value <= 0xFFFF) {
-                            try output.writer(allocator).print(" {s}({}){s} ", .{ Colors.dim, value, Colors.reset });
+                            try output.print(allocator, " {s}({}){s} ", .{ Colors.dim, value, Colors.reset });
                         } else {
-                            try output.writer(allocator).print(" ", .{});
+                            try output.print(allocator, " ", .{});
                         }
                     }
 
@@ -1618,19 +1293,19 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                     // Special details for specific opcodes
                     if (opcode == .JUMPDEST) {
-                        try output.writer(allocator).print("{s}[target: PC={d}]{s} ", .{ Colors.bright_green, pc, Colors.reset });
+                        try output.print(allocator, "{s}[target: PC={d}]{s} ", .{ Colors.bright_green, pc, Colors.reset });
                     } else if (opcode == .JUMP) {
-                        try output.writer(allocator).print("{s}[unconditional jump]{s} ", .{ InstructionColors.jump_yellow, Colors.reset });
+                        try output.print(allocator, "{s}[unconditional jump]{s} ", .{ InstructionColors.jump_yellow, Colors.reset });
                     } else if (opcode == .JUMPI) {
-                        try output.writer(allocator).print("{s}[conditional jump]{s} ", .{ InstructionColors.jump_gold, Colors.reset });
+                        try output.print(allocator, "{s}[conditional jump]{s} ", .{ InstructionColors.jump_gold, Colors.reset });
                     }
 
                     // Gas cost
-                    try output.writer(allocator).print("{s}[gas: {}]{s}", .{ Colors.dim, opcode_info.gas_cost, Colors.reset });
+                    try output.print(allocator, "{s}[gas: {}]{s}", .{ Colors.dim, opcode_info.gas_cost, Colors.reset });
 
                     // Stack effects
                     if (opcode_info.stack_inputs > 0 or opcode_info.stack_outputs > 0) {
-                        try output.writer(allocator).print(" {s}[stack: -{}, +{}]{s}", .{ Colors.dim, opcode_info.stack_inputs, opcode_info.stack_outputs, Colors.reset });
+                        try output.print(allocator, " {s}[stack: -{}, +{}]{s}", .{ Colors.dim, opcode_info.stack_inputs, opcode_info.stack_outputs, Colors.reset });
                         // Update stack depth based on this instruction
                         stack_depth = stack_depth - @as(i32, @intCast(opcode_info.stack_inputs)) + @as(i32, @intCast(opcode_info.stack_outputs));
                     }
@@ -1640,11 +1315,11 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         .STOP, .RETURN, .REVERT, .INVALID, .SELFDESTRUCT, .JUMP, .JUMPI => true,
                         else => false,
                     };
-                } else |_| {
+                } else {
                     // Invalid opcode case
-                    try output.writer(allocator).print("{s}INVALID(0x{x:0>2}){s}", .{ Colors.bright_red, opcode_byte, Colors.reset });
-                    try output.writer(allocator).print(" | ", .{}); // Jump column
-                    try output.writer(allocator).print("          | ", .{}); // Empty jump visual
+                    try output.print(allocator, "{s}INVALID(0x{x:0>2}){s}", .{ Colors.bright_red, opcode_byte, Colors.reset });
+                    try output.print(allocator, " | ", .{}); // Jump column
+                    try output.print(allocator, "          | ", .{}); // Empty jump visual
                     last_was_terminator = true; // INVALID terminates block
                 }
 
@@ -1652,44 +1327,34 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 if (self.packed_bitmap[pc].is_fusion_candidate) {
                     const fusion_data = self.getFusionData(pc);
                     switch (fusion_data) {
-                        .push_add_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+ADD{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_mul_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+MUL{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_sub_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+SUB{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_mstore_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+MSTORE{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_mstore8_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+MSTORE8{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_mload_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+MLOAD{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_jump_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+JUMP{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_jumpi_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+JUMPI{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_and_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+AND{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_or_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+OR{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_xor_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+XOR{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_div_fusion => try output.writer(allocator).print(" {s}⚡ PUSH+DIV{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_dup3_add => try output.writer(allocator).print(" {s}⚡ PUSH+DUP3+ADD{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_add_dup1 => try output.writer(allocator).print(" {s}⚡ PUSH+ADD+DUP1{s}", .{ Colors.bright_green, Colors.reset }),
-                        .multi_push => |mp| try output.writer(allocator).print(" {s}⚡ {}xPUSH{s}", .{ Colors.bright_green, mp.count, Colors.reset }),
-                        .multi_pop => |mp| try output.writer(allocator).print(" {s}⚡ {}xPOP{s}", .{ Colors.bright_green, mp.count, Colors.reset }),
-                        .iszero_jumpi => try output.writer(allocator).print(" {s}⚡ ISZERO+JUMPI{s}", .{ Colors.bright_green, Colors.reset }),
-                        .dup2_mstore_push => try output.writer(allocator).print(" {s}⚡ DUP2+MSTORE+PUSH{s}", .{ Colors.bright_green, Colors.reset }),
-                        .function_dispatch => try output.writer(allocator).print(" {s}⚡ FUNCTION_DISPATCH{s}", .{ Colors.bright_green, Colors.reset }),
-                        .dup3_add_mstore => try output.writer(allocator).print(" {s}⚡ DUP3+ADD+MSTORE{s}", .{ Colors.bright_green, Colors.reset }),
-                        .swap1_dup2_add => try output.writer(allocator).print(" {s}⚡ SWAP1+DUP2+ADD{s}", .{ Colors.bright_green, Colors.reset }),
-                        .callvalue_check => try output.writer(allocator).print(" {s}⚡ CALLVALUE_CHECK{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push0_revert => try output.writer(allocator).print(" {s}⚡ PUSH0+REVERT{s}", .{ Colors.bright_green, Colors.reset }),
-                        .mload_swap1_dup2 => try output.writer(allocator).print(" {s}⚡ MLOAD+SWAP1+DUP2{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_add_fusion => try output.print(allocator, " {s}⚡ PUSH+ADD{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_mul_fusion => try output.print(allocator, " {s}⚡ PUSH+MUL{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_sub_fusion => try output.print(allocator, " {s}⚡ PUSH+SUB{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_mstore_fusion => try output.print(allocator, " {s}⚡ PUSH+MSTORE{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_mstore8_fusion => try output.print(allocator, " {s}⚡ PUSH+MSTORE8{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_mload_fusion => try output.print(allocator, " {s}⚡ PUSH+MLOAD{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_jump_fusion => try output.print(allocator, " {s}⚡ PUSH+JUMP{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_jumpi_fusion => try output.print(allocator, " {s}⚡ PUSH+JUMPI{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_and_fusion => try output.print(allocator, " {s}⚡ PUSH+AND{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_or_fusion => try output.print(allocator, " {s}⚡ PUSH+OR{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_xor_fusion => try output.print(allocator, " {s}⚡ PUSH+XOR{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_div_fusion => try output.print(allocator, " {s}⚡ PUSH+DIV{s}", .{ Colors.bright_green, Colors.reset }),
+                        .push_add_dup1 => try output.print(allocator, " {s}⚡ PUSH+ADD+DUP1{s}", .{ Colors.bright_green, Colors.reset }),
+                        .iszero_jumpi => try output.print(allocator, " {s}⚡ ISZERO+JUMPI{s}", .{ Colors.bright_green, Colors.reset }),
                         else => {},
                     }
                 }
 
-                try output.writer(allocator).print("\n", .{});
+                try output.print(allocator, "\n", .{});
 
                 pc += @intCast(instruction_size);
                 line_num += 1;
             }
 
             // Footer with enhanced summary
-            try output.writer(allocator).print("\n{s}╔══════════════════════════════════════╗{s}\n", .{ Colors.bright_cyan, Colors.reset });
-            try output.writer(allocator).print("{s}║            Summary                   ║{s}\n", .{ Colors.bright_cyan, Colors.reset });
-            try output.writer(allocator).print("{s}╚══════════════════════════════════════╝{s}\n", .{ Colors.bright_cyan, Colors.reset });
+            try output.print(allocator, "\n{s}╔══════════════════════════════════════╗{s}\n", .{ Colors.bright_cyan, Colors.reset });
+            try output.print(allocator, "{s}║            Summary                   ║{s}\n", .{ Colors.bright_cyan, Colors.reset });
+            try output.print(allocator, "{s}╚══════════════════════════════════════╝{s}\n", .{ Colors.bright_cyan, Colors.reset });
 
             // Count jump destinations and fusions
             var jumpdest_count: u32 = 0;
@@ -1721,21 +1386,21 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 }
             }
 
-            try output.writer(allocator).print("{s}📈 Basic blocks: {s}{}{s}\n", .{ Colors.dim, Colors.bright_white, current_block + 1, Colors.reset });
-            try output.writer(allocator).print("{s}🎯 Jump destinations: {s}{}{s}\n", .{ Colors.dim, Colors.bright_green, jumpdest_count, Colors.reset });
-            try output.writer(allocator).print("{s}➡️  Unconditional jumps: {s}{}{s}\n", .{ Colors.dim, Colors.bright_yellow, jump_count, Colors.reset });
-            try output.writer(allocator).print("{s}❓ Conditional jumps: {s}{}{s}\n", .{ Colors.dim, Colors.yellow, jumpi_count, Colors.reset });
+            try output.print(allocator, "{s}📈 Basic blocks: {s}{}{s}\n", .{ Colors.dim, Colors.bright_white, current_block + 1, Colors.reset });
+            try output.print(allocator, "{s}🎯 Jump destinations: {s}{}{s}\n", .{ Colors.dim, Colors.bright_green, jumpdest_count, Colors.reset });
+            try output.print(allocator, "{s}➡️  Unconditional jumps: {s}{}{s}\n", .{ Colors.dim, Colors.bright_yellow, jump_count, Colors.reset });
+            try output.print(allocator, "{s}❓ Conditional jumps: {s}{}{s}\n", .{ Colors.dim, Colors.yellow, jumpi_count, Colors.reset });
             if (invalid_jump_count > 0) {
-                try output.writer(allocator).print("{s}⚠️  Invalid jumps: {s}{}{s}\n", .{ Colors.dim, Colors.bright_red, invalid_jump_count, Colors.reset });
+                try output.print(allocator, "{s}⚠️  Invalid jumps: {s}{}{s}\n", .{ Colors.dim, Colors.bright_red, invalid_jump_count, Colors.reset });
             }
-            try output.writer(allocator).print("{s}⚡ Fusion candidates: {s}{}{s}\n", .{ Colors.dim, Colors.bright_cyan, fusion_count, Colors.reset });
-            try output.writer(allocator).print("{s}📝 Total instructions: {s}{}{s}\n", .{ Colors.dim, Colors.bright_white, line_num - 1, Colors.reset });
+            try output.print(allocator, "{s}⚡ Fusion candidates: {s}{}{s}\n", .{ Colors.dim, Colors.bright_cyan, fusion_count, Colors.reset });
+            try output.print(allocator, "{s}📝 Total instructions: {s}{}{s}\n", .{ Colors.dim, Colors.bright_white, line_num - 1, Colors.reset });
 
             // Stack analysis summary
             if (stack_depth != 0) {
                 const stack_msg = if (stack_depth > 0) "⚠️  Final stack depth:" else "❌ Stack underflow:";
                 const stack_color = if (stack_depth > 0) Colors.yellow else Colors.red;
-                try output.writer(allocator).print("{s}{s} {s}{}{s}\n", .{ Colors.dim, stack_msg, stack_color, stack_depth, Colors.reset });
+                try output.print(allocator, "{s}{s} {s}{}{s}\n", .{ Colors.dim, stack_msg, stack_color, stack_depth, Colors.reset });
             }
 
             return output.toOwnedSlice(allocator);
@@ -1914,17 +1579,80 @@ test "Bytecode validation - undefined opcode treated as INVALID" {
 test "Bytecode validation - truncated PUSH instruction" {
     const allocator = testing.allocator;
 
-    // PUSH1 without data byte
+    // PUSH1 without data byte: valid code, the missing byte reads as zero.
     const code = [_]u8{0x60};
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expectEqual(@as(u256, 0), bytecode.pushValuePadded(0, 1));
+
+    var iter = bytecode.createIterator();
+    const first = iter.next().?;
+    try testing.expectEqual(@as(u256, 0), first.push.value);
+    try testing.expectEqual(@as(u8, 1), first.push.size);
+    try testing.expect(iter.next() == null);
 }
 
 test "Bytecode validation - truncated PUSH32" {
     const allocator = testing.allocator;
 
-    // PUSH32 with only 31 bytes of data (should have 32)
-    var code = [_]u8{0x7F} ++ [_]u8{0xFF} ** 31;
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    // PUSH32 with only 31 bytes of data: the 32nd byte reads as zero, so the
+    // value is the 31 bytes shifted left by one byte.
+    var code = [_]u8{0x7F} ++ @as([31]u8, @splat(0xFF));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    const expected: u256 = @as(u256, std.math.maxInt(u256)) << 8;
+    try testing.expectEqual(expected, bytecode.pushValuePadded(0, 32));
+
+    var iter = bytecode.createIterator();
+    const first = iter.next().?;
+    try testing.expectEqual(expected, first.push.value);
+    try testing.expect(iter.next() == null);
+}
+
+test "Bytecode validation - truncated PUSH is zero-padded for every PUSH size" {
+    const allocator = testing.allocator;
+
+    // PUSHn followed by k < n bytes of 0xAB, for every n and every k.
+    var n: usize = 1;
+    while (n <= 32) : (n += 1) {
+        var k: usize = 0;
+        while (k < n) : (k += 1) {
+            var code: [33]u8 = undefined;
+            code[0] = @intCast(0x5F + n);
+            @memset(code[1 .. 1 + k], 0xAB);
+            var bytecode = try BytecodeDefault.init(allocator, code[0 .. 1 + k]);
+            defer bytecode.deinit();
+
+            var expected: u256 = 0;
+            var b: usize = 0;
+            while (b < n) : (b += 1) {
+                expected = (expected << 8) | @as(u256, if (b < k) 0xAB else 0);
+            }
+
+            var iter = bytecode.createIterator();
+            iter.enable_fusion = false;
+            const first = iter.next().?;
+            try testing.expectEqual(expected, first.push.value);
+            try testing.expect(iter.next() == null);
+            // No byte of a truncated PUSH is a jump destination.
+            var pc: usize = 0;
+            while (pc < 1 + k) : (pc += 1) {
+                try testing.expect(!bytecode.isValidJumpDest(@intCast(pc)));
+            }
+        }
+    }
+}
+
+test "Bytecode validation - JUMPDEST byte inside a truncated PUSH is push data" {
+    const allocator = testing.allocator;
+
+    // JUMPDEST, PUSH2 0x5b (truncated): pc 0 is a jump destination, pc 2 is not.
+    const code = [_]u8{ 0x5b, 0x61, 0x5b };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expect(bytecode.isValidJumpDest(0));
+    try testing.expect(!bytecode.isValidJumpDest(2));
+    try testing.expectEqual(@as(u256, 0x5b00), bytecode.pushValuePadded(1, 2));
 }
 
 test "Jump destination validation - valid JUMPDEST" {
@@ -2265,7 +1993,7 @@ test "Edge cases - maximum PUSH32 instruction" {
     const allocator = testing.allocator;
 
     // PUSH32 with 32 bytes of data
-    var code = [_]u8{0x7F} ++ [_]u8{0xFF} ** 32 ++ [_]u8{0x00}; // PUSH32 + 32 bytes + STOP
+    var code = [_]u8{0x7F} ++ @as([32]u8, @splat(0xFF)) ++ [_]u8{0x00}; // PUSH32 + 32 bytes + STOP
     var bytecode = try BytecodeDefault.init(allocator, &code);
     defer bytecode.deinit();
 
@@ -2296,7 +2024,7 @@ test "Invalid jump - jumping to non-JUMPDEST opcode" {
     // This test reproduces the bug from 15_test.zig where we jump to position 37
     // instead of position 36 where the JUMPDEST is located
     // PUSH32 value (33 bytes total), PUSH1 37, JUMP, JUMPDEST (at 36), ISZERO (at 37)
-    var code = std.ArrayList(u8){};
+    var code = std.ArrayList(u8).empty;
     defer code.deinit(allocator);
 
     // PUSH32 with value 0
@@ -2338,7 +2066,7 @@ test "Valid jump - jumping to correct JUMPDEST" {
     const allocator = testing.allocator;
 
     // Same as above but with correct jump destination
-    var code = std.ArrayList(u8){};
+    var code = std.ArrayList(u8).empty;
     defer code.deinit(allocator);
 
     // PUSH32 with value 0
@@ -2388,43 +2116,49 @@ test "Minimal repro - deployment bytecode with apparent truncated PUSH" {
         0x5f, // PUSH0
         0xf3, // RETURN
         0xfe, // INVALID (start of runtime code)
-        0x60, // PUSH1 without data - this triggers TruncatedPush
+        0x60, // PUSH1 without data: valid, pushes zero if ever executed
     };
 
-    // Per Yellow Paper, a truncated PUSH at EOF zero-pads missing trailing bytes.
-    var bc = try BytecodeDefault.init(allocator, &code);
-    defer bc.deinit();
-    try testing.expectEqual(code.len, bc.len());
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expectEqual(@as(usize, code.len), bytecode.len());
+    try testing.expectEqual(@as(u256, 0), bytecode.pushValuePadded(code.len - 1, 1));
 }
 
 test "Deployment bytecode - actual ten-thousand-hashes fixture" {
     const allocator = testing.allocator;
 
-    // First 32 bytes of the actual ten-thousand-hashes bytecode that ends with a truncated PUSH1
+    // First 32 bytes of the actual ten-thousand-hashes bytecode that's failing
+    // This is deployment bytecode that ends with what looks like a truncated PUSH
     const code = [_]u8{
         0x60, 0x80, 0x60, 0x40, 0x52, 0x34, 0x80, 0x15,
         0x60, 0x0e, 0x57, 0x5f, 0x5f, 0xfd, 0x5b, 0x50,
         0x60, 0x97, 0x80, 0x60, 0x1a, 0x5f, 0x39, 0x5f,
         0xf3, 0xfe, // RETURN opcode followed by INVALID
         0x60, 0x80, 0x60, 0x40, 0x52, 0x34, // Start of runtime bytecode
-        0x80, 0x15, 0x60, // Ends with 0x60 (PUSH1) — zero-padded to 0x00 per Yellow Paper
+        0x80, 0x15, 0x60, // This ends with 0x60 (PUSH1) without the data byte
     };
 
-    var bc = try BytecodeDefault.init(allocator, &code);
-    defer bc.deinit();
-    try testing.expectEqual(code.len, bc.len());
+    // Code ending in an incomplete PUSH1 is valid EVM code.
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expectEqual(@as(usize, code.len), bytecode.len());
 }
 
-test "Iterator should zero-pad truncated PUSH32 without reading out of bounds" {
+test "Iterator should not read past truncated PUSH32" {
     const allocator = testing.allocator;
 
-    // PUSH32 with only 31 bytes of data: Yellow Paper pads the missing final byte with 0x00
-    var code = [_]u8{0x7F} ++ [_]u8{0x00} ** 30 ++ [_]u8{0x01};
-    var bc = try BytecodeDefault.init(allocator, &code);
-    defer bc.deinit();
-    var iter = bc.createIterator();
-    const op = iter.next().?;
-    try testing.expectEqual(@as(u256, 0x0100), op.push.value);
+    // PUSH32 with only 31 bytes of data (malformed)
+    // Total: 1 byte opcode + 31 bytes data = 32 bytes (should be 33)
+    var code = [_]u8{0x7F} ++ @as([31]u8, @splat(0x00)); // PUSH32 (truncated)
+
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    var iter = bytecode.createIterator();
+    const first = iter.next().?;
+    try testing.expectEqual(@as(u256, 0), first.push.value);
+    // The iterator stops exactly at the end of the code.
+    try testing.expectEqual(@as(usize, code.len), @as(usize, iter.pc));
     try testing.expect(iter.next() == null);
 }
 
@@ -2474,7 +2208,7 @@ test "Bytecode with Solidity metadata - ipfs format" {
         0x58, 0x22, // bytes of length 34
         // 34 bytes of IPFS hash would follow...
         0x12, 0x20, // multihash: SHA256
-    } ++ [_]u8{0xAA} ** 32 ++ // 32 bytes of hash data
+    } ++ @as([32]u8, @splat(0xAA)) ++ // 32 bytes of hash data
         [_]u8{
             0x64, // string of length 4
             0x73, 0x6f, 0x6c, 0x63, // "solc"
@@ -2485,10 +2219,9 @@ test "Bytecode with Solidity metadata - ipfs format" {
     var bytecode = try BytecodeDefault.init(allocator, &code_with_metadata);
     defer bytecode.deinit();
 
-    // Should detect metadata and trim to just the actual code
-    try testing.expectEqual(@as(usize, 6), bytecode.runtime_code.len);
-    try testing.expectEqual(@as(u8, 0x60), bytecode.runtime_code[0]);
-    try testing.expectEqual(@as(u8, 0x00), bytecode.runtime_code[5]);
+    // Metadata is ordinary code to the EVM: nothing is trimmed.
+    try testing.expectEqual(code_with_metadata.len, bytecode.runtime_code.len);
+    try testing.expectEqualSlices(u8, &code_with_metadata, bytecode.runtime_code);
 }
 
 test "Bytecode with Solidity metadata - bzzr format" {
@@ -2506,15 +2239,14 @@ test "Bytecode with Solidity metadata - bzzr format" {
         0x65, // string of length 5
         0x62, 0x7a, 0x7a, 0x72, 0x30, // "bzzr0"
         0x58, 0x20, // bytes of length 32
-    } ++ [_]u8{0xBB} ** 32; // 32 bytes of swarm hash
+    } ++ @as([32]u8, @splat(0xBB)); // 32 bytes of swarm hash
 
     var bytecode = try BytecodeDefault.init(allocator, &code_with_metadata);
     defer bytecode.deinit();
 
-    // Should detect metadata and trim to just the actual code
-    try testing.expectEqual(@as(usize, 6), bytecode.runtime_code.len);
-    try testing.expectEqual(@as(u8, 0x60), bytecode.runtime_code[0]);
-    try testing.expectEqual(@as(u8, 0x00), bytecode.runtime_code[5]);
+    // Metadata is ordinary code to the EVM: nothing is trimmed.
+    try testing.expectEqual(code_with_metadata.len, bytecode.runtime_code.len);
+    try testing.expectEqualSlices(u8, &code_with_metadata, bytecode.runtime_code);
 }
 
 test "Bytecode without metadata should remain unchanged" {

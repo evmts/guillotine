@@ -1,5 +1,8 @@
 const std = @import("std");
 const evm = @import("evm");
+const primitives = @import("voltaire");
+const bytecode_mod = @import("../src/bytecode/bytecode.zig");
+const dispatch_mod = @import("../src/preprocessor/dispatch.zig");
 
 test "dispatch building observability for CALL bytecode" {
     std.testing.log_level = .err;
@@ -30,8 +33,9 @@ test "dispatch building observability for CALL bytecode" {
     std.debug.print("\n=== Testing dispatch building for CALL bytecode ===\n", .{});
 
     // Create bytecode with fusions enabled
-    const BytecodeType = evm.Bytecode(.{
+    const BytecodeType = bytecode_mod.Bytecode(.{
         .max_bytecode_size = 24576,
+        .pc_type = u16,
         .fusions_enabled = true,
     });
 
@@ -39,24 +43,30 @@ test "dispatch building observability for CALL bytecode" {
     defer bytecode.deinit();
 
     // Create frame to get dispatch
-    const Frame = evm.DefaultEvm.Frame;
+    const FrameType = evm.frame.Frame(.{
+        .pc_type = u16,
+        .call_stack_size = 1024,
+        .disable_gas = false,
+        .depth_limit = 1024,
+        .enable_stack_depth_validation = true,
+        .enable_invariant_checks = false,
+        .loop_quota = 300_000_000,
+    });
 
     // Build dispatch schedule
     std.debug.print("\n=== Building dispatch schedule ===\n", .{});
-    var dispatch_schedule = try Frame.Dispatch.DispatchSchedule.init(
+    const dispatch_schedule = try dispatch_mod.Dispatch(FrameType).buildFrom(
         allocator,
         bytecode,
-        &Frame.opcode_handlers,
-        @as(?*evm.Tracer, null),
+        &FrameType.opcode_handlers,
+        null, // No tracer
     );
     defer dispatch_schedule.deinit();
 
     std.debug.print("\n=== Dispatch schedule built with {} items ===\n", .{dispatch_schedule.items.len});
 
     // Print first few dispatch items
-    try std.testing.expect(dispatch_schedule.validate());
-    try std.testing.expect(dispatch_schedule.has_first_block_gas);
-    for (dispatch_schedule.item_kinds[0..@min(20, dispatch_schedule.item_kinds.len)], 0..) |kind, i| {
-        std.debug.print("Schedule[{}]: {s}\n", .{ i, @tagName(kind) });
+    for (dispatch_schedule.items[0..@min(20, dispatch_schedule.items.len)], 0..) |item, i| {
+        std.debug.print("Schedule[{}]: {s}\n", .{i, @tagName(item)});
     }
 }
