@@ -146,7 +146,7 @@ jobs:
           bun install --frozen-lockfile
           bun scripts/copy-native.ts
           test -f "prebuilds/${{ matrix.platform }}/${{ matrix.shared }}"
-          bun test
+          GUILLOTINE_LIB_PATH="$PWD/prebuilds/linux-x64/libguillotine_ffi.so" bun test
       - name: Upload the ${{ matrix.platform }} shared library
         uses: actions/upload-artifact@v4
         with:
@@ -275,7 +275,7 @@ jobs:
           bun install --frozen-lockfile
           bun run build
           bun run typecheck
-          bun test
+          GUILLOTINE_LIB_PATH="$PWD/prebuilds/linux-x64/libguillotine_ffi.so" bun test
           bun run lint:package
       - name: Pack (dry run)
         working-directory: sdks/typescript
