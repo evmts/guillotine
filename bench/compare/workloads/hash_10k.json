@@ -1,0 +1,43 @@
+{
+  "name": "hash_10k",
+  "category": "classic",
+  "source": "alloy-rs/evm2@e80df9c46a82:data/hash_10k.json#hash_10k",
+  "description": "10,000 sequential Keccak256 hashes",
+  "hardfork": "OSAKA",
+  "jit_eligible": true,
+  "block": {
+    "number": "0x1",
+    "timestamp": "0x1",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "basefee": "0x0",
+    "prevrandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gas_limit": "0x7fffffffffffffff",
+    "chain_id": "0x1"
+  },
+  "accounts": [
+    {
+      "address": "0x1111111111111111111111111111111111111111",
+      "balance": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "nonce": 0,
+      "code": "0x",
+      "storage": []
+    },
+    {
+      "address": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "balance": "0x0",
+      "nonce": 1,
+      "code": "0x6080604052348015600e575f80fd5b50600436106026575f3560e01c806330627b7c14602a575b5f80fd5b60306042565b60405190815260200160405180910390f35b5f805b612710811015609957604080516020810184905201604080517fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0818403018152919052805160209091012091506001016045565b509056fea26469706673582212205619b6f35e6b36e84f322068af3e58f103c6c5317af1da5cbb6f136edc8e3be564736f6c63430008190033",
+      "storage": []
+    }
+  ],
+  "tx": {
+    "caller": "0x1111111111111111111111111111111111111111",
+    "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+    "value": "0x0",
+    "input": "0x30627b7c",
+    "gas_limit": "0x1000000",
+    "gas_price": "0x0",
+    "nonce": 0,
+    "access_list": []
+  }
+}

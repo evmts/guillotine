@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "compare-revmc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+revmc = { git = "https://github.com/paradigmxyz/revmc", rev = "6860b6f7bbda", features = ["llvm"] }
+revmc-builtins = { git = "https://github.com/paradigmxyz/revmc", rev = "6860b6f7bbda" }
+revmc-context = { git = "https://github.com/paradigmxyz/revmc", rev = "6860b6f7bbda" }
+revm = { version = "43.0.3", features = ["std", "secp256k1", "blst", "c-kzg", "portable", "asm-keccak"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+lto = "thin"
+codegen-units = 1

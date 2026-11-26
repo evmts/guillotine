@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "pinned_at": "2026-11-25",
+  "engines": {
+    "guillotine": {
+      "name": "Guillotine",
+      "language": "Zig",
+      "tier": "interpreter",
+      "repo": "local (evmts/guillotine)",
+      "notes": "Default tail-call dispatch schedule with instruction fusions, ReleaseFast"
+    },
+    "guillotine-nofusion": {
+      "name": "Guillotine (no fusion)",
+      "language": "Zig",
+      "tier": "interpreter",
+      "repo": "local (evmts/guillotine)",
+      "notes": "Tail-call dispatch schedule with enable_fusion=false, ReleaseFast"
+    },
+    "guillotine-jit": {
+      "name": "Guillotine JIT",
+      "language": "Zig",
+      "tier": "jit",
+      "repo": "local (evmts/guillotine)",
+      "notes": "Zero-dependency ARM64 native JIT (enable_native_jit=true), ReleaseFast; falls back to interpreter for stateful/unsupported contracts"
+    },
+    "evm2": {
+      "name": "evm2",
+      "language": "Rust",
+      "tier": "interpreter",
+      "repo": "https://github.com/alloy-rs/evm2",
+      "rev": "e80df9c46a82",
+      "notes": "Alloy/revm team's new Rust EVM with tail-call interpreter and static dispatch tables"
+    },
+    "evm2-jit": {
+      "name": "evm2 JIT",
+      "language": "Rust",
+      "tier": "jit",
+      "repo": "https://github.com/alloy-rs/evm2",
+      "rev": "e80df9c46a82",
+      "notes": "Alloy evm2-jit with LLVM 23 native compiler backend"
+    },
+    "revm": {
+      "name": "revm",
+      "language": "Rust",
+      "tier": "interpreter",
+      "repo": "https://github.com/bluealloy/revm",
+      "rev": "61eb0f231227",
+      "notes": "BlueAlloy REVM (industry standard Rust EVM)"
+    },
+    "revmc": {
+      "name": "revmc",
+      "language": "Rust",
+      "tier": "jit",
+      "repo": "https://github.com/paradigmxyz/revmc",
+      "rev": "6860b6f7bbda",
+      "notes": "Paradigm revmc LLVM 22 AOT/JIT compiler on revm"
+    },
+    "evmone-advanced": {
+      "name": "evmone (Advanced)",
+      "language": "C++",
+      "tier": "interpreter",
+      "repo": "https://github.com/ipsilon/evmone",
+      "tag": "v0.25.0",
+      "rev": "ba22a659174e",
+      "notes": "Ipsilon evmone C++ threaded/pre-analyzed Advanced interpreter via evmone::state::transition"
+    },
+    "evmone-baseline": {
+      "name": "evmone (Baseline)",
+      "language": "C++",
+      "tier": "interpreter",
+      "repo": "https://github.com/ipsilon/evmone",
+      "tag": "v0.25.0",
+      "rev": "ba22a659174e",
+      "notes": "Ipsilon evmone C++ Baseline interpreter via evmone::state::transition"
+    },
+    "ethrex-levm": {
+      "name": "ethrex (LEVM)",
+      "language": "Rust",
+      "tier": "interpreter",
+      "repo": "https://github.com/lambdaclass/ethrex",
+      "rev": "fc7d69250d1a",
+      "notes": "LambdaClass ethrex Rust EVM (ethrex-levm)"
+    },
+    "gevm": {
+      "name": "gevm",
+      "language": "Go",
+      "tier": "interpreter",
+      "repo": "https://github.com/Giulio2002/gevm",
+      "rev": "42d4e2f3f205",
+      "notes": "Fast Go port of Rust reference EVM"
+    },
+    "geth": {
+      "name": "geth",
+      "language": "Go",
+      "tier": "interpreter",
+      "repo": "https://github.com/ethereum/go-ethereum",
+      "rev": "bbafd66b66f5",
+      "notes": "Go-Ethereum canonical reference EVM (core.ApplyMessage)"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "counter",
+  "category": "classic",
+  "source": "alloy-rs/evm2@e80df9c46a82:data/counter.json#counter",
+  "description": "Minimal counter increment (measures baseline per-tx overhead)",
+  "hardfork": "OSAKA",
+  "jit_eligible": false,
+  "block": {
+    "number": "0x1",
+    "timestamp": "0x1",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "basefee": "0x0",
+    "prevrandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gas_limit": "0x7fffffffffffffff",
+    "chain_id": "0x1"
+  },
+  "accounts": [
+    {
+      "address": "0x1111111111111111111111111111111111111111",
+      "balance": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "nonce": 0,
+      "code": "0x",
+      "storage": []
+    },
+    {
+      "address": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "balance": "0x0",
+      "nonce": 1,
+      "code": "0x6080806040526004361015610012575f80fd5b5f3560e01c9081633fb5c1cb146101035781638381f58a146100cc575063d09de08a1461003d575f80fd5b346100c8575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126100c8575f547fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff811461009b576001015f55005b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f80fd5b346100c8575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126100c8576020905f548152f35b346100c85760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126100c8576004355f5500fea264697066735822122019105920c33dab502c8d24693bd24f1b4b0fbb562ad3a475173a15b7aa3574f064736f6c63430008190033",
+      "storage": []
+    }
+  ],
+  "tx": {
+    "caller": "0x1111111111111111111111111111111111111111",
+    "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+    "value": "0x0",
+    "input": "0xd09de08a",
+    "gas_limit": "0x1000000",
+    "gas_price": "0x0",
+    "nonce": 0,
+    "access_list": []
+  }
+}

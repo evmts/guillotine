@@ -1,0 +1,43 @@
+{
+  "name": "loop_memory",
+  "category": "opcode",
+  "source": "guillotine/bench/compare (synthetic hot-loop)",
+  "description": "2,048-iteration memory hot loop (MCOPY, MLOAD, MSTORE)",
+  "hardfork": "OSAKA",
+  "jit_eligible": true,
+  "block": {
+    "number": "0x1",
+    "timestamp": "0x1",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "basefee": "0x0",
+    "prevrandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gas_limit": "0x7fffffffffffffff",
+    "chain_id": "0x1"
+  },
+  "accounts": [
+    {
+      "address": "0x1111111111111111111111111111111111111111",
+      "balance": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "nonce": 0,
+      "code": "0x",
+      "storage": []
+    },
+    {
+      "address": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "balance": "0x0",
+      "nonce": 1,
+      "code": "0x7fdeadbeefcafebabe1234567890abcdef0123456789abcdef0123456789abcdef5f526108005b60405f60405e60405181185f5260019003806026575060205ff3",
+      "storage": []
+    }
+  ],
+  "tx": {
+    "caller": "0x1111111111111111111111111111111111111111",
+    "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+    "value": "0x0",
+    "input": "0x",
+    "gas_limit": "0x1000000",
+    "gas_price": "0x0",
+    "nonce": 0,
+    "access_list": []
+  }
+}

@@ -60,6 +60,19 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
     bench.dependOn(&run.step);
     const compile = b.step("bench-build", "Build the standalone EVM benchmark runner");
     compile.dependOn(&b.addInstallArtifact(exe, .{}).step);
+
+    // Cross-EVM comparison runner (bench/compare/runners/guillotine/main.zig)
+    const compare_mod = b.createModule(.{
+        .root_source_file = directory.path(b, "compare/runners/guillotine/main.zig"),
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+    compare_mod.addImport("guillotine", evm);
+    const compare_exe = b.addExecutable(.{ .name = "guillotine-compare", .root_module = compare_mod, .use_llvm = true });
+    compare_exe.linkLibC();
+    if (options.target.result.os.tag == .linux) compare_exe.linkSystemLibrary("unwind");
+    const compare_build = b.step("bench-compare-build", "Build the Guillotine cross-EVM comparison runner (ReleaseFast)");
+    compare_build.dependOn(&b.addInstallArtifact(compare_exe, .{}).step);
     const tests = b.addTest(.{
         .root_module = b.createModule(.{ .root_source_file = directory.path(b, "tests.zig"), .target = options.target, .optimize = .debug }),
         .use_llvm = true,

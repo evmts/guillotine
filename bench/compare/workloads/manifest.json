@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "evm2_fixture_rev": "e80df9c46a82",
+  "workloads": [
+    {
+      "name": "snailtracer",
+      "category": "classic",
+      "hardfork": "CANCUN",
+      "jit_eligible": true,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/snailtracer.json#snailtracer",
+      "description": "Snailtracer ray-tracing compute benchmark (~235M gas, Cancun)",
+      "file": "snailtracer.json"
+    },
+    {
+      "name": "erc20_transfer",
+      "category": "classic",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/erc20_transfer.json#erc20_transfer",
+      "description": "5,000 sequential ERC20 transfers (storage + logs)",
+      "file": "erc20_transfer.json"
+    },
+    {
+      "name": "hash_10k",
+      "category": "classic",
+      "hardfork": "OSAKA",
+      "jit_eligible": true,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/hash_10k.json#hash_10k",
+      "description": "10,000 sequential Keccak256 hashes",
+      "file": "hash_10k.json"
+    },
+    {
+      "name": "fibonacci",
+      "category": "classic",
+      "hardfork": "OSAKA",
+      "jit_eligible": true,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/fibonacci-calldata.json#fibonacci-calldata",
+      "description": "Fibonacci computation via calldata",
+      "file": "fibonacci.json"
+    },
+    {
+      "name": "factorial",
+      "category": "classic",
+      "hardfork": "OSAKA",
+      "jit_eligible": true,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/factorial.json#factorial",
+      "description": "Iterative factorial loop",
+      "file": "factorial.json"
+    },
+    {
+      "name": "bswap64",
+      "category": "classic",
+      "hardfork": "OSAKA",
+      "jit_eligible": true,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/bswap64.json#bswap64",
+      "description": "64-bit byte-swap bitwise stress test",
+      "file": "bswap64.json"
+    },
+    {
+      "name": "counter",
+      "category": "classic",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/counter.json#counter",
+      "description": "Minimal counter increment (measures baseline per-tx overhead)",
+      "file": "counter.json"
+    },
+    {
+      "name": "weth",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/weth.json#weth",
+      "description": "Mainnet WETH9 contract call",
+      "file": "weth.json"
+    },
+    {
+      "name": "usdc_proxy",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/usdc_proxy.json#usdc_proxy",
+      "description": "Mainnet USDC proxy (DELEGATECALL + storage)",
+      "file": "usdc_proxy.json"
+    },
+    {
+      "name": "fiat_token",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/fiat_token.json#fiat_token",
+      "description": "Mainnet USDC FiatTokenV2 execution",
+      "file": "fiat_token.json"
+    },
+    {
+      "name": "uniswap_v2_pair",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/uniswap_v2_pair.json#uniswap_v2_pair",
+      "description": "Mainnet Uniswap V2 pair execution",
+      "file": "uniswap_v2_pair.json"
+    },
+    {
+      "name": "uniswap_v3_pool",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/uniswap_v3_pool.json#uniswap_v3_pool",
+      "description": "Mainnet Uniswap V3 pool execution",
+      "file": "uniswap_v3_pool.json"
+    },
+    {
+      "name": "seaport",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/seaport.json#seaport",
+      "description": "Mainnet OpenSea Seaport large-bytecode call (cold vs warm test)",
+      "file": "seaport.json"
+    },
+    {
+      "name": "curve_stableswap",
+      "category": "mainnet",
+      "hardfork": "CANCUN",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/curve-stableswap-2pool.json#curve-stableswap-2pool",
+      "description": "Curve StableSwap 2pool math (Cancun)",
+      "file": "curve_stableswap.json"
+    },
+    {
+      "name": "burntpix",
+      "category": "mainnet",
+      "hardfork": "CANCUN",
+      "jit_eligible": true,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/burntpix.json#burntpix",
+      "description": "BurntPix heavy on-chain pixel/SVG generation (Cancun)",
+      "file": "burntpix.json"
+    },
+    {
+      "name": "push0_proxy",
+      "category": "mainnet",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/push0_proxy.json#push0_proxy",
+      "description": "Minimal PUSH0 proxy delegatecall",
+      "file": "push0_proxy.json"
+    },
+    {
+      "name": "precompile_ecrecover",
+      "category": "precompile",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-ecrecover.json#precompile/ecrecover",
+      "description": "ECRECOVER (0x01) secp256k1 signature recovery",
+      "file": "precompile_ecrecover.json"
+    },
+    {
+      "name": "precompile_sha256",
+      "category": "precompile",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-sha256.json#precompile/sha256/size_1024",
+      "description": "SHA256 (0x02) 1 KiB cryptographic hash precompile",
+      "file": "precompile_sha256.json"
+    },
+    {
+      "name": "precompile_modexp",
+      "category": "precompile",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-modexp.json#precompile/modexp/mod_odd_256b_exp_1024",
+      "description": "MODEXP (0x05) 256-byte odd modulus, 1024-bit exponent",
+      "file": "precompile_modexp.json"
+    },
+    {
+      "name": "precompile_bn254_pairing",
+      "category": "precompile",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-bn254.json#precompile/bn254/pairing",
+      "description": "BN254 (0x08) elliptic curve pairing check",
+      "file": "precompile_bn254_pairing.json"
+    },
+    {
+      "name": "precompile_bls12_381",
+      "category": "precompile",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-bls12-381.json#precompile/bls12_381/g1_add",
+      "description": "BLS12-381 (0x0b) G1 point addition (EIP-2537)",
+      "file": "precompile_bls12_381.json"
+    },
+    {
+      "name": "loop_arithmetic",
+      "category": "opcode",
+      "hardfork": "OSAKA",
+      "jit_eligible": true,
+      "source": "guillotine/bench/compare (synthetic hot-loop)",
+      "description": "2,048-iteration tight arithmetic loop (MUL, ADD, DIV, XOR, JUMPI)",
+      "file": "loop_arithmetic.json"
+    },
+    {
+      "name": "loop_memory",
+      "category": "opcode",
+      "hardfork": "OSAKA",
+      "jit_eligible": true,
+      "source": "guillotine/bench/compare (synthetic hot-loop)",
+      "description": "2,048-iteration memory hot loop (MCOPY, MLOAD, MSTORE)",
+      "file": "loop_memory.json"
+    },
+    {
+      "name": "loop_storage",
+      "category": "opcode",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "guillotine/bench/compare (synthetic hot-loop)",
+      "description": "128 cold SLOADs + 512 warm SLOAD/SSTORE mutations",
+      "file": "loop_storage.json"
+    },
+    {
+      "name": "loop_staticcall",
+      "category": "opcode",
+      "hardfork": "OSAKA",
+      "jit_eligible": false,
+      "source": "guillotine/bench/compare (synthetic hot-loop)",
+      "description": "256 nested STATICCALL frames to child contract returning 42",
+      "file": "loop_staticcall.json"
+    }
+  ]
+}

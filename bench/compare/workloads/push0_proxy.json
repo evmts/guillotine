@@ -1,0 +1,43 @@
+{
+  "name": "push0_proxy",
+  "category": "mainnet",
+  "source": "alloy-rs/evm2@e80df9c46a82:data/push0_proxy.json#push0_proxy",
+  "description": "Minimal PUSH0 proxy delegatecall",
+  "hardfork": "OSAKA",
+  "jit_eligible": false,
+  "block": {
+    "number": "0x1",
+    "timestamp": "0x1",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "basefee": "0x0",
+    "prevrandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gas_limit": "0x7fffffffffffffff",
+    "chain_id": "0x1"
+  },
+  "accounts": [
+    {
+      "address": "0x1111111111111111111111111111111111111111",
+      "balance": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "nonce": 0,
+      "code": "0x",
+      "storage": []
+    },
+    {
+      "address": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "balance": "0x0",
+      "nonce": 1,
+      "code": "0x365f5f375f5f365f73bebebebebebebebebebebebebebebebebebebebe5af43d5f5f3e5f3d91602a57fd5bf3",
+      "storage": []
+    }
+  ],
+  "tx": {
+    "caller": "0x1111111111111111111111111111111111111111",
+    "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+    "value": "0x0",
+    "input": "0x",
+    "gas_limit": "0x1000000",
+    "gas_price": "0x0",
+    "nonce": 0,
+    "access_list": []
+  }
+}

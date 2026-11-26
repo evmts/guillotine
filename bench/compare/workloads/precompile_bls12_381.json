@@ -1,0 +1,36 @@
+{
+  "name": "precompile_bls12_381",
+  "category": "precompile",
+  "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-bls12-381.json#precompile/bls12_381/g1_add",
+  "description": "BLS12-381 (0x0b) G1 point addition (EIP-2537)",
+  "hardfork": "OSAKA",
+  "jit_eligible": false,
+  "block": {
+    "number": "0x1",
+    "timestamp": "0x1",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "basefee": "0x0",
+    "prevrandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gas_limit": "0x1000000",
+    "chain_id": "0x1"
+  },
+  "accounts": [
+    {
+      "address": "0x1111111111111111111111111111111111111111",
+      "balance": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "nonce": 0,
+      "code": "0x",
+      "storage": []
+    }
+  ],
+  "tx": {
+    "caller": "0x1111111111111111111111111111111111111111",
+    "to": "0x000000000000000000000000000000000000000b",
+    "value": "0x0",
+    "input": "0x000000000000000000000000000000000e8665724fa74bb34215b1d774a93d6958fbcee1bf34fdd20b2f71cf312bcd087c3880af08593ac95b4e85624d72794f000000000000000000000000000000000b550f3c34a9753c632cf641c25ff4d5cf4fafe576e6ed0c2ac3c984df4139d75e474f493578ebeeb4497c4e40b0fa9f0000000000000000000000000000000004f387c4a4ea043717a073ece1fdad218dc4c619799d76cfe3910c9d64fb76e87105c6ad822872c5a23a446ee333705c00000000000000000000000000000000076d882de6cde580e6f4146b6a7dcf1030b5d523a5909ed80dc4ba79818faf5b60dd0ba010ed68a9b2ba2037f350b70a",
+    "gas_limit": "0x1000000",
+    "gas_price": "0x0",
+    "nonce": 0,
+    "access_list": []
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "precompile_ecrecover",
+  "category": "precompile",
+  "source": "alloy-rs/evm2@e80df9c46a82:data/precompile-ecrecover.json#precompile/ecrecover",
+  "description": "ECRECOVER (0x01) secp256k1 signature recovery",
+  "hardfork": "OSAKA",
+  "jit_eligible": false,
+  "block": {
+    "number": "0x1",
+    "timestamp": "0x1",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "basefee": "0x0",
+    "prevrandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gas_limit": "0x1000000",
+    "chain_id": "0x1"
+  },
+  "accounts": [
+    {
+      "address": "0x1111111111111111111111111111111111111111",
+      "balance": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "nonce": 0,
+      "code": "0x",
+      "storage": []
+    }
+  ],
+  "tx": {
+    "caller": "0x1111111111111111111111111111111111111111",
+    "to": "0x0000000000000000000000000000000000000001",
+    "value": "0x0",
+    "input": "0xd49526f5e96ad4786bb3450d1b7c7120bf27d3a03fe04ec70b2172137cf0a37e000000000000000000000000000000000000000000000000000000000000001c48db26fab78a5ebd57b9766e05d67d7378aa3d6a21dfcb367cef8235566936713812857c1115db79778526795242044d43c16313d7550ecd3ebecda53d88d34a",
+    "gas_limit": "0x1000000",
+    "gas_price": "0x0",
+    "nonce": 0,
+    "access_list": []
+  }
+}

@@ -1,0 +1,27 @@
+[workspace]
+
+[package]
+name = "compare-evm2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a82" }
+evm2-jit-context = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a82", optional = true }
+evm2-jit-llvm = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a82", optional = true }
+evm2-jit-runtime = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a82", optional = true, features = ["llvm"] }
+alloy-consensus = { version = "2", default-features = false }
+alloy-primitives = { version = "1.6", features = ["map-foldhash"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+
+[features]
+default = []
+jit = ["dep:evm2-jit-context", "dep:evm2-jit-llvm", "dep:evm2-jit-runtime"]
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+lto = "thin"
+codegen-units = 1

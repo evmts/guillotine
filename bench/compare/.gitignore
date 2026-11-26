@@ -1,0 +1,12 @@
+.cache/
+bin/
+build/
+target/
+vendor/
+runners/*/target/
+runners/*/build/
+runners/*/.zig-cache/
+runners/*/zig-out/
+*.o
+*.a
+*.dylib
