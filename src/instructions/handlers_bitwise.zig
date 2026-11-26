@@ -32,9 +32,9 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// AND opcode (0x16) - Bitwise AND operation.
-        pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .AND, cursor, s.sp, gas);
+        pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .AND, cursor, s, gas);
 
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
@@ -42,88 +42,88 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            return N.next(self, .AND, cursor, s.sp, gas);
+            return N.next(self, .AND, cursor, s, gas);
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
-        pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .OR, cursor, s.sp, gas);
+        pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .OR, cursor, s, gas);
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top | second;
                 }
             }.op);
-            return N.next(self, .OR, cursor, s.sp, gas);
+            return N.next(self, .OR, cursor, s, gas);
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
-        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .XOR, cursor, s.sp, gas);
+        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .XOR, cursor, s, gas);
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top ^ second;
                 }
             }.op);
-            return N.next(self, .XOR, cursor, s.sp, gas);
+            return N.next(self, .XOR, cursor, s, gas);
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
-        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .NOT, cursor, s.sp, gas);
+        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .NOT, cursor, s, gas);
             const value = s.peek_unsafe();
             s.set_top_unsafe(~value);
-            return N.next(self, .NOT, cursor, s.sp, gas);
+            return N.next(self, .NOT, cursor, s, gas);
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
         /// Returns the byte at that index or 0 if index >= 32.
-        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .BYTE, cursor, s.sp, gas);
+        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .BYTE, cursor, s, gas);
             const byte_index = s.pop_unsafe(); // Top of stack - byte index
             const value = s.peek_unsafe(); // Second from top - value to extract from
             // `verified_ops.byteFast` is the form the proofs cover (`byte_fast_equiv`).
             s.set_top_unsafe(verified_ops.byteFast(byte_index, value));
-            return N.next(self, .BYTE, cursor, s.sp, gas);
+            return N.next(self, .BYTE, cursor, s, gas);
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
-        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .SHL, cursor, s.sp, gas);
+        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .SHL, cursor, s, gas);
             const shift = s.pop_unsafe(); // Top of stack - shift amount
             const value = s.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= 256) 0 else value << @intCast(shift);
             s.set_top_unsafe(result);
-            return N.next(self, .SHL, cursor, s.sp, gas);
+            return N.next(self, .SHL, cursor, s, gas);
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
-        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .SHR, cursor, s.sp, gas);
+        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .SHR, cursor, s, gas);
             const shift = s.pop_unsafe(); // Top of stack - shift amount
             const value = s.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= 256) 0 else value >> @intCast(shift);
             s.set_top_unsafe(result);
-            return N.next(self, .SHR, cursor, s.sp, gas);
+            return N.next(self, .SHR, cursor, s, gas);
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
         /// Preserves the sign bit during shift.
-        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .SAR, cursor, s.sp, gas);
+        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .SAR, cursor, s, gas);
             const shift = s.pop_unsafe(); // Top of stack - shift amount
             const value = s.peek_unsafe(); // Second from top - value to shift
             // `verified_ops.sarFast` is the branchless form the proofs cover (`sar_branchless_equiv`):
             // clamping the shift to 255 yields all sign bits for any shift >= 256.
             s.set_top_unsafe(verified_ops.sarFast(shift, value));
-            return N.next(self, .SAR, cursor, s.sp, gas);
+            return N.next(self, .SAR, cursor, s, gas);
         }
     };
 }

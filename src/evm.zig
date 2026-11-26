@@ -280,7 +280,8 @@ pub fn Evm(config: EvmConfig) type {
         /// the reverse order they start, so `stacks[0..in_use]` are the live ones.
         const FrameStackPool = struct {
             const Buffer = []align(alignment.toByteUnits()) u8;
-            const size = @as(usize, Frame.Stack.stack_capacity) * @sizeOf(Frame.WordType);
+            /// The whole stack buffer, sentinel word included (`Stack.buffer_len`).
+            const size = Frame.Stack.buffer_len * @sizeOf(Frame.WordType);
             const alignment: std.mem.Alignment = .@"64";
             /// Free stacks kept after a transaction (512 KiB). A deeper call chain
             /// frees the rest when its transaction ends.

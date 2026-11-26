@@ -98,10 +98,11 @@ shape `debug_traceTransaction` consumers read.
 Every handler begins with one mandatory line:
 
 ```zig
-pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-    N.before(self, .SOME_OPCODE, cursor, sp, gas); // writes sp and gas back, then calls beforeInstruction
+pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    const s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .SOME_OPCODE, cursor, s, gas); // writes sp and gas back, then calls beforeInstruction
     // ... implementation ...
-    return N.next(self, .SOME_OPCODE, cursor, sp, gas);
+    return N.next(self, .SOME_OPCODE, cursor, s, gas);
 }
 ```
 

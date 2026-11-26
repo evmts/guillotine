@@ -115,9 +115,9 @@ are mandatory and easy to forget:
 
 ```zig
 // src/instructions/handlers_arithmetic.zig
-pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-    var s = N.StackView{ .sp = sp };
-    N.before(self, .ADD, cursor, s.sp, gas); // 1. sync the reference EVM
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .ADD, cursor, s, gas); // 1. sync the reference EVM
 
     s.binary_op_unsafe(struct {
         fn op(top: WordType, second: WordType) WordType {
@@ -125,7 +125,7 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, ga
         }
     }.op);
 
-    return N.next(self, .ADD, cursor, s.sp, gas); // 2. tail call
+    return N.next(self, .ADD, cursor, s, gas); // 2. tail call
 }
 ```
 

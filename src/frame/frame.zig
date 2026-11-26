@@ -69,7 +69,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
 
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         /// Takes cursor pointer with jump table available through dispatch metadata when needed
-        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Preprocessor(Self);

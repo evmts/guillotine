@@ -39,7 +39,7 @@ memory read, a bounds check, a gas check, and stack-depth validation.
 
 ```zig
 // src/frame/frame.zig
-pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
+pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 ```
 
 Every handler has this signature (`src/preprocessor/handler_abi.zig`). It ends by
@@ -50,14 +50,16 @@ calling convention cannot return an error union or take a `u256` by value, so a
 handler returns an `ExitCode` and the caller maps it back to an error with
 `errorFromExit`. Other targets use the C calling convention.
 
-`sp` and `gas` are the live stack pointer and gas counter. `frame.stack.stack_ptr`
-and `frame.gas_remaining` are stale while handlers run.
+`sp` and `gas` are the live stack pointer and gas counter. `t0..t3` are the top stack
+item as 64-bit limbs; `sp[0]` is its spill slot and `sp[1]` is the second item.
+`frame.stack.stack_ptr`, the word at `sp[0]` and `frame.gas_remaining` are stale while
+handlers run.
 
 ```zig
 // src/instructions/handlers_arithmetic.zig
-pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-    var s = N.StackView{ .sp = sp };
-    N.before(self, .ADD, cursor, s.sp, gas);
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .ADD, cursor, s, gas);
 
     s.binary_op_unsafe(struct {
         fn op(top: WordType, second: WordType) WordType {
@@ -65,7 +67,7 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, ga
         }
     }.op);
 
-    return N.next(self, .ADD, cursor, s.sp, gas);
+    return N.next(self, .ADD, cursor, s, gas);
 }
 ```
 
@@ -193,7 +195,7 @@ analysed once. Analysis is the expensive part; execution is cheap.
 
 ## What this means for you
 
-- **Writing a handler?** It must call `N.before(self, opcode, cursor, sp, gas)`
+- **Writing a handler?** It must call `N.before(self, opcode, cursor, s, gas)`
   first and end with `N.next(...)`, or the differential tracer desynchronises and tests fail with confusing
   state mismatches. See [Tracing](/guides/tracing).
 - **Debugging?** Print the schedule, not the bytecode:

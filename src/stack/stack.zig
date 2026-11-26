@@ -31,6 +31,16 @@ pub fn Stack(config: StackConfig) type {
         pub const IndexType = config.StackIndexType();
         pub const stack_capacity = config.stack_size;
 
+        /// Words in the stack buffer: `stack_capacity` items plus one sentinel word at
+        /// index `stack_capacity`, the address `stack_ptr` holds when the stack is empty.
+        ///
+        /// The sentinel is never a stack item. It exists for the dispatch handlers, which
+        /// keep the top item in registers (`handler_abi.Native.StackView`) and treat
+        /// `stack_ptr[0]` as the top item's spill slot. With the sentinel that slot is
+        /// addressable at every depth, including the empty stack, so spilling and
+        /// reloading the top item need no emptiness branch.
+        pub const buffer_len = @as(usize, stack_capacity) + 1;
+
         pub const Error = error{
             StackOverflow,
             StackUnderflow,
@@ -58,8 +68,11 @@ pub fn Stack(config: StackConfig) type {
 
         /// Initialize a new stack with a tracer for assertions.
         pub fn initWithTracer(allocator: std.mem.Allocator, tracer: anytype) Error!Self {
-            const memory = allocator.alignedAlloc(WordType, @enumFromInt(6), stack_capacity) catch return Error.AllocationError;
+            const memory = allocator.alignedAlloc(WordType, @enumFromInt(6), buffer_len) catch return Error.AllocationError;
             errdefer allocator.free(memory);
+            // Buffers can be recycled, so give the sentinel a defined value: an empty
+            // stack's spill slot is read when a frame enters the handler chain.
+            memory[stack_capacity] = 0;
 
             const base_ptr: [*]align(64) WordType = memory.ptr;
 
@@ -73,7 +86,7 @@ pub fn Stack(config: StackConfig) type {
         /// Deallocates the stack's aligned memory.
         /// Must be called when the stack is no longer needed.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            const memory_slice = self.buf_ptr[0..stack_capacity];
+            const memory_slice = self.buf_ptr[0..buffer_len];
             allocator.free(memory_slice);
         }
 

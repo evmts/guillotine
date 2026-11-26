@@ -14,35 +14,35 @@ pub fn Handlers(FrameType: type) type {
         const N = handler_abi.Native(FrameType);
 
         /// LT opcode (0x10) - Less than comparison.
-        pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .LT, cursor, s.sp, gas);
+        pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .LT, cursor, s, gas);
             // EVM: pops a (top), then b (second); pushes (a < b)
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return @intFromBool(top < second);
                 }
             }.op);
-            return N.next(self, .LT, cursor, s.sp, gas);
+            return N.next(self, .LT, cursor, s, gas);
         }
 
         /// GT opcode (0x11) - Greater than comparison.
-        pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .GT, cursor, s.sp, gas);
+        pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .GT, cursor, s, gas);
             // EVM: pops a (top), then b (second); pushes (a > b)
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return @intFromBool(top > second);
                 }
             }.op);
-            return N.next(self, .GT, cursor, s.sp, gas);
+            return N.next(self, .GT, cursor, s, gas);
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
-        pub fn slt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .SLT, cursor, s.sp, gas);
+        pub fn slt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .SLT, cursor, s, gas);
             const a = s.pop_unsafe(); // Top of stack (second pushed value)
             const b = s.peek_unsafe(); // Second from top (first pushed value)
             const a_signed = @as(@Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
@@ -50,13 +50,13 @@ pub fn Handlers(FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a < b) with signed comparison
             const result: WordType = @intFromBool(a_signed < b_signed);
             s.set_top_unsafe(result);
-            return N.next(self, .SLT, cursor, s.sp, gas);
+            return N.next(self, .SLT, cursor, s, gas);
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
-        pub fn sgt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .SGT, cursor, s.sp, gas);
+        pub fn sgt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .SGT, cursor, s, gas);
             const a = s.pop_unsafe(); // Top of stack (second pushed value)
             const b = s.peek_unsafe(); // Second from top (first pushed value)
             const a_signed = @as(@Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
@@ -64,13 +64,13 @@ pub fn Handlers(FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a > b) with signed comparison
             const result: WordType = @intFromBool(a_signed > b_signed);
             s.set_top_unsafe(result);
-            return N.next(self, .SGT, cursor, s.sp, gas);
+            return N.next(self, .SGT, cursor, s, gas);
         }
 
         /// EQ opcode (0x14) - Equality comparison.
-        pub fn eq(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .EQ, cursor, s.sp, gas);
+        pub fn eq(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .EQ, cursor, s, gas);
 
             // EVM: pops top, then second, and pushes (top == second)
             s.binary_op_unsafe(struct {
@@ -79,17 +79,17 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            return N.next(self, .EQ, cursor, s.sp, gas);
+            return N.next(self, .EQ, cursor, s, gas);
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
-        pub fn iszero(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            var s = N.StackView{ .sp = sp };
-            N.before(self, .ISZERO, cursor, s.sp, gas);
+        pub fn iszero(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .ISZERO, cursor, s, gas);
             const value = s.peek_unsafe();
             const result: WordType = @intFromBool(value == 0);
             s.set_top_unsafe(result);
-            return N.next(self, .ISZERO, cursor, s.sp, gas);
+            return N.next(self, .ISZERO, cursor, s, gas);
         }
     };
 }

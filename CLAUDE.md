@@ -315,21 +315,22 @@ The `tracer.assert()` calls in unsafe operations are **development aids for debu
 ### Opcode Pattern
 
 Handlers use the register-passing tail-call ABI in
-`src/preprocessor/handler_abi.zig`: `fn (frame, cursor, sp, gas)
-callconv(handler_cc) ExitCode`. On LLVM x86_64/aarch64 `handler_cc` is
+`src/preprocessor/handler_abi.zig`: `fn (frame, cursor, sp, gas, t0, t1, t2, t3)
+callconv(handler_cc) ExitCode` (`t0..t3` are the top stack item as 64-bit limbs;
+`sp[0]` is its spill slot). On LLVM x86_64/aarch64 `handler_cc` is
 `preserve_none`, which cannot return an error union or take `u256` by value, so
 handlers return an `ExitCode` and the caller maps it back with `errorFromExit`.
 
 ```zig
-pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-    var s = N.StackView{ .sp = sp };
-    N.before(self, .ADD, cursor, s.sp, gas);
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .ADD, cursor, s, gas);
     s.binary_op_unsafe(struct {
         fn op(top: WordType, second: WordType) WordType {
             return top +% second;
         }
     }.op);
-    return N.next(self, .ADD, cursor, s.sp, gas);
+    return N.next(self, .ADD, cursor, s, gas);
 }
 ```
 
@@ -381,10 +382,11 @@ The tracer system in `@src/tracer/tracer.zig` provides sophisticated execution s
 
 ### Instruction Handler Pattern
 ```zig
-pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-    N.before(self, .SOME_OPCODE, cursor, sp, gas);  // ← REQUIRED! (calls beforeInstruction)
+pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    const s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .SOME_OPCODE, cursor, s, gas);  // ← REQUIRED! (calls beforeInstruction)
     // ... opcode implementation ...
-    return N.next(self, .SOME_OPCODE, cursor, sp, gas);
+    return N.next(self, .SOME_OPCODE, cursor, s, gas);
 }
 ```
 

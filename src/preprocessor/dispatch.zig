@@ -33,7 +33,7 @@ pub fn Preprocessor(FrameType: type) type {
 
         const Metadata = dispatch_metadata.DispatchMetadata(FrameType);
 
-        const OpcodeHandler = *const fn (frame: *FrameType, cursor: [*]const Item, sp: [*]FrameType.WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
+        const OpcodeHandler = *const fn (frame: *FrameType, cursor: [*]const Item, sp: [*]FrameType.WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 
         /// True when a schedule item carries a runtime tag naming what it holds.
         ///

@@ -25,36 +25,41 @@ pub fn Handlers(FrameType: type) type {
         const mstore8_general_handler = handler_abi.wrap(FrameType, mstore8_general);
 
         /// MLOAD opcode (0x51) - Load word from memory.
-        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.word_ptr_in_bounds(sp[0])) |word| {
+        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            if (self.memory.word_ptr_in_bounds(s.peek_unsafe())) |word| {
                 @branchHint(.likely);
-                N.before(self, .MLOAD, cursor, sp, gas);
-                sp[0] = @truncate(memory_mod.loadWordBigEndian(word));
-                return N.next(self, .MLOAD, cursor, sp, gas);
+                N.before(self, .MLOAD, cursor, s, gas);
+                s.set_top_unsafe(@truncate(memory_mod.loadWordBigEndian(word)));
+                return N.next(self, .MLOAD, cursor, s, gas);
             }
-            return @call(handler_abi.tail_mod, mload_general_handler, .{ self, cursor, sp, gas });
+            return @call(handler_abi.tail_mod, mload_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
-        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.word_ptr_in_bounds(sp[0])) |word| {
+        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            if (self.memory.word_ptr_in_bounds(s.peek_unsafe())) |word| {
                 @branchHint(.likely);
-                N.before(self, .MSTORE, cursor, sp, gas);
-                memory_mod.storeWordBigEndian(word, sp[1]);
-                return N.next(self, .MSTORE, cursor, sp + 2, gas);
+                N.before(self, .MSTORE, cursor, s, gas);
+                _ = s.pop_unsafe();
+                memory_mod.storeWordBigEndian(word, s.pop_unsafe());
+                return N.next(self, .MSTORE, cursor, s, gas);
             }
-            return @call(handler_abi.tail_mod, mstore_general_handler, .{ self, cursor, sp, gas });
+            return @call(handler_abi.tail_mod, mstore_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
-        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.byte_ptr_in_bounds(sp[0])) |byte| {
+        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            if (self.memory.byte_ptr_in_bounds(s.peek_unsafe())) |byte| {
                 @branchHint(.likely);
-                N.before(self, .MSTORE8, cursor, sp, gas);
-                byte.* = @truncate(sp[1]);
-                return N.next(self, .MSTORE8, cursor, sp + 2, gas);
+                N.before(self, .MSTORE8, cursor, s, gas);
+                _ = s.pop_unsafe();
+                byte.* = @truncate(s.pop_unsafe());
+                return N.next(self, .MSTORE8, cursor, s, gas);
             }
-            return @call(handler_abi.tail_mod, mstore8_general_handler, .{ self, cursor, sp, gas });
+            return @call(handler_abi.tail_mod, mstore8_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
         }
 
         /// Memory never grows past this many bytes: the frame's configured memory limit,
@@ -240,11 +245,11 @@ pub fn Handlers(FrameType: type) type {
 
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
-        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            N.before(self, .MSIZE, cursor, sp, gas);
-            var s = N.StackView{ .sp = sp };
+        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .MSIZE, cursor, s, gas);
             s.push_unsafe(@as(WordType, @intCast(self.memory.size())));
-            return N.next(self, .MSIZE, cursor, s.sp, gas);
+            return N.next(self, .MSIZE, cursor, s, gas);
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).

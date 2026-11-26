@@ -140,13 +140,13 @@ pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!n
 ```zig
 // src/instructions/handlers_advanced_synthetic.zig
 // ISZERO + PUSH target + JUMPI. cursor[1] holds the statically resolved target.
-pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_cc) ExitCode {
-    N.before(self, .ISZERO_JUMPI, cursor, sp, gas);
-    var s = N.StackView{ .sp = sp };
+pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_cc) ExitCode {
+    var s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .ISZERO_JUMPI, cursor, s, gas);
     const value = s.pop_unsafe();
-    if (value != 0) return N.next(self, .ISZERO_JUMPI, cursor, s.sp, gas);
+    if (value != 0) return N.next(self, .ISZERO_JUMPI, cursor, s, gas);
     const target: [*]const Dispatch.Item = @ptrCast(@alignCast(cursor[1].jump_static.dispatch));
-    return N.jump(self, .ISZERO_JUMPI, target, s.sp, gas);
+    return N.jump(self, .ISZERO_JUMPI, target, s, gas);
 }
 ```
 
