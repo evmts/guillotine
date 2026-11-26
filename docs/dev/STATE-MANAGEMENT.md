@@ -28,54 +28,46 @@ original_storage: Map(StorageKey, u256)
 transient: Map(StorageKey, u256)
 ```
 
-### Mini Storage Implementation
+### MinimalEvm Storage Implementation
+
+MinimalEvm keeps all storage in hash maps on the `MinimalEvm` struct and
+delegates to a host interface when one is attached.
 
 ```zig
-// mini/src/storage.zig:19-55
-pub const Storage = struct {
-    storage: std.AutoHashMap(StorageSlotKey, u256),
-    original_storage: std.AutoHashMap(StorageSlotKey, u256),
-    transient: std.AutoHashMap(StorageSlotKey, u256),
-    host: ?host.HostInterface,
-    storage_injector: ?*StorageInjector,
-    allocator: std.mem.Allocator,
+// src/tracer/minimal_evm.zig
+storage: std.AutoHashMap(StorageSlotKey, u256),
+transient_storage: std.AutoHashMap(StorageSlotKey, u256),
+original_storage: std.AutoHashMap(StorageSlotKey, u256),
 
-    pub fn get(self: *Storage, address: Address, slot: u256) !u256 {
-        const key = StorageSlotKey{ .address = address.bytes, .slot = slot };
+pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
+    if (self.host) |host| {
+        return host.getStorage(address, slot);
+    }
+    const key = StorageSlotKey{ .address = address, .slot = slot };
+    return self.storage.get(key) orelse 0;
+}
 
-        // Check injector cache first (for async fetching)
-        if (self.storage_injector) |injector| {
-            if (injector.storage_cache.get(key)) |value| {
-                return value;
-            }
-            // Request async fetch
-            self.async_data_request = .{ .storage = .{ .address = address, .slot = slot } };
-            return error.NeedAsyncData;
-        }
+pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) Error!void {
+    if (self.host) |host| {
+        host.setStorage(address, slot, value) catch {
+            return Error.StorageError;
+        };
+        return;
+    }
+    const key = StorageSlotKey{ .address = address, .slot = slot };
 
-        // Try local storage
-        if (self.storage.get(key)) |value| {
-            return value;
-        }
-
-        // Try host interface
-        if (self.host) |h| {
-            return h.getStorage(address, slot);
-        }
-
-        return 0;  // Empty slot
+    // Track original value on first write in transaction
+    if (!self.original_storage.contains(key)) {
+        const current = self.storage.get(key) orelse 0;
+        self.original_storage.put(key, current) catch {
+            return Error.StorageError;
+        };
     }
 
-    pub fn set(self: *Storage, address: Address, slot: u256, value: u256) !void {
-        const key = StorageSlotKey{ .address = address.bytes, .slot = slot };
-        try self.storage.put(key, value);
-
-        // Notify injector if present
-        if (self.storage_injector) |injector| {
-            injector.markStorageDirty(address, slot);
-        }
-    }
-};
+    self.storage.put(key, value) catch {
+        return Error.StorageError;
+    };
+}
 ```
 
 ### Performance Storage Implementation
@@ -206,28 +198,35 @@ pub const COLD_SLOAD = 2100;
 pub const WARM_SLOAD = 100;
 ```
 
-### Mini Implementation
+### MinimalEvm Implementation
 
 ```zig
-// mini/src/evm.zig
-warm_addresses: std.AutoHashMap(Address, void),
-warm_storage_slots: std.AutoHashMap(StorageSlotKey, void),
-
-pub fn accessAddress(self: *Self, address: Address) u64 {
-    if (self.warm_addresses.contains(address)) {
-        return WARM_ACCOUNT_ACCESS;  // 100
+// src/tracer/minimal_evm.zig
+pub fn access_address(self: *Self, address: Address) !u64 {
+    if (self.hardfork.isBefore(.BERLIN)) {
+        @branchHint(.cold);
+        return GasConstants.CallCodeCost;
     }
-    try self.warm_addresses.put(address, {});
-    return COLD_ACCOUNT_ACCESS;  // 2600
+
+    const entry = try self.warm_addresses.getOrPut(self.allocator, address);
+    return if (entry.found_existing)
+        GasConstants.WarmStorageReadCost   // 100
+    else
+        GasConstants.ColdAccountAccessCost; // 2600
 }
 
-pub fn accessStorageSlot(self: *Self, address: Address, slot: u256) u64 {
-    const key = StorageSlotKey{ .address = address.bytes, .slot = slot };
-    if (self.warm_storage_slots.contains(key)) {
-        return WARM_SLOAD;  // 100
+pub fn access_storage_slot(self: *Self, contract_address: Address, slot: u256) !u64 {
+    if (self.hardfork.isBefore(.BERLIN)) {
+        @branchHint(.cold);
+        return GasConstants.SloadGas;
     }
-    try self.warm_storage_slots.put(key, {});
-    return COLD_SLOAD;  // 2100
+
+    const key = StorageSlotKey{ .address = contract_address, .slot = slot };
+    const entry = try self.warm_storage_slots.getOrPut(self.allocator, key);
+    return if (entry.found_existing)
+        GasConstants.WarmStorageReadCost // 100
+    else
+        GasConstants.ColdSloadCost;      // 2100
 }
 ```
 
@@ -285,56 +284,47 @@ pub fn AccessList(comptime config: AccessListConfig) type {
 ### Implementation
 
 ```zig
-// mini/src/storage.zig
-pub fn getTransient(self: *Storage, address: Address, slot: u256) u256 {
-    const key = StorageSlotKey{ .address = address.bytes, .slot = slot };
-    return self.transient.get(key) orelse 0;
+// src/tracer/minimal_evm.zig
+pub fn get_transient_storage(self: *Self, address: Address, slot: u256) u256 {
+    const key = StorageSlotKey{ .address = address, .slot = slot };
+    return self.transient_storage.get(key) orelse 0;
 }
 
-pub fn setTransient(self: *Storage, address: Address, slot: u256, value: u256) !void {
-    const key = StorageSlotKey{ .address = address.bytes, .slot = slot };
-    try self.transient.put(key, value);
-}
-
-// Cleared at transaction start
-pub fn clearTransient(self: *Storage) void {
-    self.transient.clearRetainingCapacity();
+pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) Error!void {
+    const key = StorageSlotKey{ .address = address, .slot = slot };
+    self.transient_storage.put(key, value) catch {
+        return Error.StorageError;
+    };
 }
 ```
 
 ### Handler
 
 ```zig
-// mini/src/instructions/handlers_storage.zig
-pub fn tload(frame: *FrameType) EvmError!void {
-    // Always warm access (100 gas)
-    try frame.consumeGas(GasConstants.WarmStorageReadCost);
+// src/tracer/minimal_frame.zig (MinimalFrame.executeOpcode)
+// TLOAD
+0x5c => {
+    // EIP-1153: TLOAD was introduced in Cancun hardfork
+    if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
 
-    const slot = try frame.popStack();
-    const evm = frame.getEvm();
-    const value = evm.storage.getTransient(frame.address, slot);
+    try self.consumeGas(GasConstants.WarmStorageReadCost);
+    const key = try self.popStack();
+    const value = evm.get_transient_storage(self.address, key);
+    try self.pushStack(value);
+    self.pc += 1;
+},
 
-    try frame.pushStack(value);
-    frame.pc += 1;
-}
+// TSTORE
+0x5d => {
+    // EIP-1153: TSTORE was introduced in Cancun hardfork
+    if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
 
-pub fn tstore(frame: *FrameType) EvmError!void {
-    // Check static context
-    if (frame.is_static) {
-        return error.WriteInStaticContext;
-    }
-
-    // Always warm access (100 gas)
-    try frame.consumeGas(GasConstants.WarmStorageReadCost);
-
-    const slot = try frame.popStack();
-    const value = try frame.popStack();
-
-    const evm = frame.getEvm();
-    try evm.storage.setTransient(frame.address, slot, value);
-
-    frame.pc += 1;
-}
+    try self.consumeGas(GasConstants.WarmStorageReadCost);
+    const key = try self.popStack();
+    const value = try self.popStack();
+    try evm.set_transient_storage(self.address, key, value);
+    self.pc += 1;
+},
 ```
 
 ## SSTORE Gas Calculation (EIP-2200)
@@ -342,63 +332,47 @@ pub fn tstore(frame: *FrameType) EvmError!void {
 Complex gas calculation based on original, current, and new values:
 
 ```zig
-// mini/src/instructions/handlers_storage.zig
-pub fn sstore(frame: *FrameType) EvmError!void {
-    const evm = frame.getEvm();
+// src/tracer/minimal_frame.zig (MinimalFrame.executeOpcode)
+// SSTORE
+0x55 => {
+    const key = try self.popStack();
+    const value = try self.popStack();
 
-    // Pop key and value
-    const slot = try frame.popStack();
-    const new_value = try frame.popStack();
-
-    // Get current and original values
-    const current_value = try evm.storage.get(frame.address, slot);
-    const original_value = evm.storage.getOriginal(frame.address, slot) orelse current_value;
-
-    // Calculate gas (EIP-2200)
-    var gas_cost: u64 = 0;
-
-    // Cold access cost
-    if (!evm.warm_storage_slots.contains(.{ .address = frame.address.bytes, .slot = slot })) {
-        gas_cost += GasConstants.ColdSloadCost;  // 2100
-        try evm.warm_storage_slots.put(.{ .address = frame.address.bytes, .slot = slot }, {});
+    // EIP-2200 (Istanbul+): fail when gas left is at or below the stipend.
+    if (fork_gas.sstoreHasSentry(self.hardfork) and self.gas_remaining <= @as(i64, @intCast(fork_gas.sstore_sentry_gas))) {
+        self.gas_remaining = 0;
+        return error.OutOfGas;
     }
 
-    // Value change costs
-    if (original_value == current_value and current_value != new_value) {
-        if (original_value == 0) {
-            gas_cost += GasConstants.SstoreSetGas;  // 20000
-        } else {
-            gas_cost += GasConstants.SstoreResetGas - GasConstants.ColdSloadCost;  // 2900
-        }
-    } else {
-        gas_cost += GasConstants.WarmStorageReadCost;  // 100
+    // Get current and original values for gas calculation
+    const current_value = evm.get_storage(self.address, key);
+    const original_value = evm.get_original_storage(self.address, key);
+
+    // EIP-2929: Check if storage slot is cold and warm it
+    const access_cost = try evm.access_storage_slot(self.address, key);
+    const is_cold = fork_gas.hasAccessLists(self.hardfork) and access_cost == GasConstants.ColdSloadCost;
+
+    // Same fork-aware metering as the Frame handler.
+    const cost = fork_gas.sstoreCost(self.hardfork, original_value, current_value, value, is_cold);
+    try self.consumeGas(cost.gas);
+
+    if (cost.refund > 0) {
+        evm.add_refund(@intCast(cost.refund));
+    } else if (cost.refund < 0) {
+        // Takes back a refund granted earlier in this transaction.
+        const taken_back: u64 = @intCast(-cost.refund);
+        if (taken_back > evm.gas_refund) return error.InvalidOpcode;
+        evm.gas_refund -= taken_back;
     }
 
-    // Refund calculation
-    if (new_value != current_value) {
-        if (original_value != 0 and current_value != 0 and new_value == 0) {
-            // Clearing slot: refund
-            evm.gas_refund += GasConstants.SstoreClearRefund;  // 4800
-        }
-        if (original_value != 0 and current_value == 0) {
-            // Re-setting cleared slot: reduce refund
-            evm.gas_refund -= GasConstants.SstoreClearRefund;
-        }
-        if (original_value == new_value) {
-            // Resetting to original: refund
-            if (original_value == 0) {
-                evm.gas_refund += GasConstants.SstoreSetGas - GasConstants.WarmStorageReadCost;
-            } else {
-                evm.gas_refund += GasConstants.SstoreResetGas - GasConstants.WarmStorageReadCost;
-            }
-        }
-    }
-
-    try frame.consumeGas(gas_cost);
-    try evm.storage.set(frame.address, slot, new_value);
-    frame.pc += 1;
-}
+    try evm.set_storage(self.address, key, value);
+    self.pc += 1;
+},
 ```
+
+`fork_gas.sstoreCost` in `src/frame/fork_gas.zig` holds the EIP-2200, EIP-2929
+and EIP-3529 cost and refund rules; MinimalFrame and the performance Frame
+share it.
 
 ## Snapshot/Restore for Nested Calls
 
@@ -444,13 +418,13 @@ pub const StorageSlotKey = struct {
 
 ## Memory Management
 
-### Mini: Standard Allocator
+### MinimalEvm: Standard Allocator
 
 ```zig
 allocator: std.mem.Allocator,
 
-// Direct HashMap allocation
-storage: std.AutoHashMap(StorageSlotKey, u256).init(allocator),
+// Direct HashMap allocation (src/tracer/minimal_evm.zig)
+storage: std.AutoHashMap(StorageSlotKey, u256),
 ```
 
 ### Performance: Arena Allocator

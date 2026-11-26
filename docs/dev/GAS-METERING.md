@@ -229,60 +229,56 @@ fn memoryExpansionCost(current_size: u64, new_size: u64) u64 {
 ### Code Implementation
 
 ```zig
-// mini/src/instructions/handlers_storage.zig
-pub fn calculateSstoreGas(
-    original: u256,
-    current: u256,
-    new_value: u256,
-    is_cold: bool,
-) struct { gas: u64, refund: i64 } {
+// src/frame/fork_gas.zig (shared by Frame and MinimalFrame)
+pub fn sstoreCost(hardfork: Hardfork, original: u256, current: u256, new: u256, is_cold: bool) SstoreCost {
+    if (sstoreScheme(hardfork) == .legacy) {
+        const gas: u64 = if (current == 0 and new != 0) sstore_set_gas else sstore_reset_gas;
+        const refund: i64 = if (current != 0 and new == 0) 15000 else 0;
+        return .{ .gas = gas, .refund = refund };
+    }
+
+    const berlin = hardfork.isAtLeast(.BERLIN);
+    const noop_gas = sstoreNoopGas(hardfork);
+    // EIP-2929 moved the cold-read part of a reset out of SSTORE_RESET_GAS.
+    const reset_gas: u64 = if (berlin) sstore_reset_gas - cold_sload_cost else sstore_reset_gas;
+    const clear_refund: i64 = @intCast(sstoreClearRefund(hardfork));
+
     var gas: u64 = 0;
     var refund: i64 = 0;
 
-    // Cold access cost
-    if (is_cold) {
-        gas += 2100;  // COLD_SLOAD
-    }
+    if (berlin and is_cold) gas += cold_sload_cost;
 
-    // No change: warm access only
-    if (current == new_value) {
-        gas += 100;  // WARM_STORAGE_READ
+    if (current == new) {
+        gas += noop_gas;
         return .{ .gas = gas, .refund = 0 };
     }
 
-    // Value changed
     if (original == current) {
-        // First change in transaction
         if (original == 0) {
-            gas += 20000;  // SSTORE_SET (0 → non-zero)
+            gas += sstore_set_gas;
         } else {
-            gas += 2900;   // SSTORE_RESET (non-zero → different non-zero)
+            gas += reset_gas;
+            if (new == 0) refund += clear_refund;
         }
-    } else {
-        gas += 100;  // WARM_STORAGE_READ (already modified)
+        return .{ .gas = gas, .refund = refund };
     }
 
-    // Refund calculations
+    // Dirty slot: already changed earlier in this transaction.
+    gas += noop_gas;
     if (original != 0) {
-        if (current != 0 and new_value == 0) {
-            // Clearing a slot
-            refund += 4800;  // SSTORE_CLEARS_SCHEDULE (EIP-3529)
-        }
         if (current == 0) {
-            // Re-setting a cleared slot
-            refund -= 4800;
+            refund -= clear_refund;
+        } else if (new == 0) {
+            refund += clear_refund;
         }
     }
-
-    if (original == new_value) {
-        // Resetting to original value
+    if (original == new) {
         if (original == 0) {
-            refund += 19900;  // SSTORE_SET - WARM
+            refund += @intCast(sstore_set_gas - noop_gas);
         } else {
-            refund += 2800;   // SSTORE_RESET - COLD - WARM
+            refund += @intCast(reset_gas - noop_gas);
         }
     }
-
     return .{ .gas = gas, .refund = refund };
 }
 ```
@@ -565,25 +561,26 @@ pub fn applyRefundCap(gas_used: u64, gas_refund: i64, hardfork: Hardfork) u64 {
 
 ## Gas Metering Patterns
 
-### Mini: Per-Operation
+### MinimalEvm: Per-Operation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      MINI GAS METERING PATTERN                              │
+│                      MINIMALEVM GAS METERING PATTERN                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Every opcode handler:                                                     │
 │                                                                             │
-│   pub fn add(frame: *FrameType) EvmError!void {                            │
-│       try frame.consumeGas(3);  // ← Check EVERY operation                 │
+│   0x01 => {  // ADD, in MinimalFrame.executeOpcode                          │
+│       try self.consumeGas(3);  // ← Check EVERY operation                   │
 │       // ... operation logic                                                │
-│   }                                                                         │
+│   },                                                                        │
 │                                                                             │
-│   pub fn consumeGas(self: *Self, amount: u64) EvmError!void {              │
-│       if (self.gas_remaining < amount) {                                   │
-│           return error.OutOfGas;  // ← Branch on every op                  │
+│   pub fn consumeGas(self: *Self, amount: u64) MinimalEvmError!void {        │
+│       if (self.gas_remaining < @as(i64, @intCast(amount))) {                │
+│           self.gas_remaining = 0;                                           │
+│           return error.OutOfGas;  // ← Branch on every op                   │
 │       }                                                                     │
-│       self.gas_remaining -= amount;                                        │
+│       self.gas_remaining -= @intCast(amount);                               │
 │   }                                                                         │
 │                                                                             │
 │   Cost: 1 comparison + 1 subtraction + 1 branch per opcode                 │

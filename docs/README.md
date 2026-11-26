@@ -1,6 +1,6 @@
 # Guillotine Documentation
 
-Guillotine is a high-performance Ethereum Virtual Machine (EVM) implementation in Zig, featuring two distinct execution engines optimized for different use cases.
+Guillotine is a high-performance Ethereum Virtual Machine (EVM) implementation in Zig. The repository contains two execution engines: the dispatch-based performance EVM in `src/`, and MinimalEvm, a sequential reference interpreter in `src/tracer/` that differential tests compare against.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -12,14 +12,14 @@ Guillotine is a high-performance Ethereum Virtual Machine (EVM) implementation i
 │   ▼                                                                         │
 │   ┌───────────────────────────────────────────────────────────────────┐    │
 │   │                                                                   │    │
-│   │      MINI EVM                    PERFORMANCE EVM                  │    │
-│   │      ─────────                   ───────────────                  │    │
+│   │      MINIMALEVM                  PERFORMANCE EVM                  │    │
+│   │      ──────────                  ───────────────                  │    │
 │   │                                                                   │    │
 │   │      Sequential         OR       Dispatch-based                   │    │
 │   │      Interpreter                 Tail-call Chain                  │    │
 │   │                                                                   │    │
 │   │      Clarity-first              Speed-first                       │    │
-│   │      ~25KB core                 ~270KB core                       │    │
+│   │      Reference oracle           Production engine                 │    │
 │   │                                                                   │    │
 │   └───────────────────────────────────────────────────────────────────┘    │
 │   │                                                                         │
@@ -52,7 +52,7 @@ zig build -Devm-hardfork=CANCUN
 | I want to... | Go to |
 |--------------|-------|
 | Understand the architecture | [dev/ARCHITECTURE.md](./dev/ARCHITECTURE.md) |
-| Compare Mini vs Performance | [dev/EXECUTION-MODELS.md](./dev/EXECUTION-MODELS.md) |
+| Compare MinimalEvm vs Performance | [dev/EXECUTION-MODELS.md](./dev/EXECUTION-MODELS.md) |
 | Learn about storage/state | [dev/STATE-MANAGEMENT.md](./dev/STATE-MANAGEMENT.md) |
 | Understand gas calculation | [dev/GAS-METERING.md](./dev/GAS-METERING.md) |
 | Run or write tests | [dev/TESTING.md](./dev/TESTING.md) |
@@ -61,17 +61,17 @@ zig build -Devm-hardfork=CANCUN
 | Contribute code | [dev/CONTRIBUTING.md](./dev/CONTRIBUTING.md) |
 | Deep dive into dispatch | [performance/DISPATCH.md](./performance/DISPATCH.md) |
 | Understand opcode fusion | [performance/SYNTHETIC-OPCODES.md](./performance/SYNTHETIC-OPCODES.md) |
-| Learn Mini EVM specifics | [mini/README.md](./mini/README.md) |
+| Read the standalone reference EVM | [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini) (separate repository) |
 
 ## Two EVM Implementations
 
-### Mini EVM (`mini/`)
+### MinimalEvm (`src/tracer/minimal_evm.zig`)
 
-A minimal, correct implementation using traditional sequential bytecode interpretation.
+A minimal, correct implementation using traditional sequential bytecode interpretation. The tracer and the differential tests in `test/differential` run it beside the performance EVM and compare results. The standalone, readable reference EVM lives in its own repository, [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          MINI EVM EXECUTION                                 │
+│                          MINIMALEVM EXECUTION                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   while (!stopped && pc < bytecode.len) {                                   │
@@ -86,9 +86,9 @@ A minimal, correct implementation using traditional sequential bytecode interpre
 ```
 
 - **Execution**: PC-based, reads bytecode per instruction
-- **Use Cases**: Testing, validation, learning EVM internals
+- **Use Cases**: Differential testing, validation, learning EVM internals
 - **Trade-off**: Clarity over raw performance
-- **Start here**: `mini/src/frame.zig`
+- **Start here**: `src/tracer/minimal_frame.zig` (`MinimalFrame.executeOpcode`)
 
 ### Performance EVM (`src/`)
 
@@ -119,15 +119,15 @@ An optimized implementation using dispatch-based execution with preprocessing.
 
 ## Key Architectural Differences
 
-| Aspect | Mini | Performance |
-|--------|------|-------------|
+| Aspect | MinimalEvm | Performance |
+|--------|------------|-------------|
 | Execution model | Sequential PC-based | Dispatch schedule + tail calls |
 | Bytecode handling | Per-instruction reads | Single preprocessing pass |
 | Stack operations | Bounds-checked every op | Unsafe ops after validation |
 | Gas checking | Per-operation | Per-basic-block batching |
 | Synthetic opcodes | None | 30+ fused patterns |
 | Branch prediction | ~50% (switch) | ~100% (direct calls) |
-| Code complexity | ~46 source files | ~158 source files |
+| Code size | 3 files (`minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig`) | Whole `src/` tree |
 
 ## Hardfork Support
 
@@ -155,23 +155,18 @@ docs/
 ├── dev/                   ← Developer deep dive documentation
 │   ├── README.md          Index with learning path
 │   ├── ARCHITECTURE.md    Unified architecture with diagrams
-│   ├── EXECUTION-MODELS.md   Side-by-side Mini vs Performance
+│   ├── EXECUTION-MODELS.md   Side-by-side MinimalEvm vs Performance
 │   ├── STATE-MANAGEMENT.md   Storage, journal, warm/cold
 │   ├── GAS-METERING.md    Gas calculation with decision trees
 │   ├── TESTING.md         Test organization and debugging
 │   ├── HARDFORKS.md       Complete opcode reference
 │   └── CONTRIBUTING.md    Development workflow
 │
-├── performance/           ← Performance EVM specifics
-│   ├── README.md          Performance overview
-│   ├── DISPATCH.md        Dispatch execution model
-│   ├── SYNTHETIC-OPCODES.md   Opcode fusion patterns
-│   └── TRACER.md          Execution synchronization
-│
-└── mini/                  ← Mini EVM specifics
-    ├── README.md          Mini overview
-    ├── typescript/        TypeScript port docs
-    └── bytecode-port-report.md
+└── performance/           ← Performance EVM specifics
+    ├── README.md          Performance overview
+    ├── DISPATCH.md        Dispatch execution model
+    ├── SYNTHETIC-OPCODES.md   Opcode fusion patterns
+    └── TRACER.md          Execution synchronization
 ```
 
 ## Build Commands
@@ -183,7 +178,6 @@ docs/
 | `zig build specs` | Run Ethereum spec tests |
 | `zig build test-unit` | Run unit tests |
 | `zig build test-opcodes` | Run opcode differential tests |
-| `zig build wasm` | Build WASM library |
 
 ## Project Conventions
 
@@ -198,7 +192,7 @@ See [CLAUDE.md](../CLAUDE.md) for complete project instructions.
 ## Links
 
 - [CLAUDE.md](../CLAUDE.md) - Project instructions and conventions
-- [mini/CLAUDE.md](../mini/CLAUDE.md) - Mini EVM specific instructions
+- [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini) - Standalone reference EVM (separate repository)
 - [GitHub Repository](https://github.com/evmts/guillotine)
 - [Ethereum Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf)
 - [EVM.codes](https://www.evm.codes/)

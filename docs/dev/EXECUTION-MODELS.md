@@ -1,6 +1,6 @@
 # Execution Models Comparison
 
-This document provides a detailed side-by-side comparison of the Mini and Performance EVM execution models with visual diagrams and state traces.
+This document provides a detailed side-by-side comparison of MinimalEvm (the reference interpreter in `src/tracer/`) and the performance EVM, with visual diagrams and state traces. The standalone, readable reference EVM lives in its own repository, [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ## Overview
 
@@ -9,7 +9,7 @@ This document provides a detailed side-by-side comparison of the Mini and Perfor
 │                         EXECUTION MODEL COMPARISON                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   MINI EVM                                 PERFORMANCE EVM                  │
+│   MINIMALEVM                                 PERFORMANCE EVM                │
 │   ────────                                 ───────────────                  │
 │                                                                             │
 │   ┌─────────────────────┐                  ┌─────────────────────┐         │
@@ -38,20 +38,20 @@ This document provides a detailed side-by-side comparison of the Mini and Perfor
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Aspect | Mini EVM | Performance EVM |
+| Aspect | MinimalEvm | Performance EVM |
 |--------|----------|-----------------|
 | Model | Sequential PC-based | Dispatch schedule with tail calls |
 | Philosophy | Clarity & correctness | Speed via preprocessing |
-| Location | `mini/src/` | `src/` |
-| Core files | `evm.zig`, `frame.zig` | `evm.zig`, `frame/frame.zig`, `preprocessor/` |
+| Location | `src/tracer/` | `src/` |
+| Core files | `minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` | `evm.zig`, `frame/frame.zig`, `preprocessor/` |
 
 ## Execution Loop
 
-### Mini: Traditional While Loop
+### MinimalEvm: Traditional While Loop
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          MINI EVM: WHILE LOOP                               │
+│                          MINIMALEVM: WHILE LOOP                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   PC = 0                                                                    │
@@ -88,28 +88,22 @@ This document provides a detailed side-by-side comparison of the Mini and Perfor
 ```
 
 ```zig
-// mini/src/frame.zig:540-553
-pub fn execute(self: *Self) EvmError!void {
+// src/tracer/minimal_frame.zig
+pub fn execute(self: *Self) MinimalEvmError!void {
     // Simple while loop - easy to understand
-    while (!self.stopped and !self.reverted and self.pc < self.bytecode.len()) {
+    while (!self.stopped and !self.reverted and self.pc < self.bytecode.len) {
         try self.step();
     }
 }
 
-pub fn step(self: *Self) EvmError!void {
-    // Read opcode from bytecode
-    const opcode = self.bytecode.getOpcode(self.pc) orelse {
-        return error.InvalidOpcode;
-    };
-
-    // Dispatch via switch statement (256 cases)
-    switch (opcode) {
-        0x00 => try SystemHandlers.stop(self),
-        0x01 => try ArithmeticHandlers.add(self),
-        0x02 => try ArithmeticHandlers.mul(self),
-        // ... all 256 opcodes
-        else => return error.InvalidOpcode,
+pub fn step(self: *Self) MinimalEvmError!void {
+    if (self.stopped or self.reverted or self.pc >= self.bytecode.len) {
+        return;
     }
+    // Read opcode from bytecode
+    const opcode = self.getCurrentOpcode() orelse return;
+    // Dispatch via one switch statement over every opcode
+    try self.executeOpcode(opcode);
 }
 ```
 
@@ -205,11 +199,11 @@ pub fn interpret(
 
 ## Handler Implementation
 
-### Mini: Simple Returns
+### MinimalEvm: Simple Returns
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MINI HANDLER: ADD                                   │
+│                         MINIMALEVM HANDLER: ADD                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   ENTRY                                                                     │
@@ -261,26 +255,19 @@ pub fn interpret(
 ```
 
 ```zig
-// mini/src/instructions/handlers_arithmetic.zig
-pub fn add(frame: *FrameType) FrameType.EvmError!void {
-    // 1. Gas check
-    try frame.consumeGas(GasConstants.GasFastestStep);  // 3 gas
-
+// src/tracer/minimal_frame.zig (MinimalFrame.executeOpcode)
+// ADD
+0x01 => {
+    // 1. Gas check (3 gas)
+    try self.consumeGas(GasConstants.GasFastestStep);
     // 2. Stack operations (bounds checked)
-    const a = try frame.popStack();
-    const b = try frame.popStack();
-
-    // 3. Compute result
-    const result = a +% b;  // Wrapping add
-
-    // 4. Push result (bounds checked)
-    try frame.pushStack(result);
-
-    // 5. Advance PC
-    frame.pc += 1;
-
-    // 6. Return to execute loop
-}
+    const a = try self.popStack();
+    const b = try self.popStack();
+    // 3. Compute and push result (wrapping add, bounds checked)
+    try self.pushStack(a +% b);
+    // 4. Advance PC, then return to the execute loop
+    self.pc += 1;
+},
 ```
 
 ### Performance: Tail-Call Pattern
@@ -351,11 +338,11 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 
 ## Execution Trace: PUSH1 5, PUSH1 3, ADD
 
-### Mini EVM Trace
+### MinimalEvm Trace
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        MINI EVM EXECUTION TRACE                             │
+│                        MINIMALEVM EXECUTION TRACE                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Bytecode: [0x60, 0x05, 0x60, 0x03, 0x01]                                  │
@@ -499,11 +486,11 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 
 ## Stack Operations
 
-### Mini: Bounds-Checked ArrayList
+### MinimalEvm: Bounds-Checked ArrayList
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      MINI STACK: ARRAYLIST                                  │
+│                      MINIMALEVM STACK: ARRAYLIST                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Structure:                                                                │
@@ -533,10 +520,10 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 ```
 
 ```zig
-// mini/src/frame.zig:161-176
+// src/tracer/minimal_frame.zig
 
 // Every push checks overflow
-pub fn pushStack(self: *Self, value: u256) EvmError!void {
+pub fn pushStack(self: *Self, value: u256) MinimalEvmError!void {
     if (self.stack.items.len >= 1024) {
         return error.StackOverflow;
     }
@@ -544,7 +531,7 @@ pub fn pushStack(self: *Self, value: u256) EvmError!void {
 }
 
 // Every pop checks underflow
-pub fn popStack(self: *Self) EvmError!u256 {
+pub fn popStack(self: *Self) MinimalEvmError!u256 {
     if (self.stack.items.len == 0) {
         return error.StackUnderflow;
     }
@@ -619,11 +606,11 @@ pub inline fn binary_op_unsafe(
 
 ## Gas Metering
 
-### Mini: Per-Operation
+### MinimalEvm: Per-Operation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       MINI GAS: PER-OPERATION                               │
+│                       MINIMALEVM GAS: PER-OPERATION                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Bytecode: PUSH1 5, PUSH1 3, ADD                                          │
@@ -684,11 +671,11 @@ pub inline fn binary_op_unsafe(
 
 ## Memory Access
 
-### Mini: Sparse HashMap
+### MinimalEvm: Sparse HashMap
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      MINI MEMORY: SPARSE HASHMAP                            │
+│                      MINIMALEVM MEMORY: SPARSE HASHMAP                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Structure: HashMap(u32 → u8)                                              │
@@ -713,19 +700,19 @@ pub inline fn binary_op_unsafe(
 ```
 
 ```zig
-// mini/src/frame.zig
-memory: std.AutoHashMap(u32, u8),  // Only non-zero bytes stored
+// src/tracer/minimal_frame.zig
+memory: std.AutoHashMap(u32, u8),  // Only written bytes stored
 
 pub fn readMemory(self: *Self, offset: u32) u8 {
     return self.memory.get(offset) orelse 0;  // Default to 0
 }
 
-pub fn writeMemory(self: *Self, offset: u32, value: u8) !void {
+pub fn writeMemory(self: *Self, offset: u32, value: u8) MinimalEvmError!void {
     try self.memory.put(offset, value);
-    // Update memory_size for expansion tracking
-    if (offset >= self.memory_size) {
-        self.memory_size = wordAlignedSize(offset + 1);
-    }
+    // EVM memory expands to word-aligned (32-byte) boundaries
+    const end_offset = std.math.cast(u64, offset + 1) orelse return error.OutOfBounds;
+    const word_aligned_size = wordAlignedSize(end_offset);
+    if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
 }
 ```
 
@@ -794,7 +781,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
 │                      BRANCH PREDICTION COMPARISON                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   MINI EVM: 256-way switch                                                  │
+│   MINIMALEVM: 256-way switch                                                │
 │   ──────────────────────────                                                │
 │                                                                             │
 │   switch (opcode) {          ← CPU: "Which of 256 branches?"               │
@@ -821,7 +808,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
 │   ┌─────────────────────────┬───────────┬───────────────────────────────┐  │
 │   │ Model                   │ Branches  │ Prediction Success           │  │
 │   ├─────────────────────────┼───────────┼───────────────────────────────┤  │
-│   │ Mini (switch)           │ 256       │ ~50% (random)                 │  │
+│   │ MinimalEvm (switch)           │ 256       │ ~50% (random)           │  │
 │   │ Performance (dispatch)  │ 1         │ ~100% (always same pattern)   │  │
 │   └─────────────────────────┴───────────┴───────────────────────────────┘  │
 │                                                                             │
@@ -830,18 +817,12 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
 ## Performance Comparison
 
-| Metric | Mini | Performance | Ratio |
-|--------|------|-------------|-------|
-| Simple arithmetic | 1.0x | 2-3x faster | 2-3x |
-| Storage operations | 1.0x | 3-5x faster | 3-5x |
-| Contract calls | 1.0x | 5-10x faster | 5-10x |
-| Memory usage | Higher | Lower | ~0.7x |
-| Branch mispredictions | ~50% | ~0% | - |
-| Gas checks per block | N | 1 | Nx |
+MinimalEvm has no benchmark suite; it exists for correctness. The performance
+EVM's measured numbers live in the repository `README.md` and `bench/`.
 
 ## When to Use Each
 
-### Use Mini When:
+### Use MinimalEvm When:
 - Learning EVM internals (code is self-documenting)
 - Debugging execution issues (clear step-by-step flow)
 - Need clear, auditable code (no magic)
@@ -857,11 +838,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
 ## Code Size Comparison
 
-| Component | Mini | Performance |
-|-----------|------|-------------|
-| EVM orchestrator | 94KB | 270KB |
-| Frame | 25KB | 50KB |
-| Handlers | ~18K lines | ~18K lines |
-| Storage | 16KB | 88KB + 34KB |
-| Preprocessor | N/A | ~50KB |
-| Total files | ~46 | ~158 |
+| Component | MinimalEvm | Performance |
+|-----------|------------|-------------|
+| EVM orchestrator | `src/tracer/minimal_evm.zig` (30 KB) | `src/evm.zig` (365 KB) |
+| Frame and handlers | `src/tracer/minimal_frame.zig` (108 KB, one opcode switch plus tests) | `src/frame/frame.zig` (31 KB) plus `src/instructions/handlers_*.zig` |
+| Host | `src/tracer/minimal_host.zig` (14 KB) | `src/storage/` (Database, Journal, AccessList) |
+| Preprocessor | None | `src/preprocessor/` |
+

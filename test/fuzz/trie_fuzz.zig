@@ -140,3 +140,18 @@ const seed_corpus: []const []const u8 = &.{
 test "fuzz Merkle Patricia Trie stateful model and cryptographic order-independence" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMerkleTrieModelAndOrderIndependence), .{ .corpus = seed_corpus });
 }
+
+// Found by `zig build fuzz-campaign` (seed 1795676789943920650, iteration 134),
+// minimized: put("ab"), put("ac"), put("ab") gave a different root than
+// inserting {"ab", "ac"} fresh, because overwriting a value stored inline in a
+// branch slot replaced it with a hashed empty-path leaf.
+test "trie_mpt: overwriting a key that ends at a branch slot keeps the root canonical" {
+    try fuzzMerkleTrieModelAndOrderIndependence({}, &.{ 0xd0, 0x81, 0x34, 0x49, 0x54, 0xd0, 0xa9, 0x91, 0xf2 });
+}
+
+// Found by `zig build fuzz-campaign` (seed 1795677607958640078, iteration 18),
+// minimized: put("abc"), put("ab"), put("ac"), delete("abc") left "ab" in a
+// hashed empty-path leaf where a fresh insert stores it inline.
+test "trie_mpt: deleting below a key that ends at a branch slot keeps the root canonical" {
+    try fuzzMerkleTrieModelAndOrderIndependence({}, &.{ 0x10, 0x92, 0xb0, 0xf0, 0xc1, 0x4e, 0x2d, 0x64, 0x1d, 0x9a, 0xd2, 0xd5 });
+}

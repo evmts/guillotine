@@ -50,6 +50,7 @@ export default defineConfig({
         { text: 'Getting started', link: '/getting-started' },
         { text: 'Project status', link: '/status' },
         { text: 'The stack', link: '/stack' },
+        { text: 'Changelog', link: '/changelog' },
       ],
     },
     {
@@ -66,7 +67,9 @@ export default defineConfig({
         { text: 'Configuring the EVM', link: '/guides/configuration' },
         { text: 'State and journaling', link: '/guides/state' },
         { text: 'Tracing and debugging', link: '/guides/tracing' },
+        { text: 'Benchmarks and native JIT', link: '/guides/benchmarks-and-jit' },
         { text: 'Language bindings', link: '/guides/bindings' },
+        { text: 'Publishing and releases', link: '/guides/publishing' },
       ],
     },
     {

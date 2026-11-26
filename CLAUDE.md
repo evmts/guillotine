@@ -176,7 +176,7 @@ const Contract = @import("../frame/contract.zig");
 
 ### Basic Commands
 - `zig build` - Build the project
-- `zig build test` - Run all tests (specs → integration → unit)
+- `zig build test` - Run the self-contained suites: unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz and jit (`specs` and `state-tests` need fetched fixtures and run separately)
 - `zig build specs` - Run Ethereum execution spec tests
 - `zig build test-integration` - Run integration tests from test/**/*.zig
 - `zig build test-unit` - Run unit tests from src/**/*.zig
@@ -217,6 +217,8 @@ zig build test-unit -Dtest-filter='stack'
 - `zig build test-layer2` - Layer 2 (Base & OP Stack) unit tests
 - `zig build test-bench` - Benchmark statistics, CLI and workload construction
 - `zig build test-fuzz` - Zig fuzz targets (corpus replay; add `--fuzz` on Linux)
+- `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=N --threads=M` - Multi-threaded havoc fuzz campaign; failing inputs land in `.fuzz-crashes/`
+- `zig build test-jit` - Native JIT tests (`src/jit`)
 - `zig build state-tests` - Official EEST state fixtures (`scripts/fetch-eest-fixtures.sh` first)
 - `zig build verify-smt` - Bitwuzla/Z3 SMT proofs (`model_pins.json` must exist; refresh with `--update-pins` after review)
 
@@ -461,7 +463,7 @@ Toolchain: Zig 0.17.1 (`zig version`), Rust/Cargo for `lib/voltaire` and
 Usage: `zig build [steps] [options]` (`zig build -l` lists every step)
 
 Key Steps:
-  test                         Run all tests (specs -> integration -> unit -> lib)
+  test                         Run unit, opcode, integration, layer 2, precompile, fusion, ModExp, fuzz and JIT tests
   specs                        Run Ethereum execution spec tests
   state-tests                  Run official pre-filled EEST state tests (Frontier through Osaka)
   test-integration             Run integration tests from test/root.zig

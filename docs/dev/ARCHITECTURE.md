@@ -41,22 +41,26 @@ Guillotine contains two complete EVM implementations:
 
 | Implementation | Location | Philosophy | Primary Use |
 |----------------|----------|------------|-------------|
-| **Mini** | `mini/src/` | Clarity over performance | Learning, testing, reference |
+| **MinimalEvm** | `src/tracer/minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` | Clarity over performance | Differential-testing reference |
 | **Performance** | `src/` | Speed via dispatch optimization | Production execution |
 
-Both are fully spec-compliant and support Frontier through Prague.
+The performance EVM passes every official EEST state test from Frontier
+through Osaka. MinimalEvm is the reference interpreter that the tracer and the
+differential tests in `test/differential` run beside it. The standalone,
+readable reference EVM lives in its own repository,
+[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ### Why Two Implementations?
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
-│   MINI EVM                              PERFORMANCE EVM                     │
-│   ────────                              ───────────────                     │
+│   MINIMALEVM                            PERFORMANCE EVM                     │
+│   ──────────                            ───────────────                     │
 │                                                                             │
 │   ┌─────────────────────────┐           ┌─────────────────────────┐        │
 │   │  • Easy to understand   │           │  • 2-10x faster         │        │
-│   │  • 46 source files      │           │  • 158 source files     │        │
+│   │  • 3 source files       │           │  • Whole src/ tree      │        │
 │   │  • Sequential execution │           │  • Dispatch execution   │        │
 │   │  • Per-op gas checking  │           │  • Per-block gas        │        │
 │   │  • No preprocessing     │           │  • Bytecode analysis    │        │
@@ -66,9 +70,9 @@ Both are fully spec-compliant and support Frontier through Prague.
 │                             │                                               │
 │                             ▼                                               │
 │              ┌─────────────────────────────┐                                │
-│              │  Same spec compliance        │                                │
-│              │  Same correctness            │                                │
-│              │  Same test suite             │                                │
+│              │  Same EVM semantics          │                                │
+│              │  Same final state            │                                │
+│              │  Compared by differential    │                                │
 │              └─────────────────────────────┘                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -80,29 +84,31 @@ Both are fully spec-compliant and support Frontier through Prague.
 
 The EVM orchestrator manages high-level execution: call stack, state access, gas refunds.
 
-#### Mini EVM (Traditional)
+#### MinimalEvm (Traditional)
 
 ```zig
-// mini/src/evm.zig - Complete state management in one file (94KB)
-pub fn Evm(comptime config: EvmConfig) type {
-    return struct {
-        // Account state
-        balances: std.AutoHashMap(Address, u256),
-        nonces: std.AutoHashMap(Address, u64),
-        code: std.AutoHashMap(Address, []const u8),
-        storage: Storage,
+// src/tracer/minimal_evm.zig (excerpt) - all state in plain hash maps
+pub const MinimalEvm = struct {
+    frames: std.ArrayList(*MinimalFrame),
+    storage: std.AutoHashMap(StorageSlotKey, u256),
+    transient_storage: std.AutoHashMap(StorageSlotKey, u256),
+    original_storage: std.AutoHashMap(StorageSlotKey, u256),
+    balances: std.AutoHashMap(Address, u256),
+    nonces: std.AutoHashMap(Address, u64),
+    code: std.AutoHashMap(Address, []const u8),
 
-        // Transaction state
-        gas_refund: i64,
-        warm_addresses: std.AutoHashMap(Address, void),
-        warm_storage_slots: std.AutoHashMap(StorageSlotKey, void),
+    // Transaction state
+    gas_refund: u64,
+    hardfork: Hardfork,
 
-        // Execution context
-        origin: Address,
-        gas_price: u256,
-        block_context: BlockContext,
-    };
-}
+    // Block and transaction context
+    chain_id: u64,
+    block_number: u64,
+    origin: Address,
+    gas_price: u256,
+    host: ?HostInterface,
+    // ...
+};
 ```
 
 #### Performance EVM (Modular)
@@ -160,16 +166,17 @@ The Frame manages a single call's execution: stack, memory, gas, bytecode.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Mini Frame
+#### MinimalFrame
 
 ```zig
-// mini/src/frame.zig:50-70
+// src/tracer/minimal_frame.zig (MinimalFrame fields, excerpt)
 stack: std.ArrayList(u256),           // Bounds-checked every operation
 memory: std.AutoHashMap(u32, u8),     // Sparse byte storage
 memory_size: u32,
 pc: u32,                               // Program counter into bytecode
 gas_remaining: i64,
-bytecode: Bytecode,                    // With JUMPDEST analysis
+bytecode: []const u8,
+valid_jumpdests: std.array_hash_map.Auto(u32, void), // JUMPDEST analysis
 caller: Address,
 address: Address,
 value: u256,
@@ -204,7 +211,7 @@ instruction_counter: LoopSafetyCounter,
 Stack Growth Direction
 ──────────────────────
 
-MINI EVM: Upward growth (ArrayList)    PERFORMANCE: Downward growth (Array)
+MINIMALEVM: Upward growth (ArrayList)  PERFORMANCE: Downward growth (Array)
 ──────────────────────────────────     ─────────────────────────────────────
 
     Index 1023 ─┐                           Index 0 ─┐
@@ -224,18 +231,18 @@ push: items.append(value)              push: stack_ptr -= 1; data[stack_ptr] = v
 pop:  items.len -= 1                   pop:  stack_ptr += 1; return data[stack_ptr-1]
 ```
 
-#### Mini Stack (ArrayList)
+#### MinimalFrame Stack (ArrayList)
 
 ```zig
-// mini/src/frame.zig:161-176
-pub fn pushStack(self: *Self, value: u256) EvmError!void {
+// src/tracer/minimal_frame.zig
+pub fn pushStack(self: *Self, value: u256) MinimalEvmError!void {
     if (self.stack.items.len >= 1024) {
         return error.StackOverflow;  // Check every push
     }
     try self.stack.append(self.allocator, value);
 }
 
-pub fn popStack(self: *Self) EvmError!u256 {
+pub fn popStack(self: *Self) MinimalEvmError!u256 {
     if (self.stack.items.len == 0) {
         return error.StackUnderflow;  // Check every pop
     }
@@ -281,11 +288,11 @@ pub fn Stack(comptime config: StackConfig) type {
 
 ## Execution Flow
 
-### Mini EVM: Sequential Interpretation
+### MinimalEvm: Sequential Interpretation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MINI EVM EXECUTION LOOP                             │
+│                       MINIMALEVM EXECUTION LOOP                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Bytecode: [60 05 60 03 01 00]  (PUSH1 5, PUSH1 3, ADD, STOP)             │
@@ -320,25 +327,23 @@ pub fn Stack(comptime config: StackConfig) type {
 ```
 
 ```zig
-// mini/src/frame.zig:540-553
-pub fn execute(self: *Self) EvmError!void {
-    while (!self.stopped and !self.reverted and self.pc < self.bytecode.len()) {
+// src/tracer/minimal_frame.zig
+pub fn execute(self: *Self) MinimalEvmError!void {
+    while (!self.stopped and !self.reverted and self.pc < self.bytecode.len) {
         try self.step();
     }
 }
 
-pub fn step(self: *Self) EvmError!void {
-    const opcode = self.bytecode.getOpcode(self.pc) orelse {
-        return error.InvalidOpcode;
-    };
-
-    // Giant switch statement - 256 cases
-    switch (opcode) {
-        0x01 => try ArithmeticHandlers.add(self),
-        0x02 => try ArithmeticHandlers.mul(self),
-        // ... all 256 opcodes
+pub fn step(self: *Self) MinimalEvmError!void {
+    if (self.stopped or self.reverted or self.pc >= self.bytecode.len) {
+        return;
     }
+    const opcode = self.getCurrentOpcode() orelse return;
+    try self.executeOpcode(opcode);
 }
+
+// executeOpcode is one switch over every opcode, with each case inline:
+//     0x01 => { try self.consumeGas(...); ...; self.pc += 1; },
 ```
 
 ### Performance EVM: Dispatch Execution
@@ -860,7 +865,7 @@ handlers_jump_synthetic.zig        // Static jump resolution
 
 ## Memory Allocation
 
-### Mini: Standard Allocator
+### MinimalEvm: Standard Allocator
 
 ```zig
 // Uses provided allocator directly
@@ -919,17 +924,15 @@ pub fn init(allocator: std.mem.Allocator, ...) Error!Self {
 
 ## Configuration
 
-Both implementations use compile-time configuration:
+The performance EVM takes a comptime configuration. MinimalEvm takes its
+hardfork at runtime through `MinimalEvm.setHardfork` (default `Hardfork.DEFAULT`).
 
 ```zig
-// Mini
-pub const EvmConfig = struct {
-    hardfork: Hardfork = .CANCUN,
-    gas_metering: bool = true,
-    // ...
-};
+// MinimalEvm (runtime)
+var minimal = try MinimalEvm.init(allocator);
+minimal.setHardfork(.OSAKA);
 
-// Performance
+// Performance (comptime)
 pub const FrameConfig = struct {
     WordType: type = u256,
     stack_size: usize = 1024,
@@ -943,8 +946,8 @@ pub const FrameConfig = struct {
 
 ## Key Architectural Differences Summary
 
-| Aspect | Mini | Performance |
-|--------|------|-------------|
+| Aspect | MinimalEvm | Performance |
+|--------|------------|-------------|
 | Execution | PC-based loop | Dispatch tail-calls |
 | Stack | `ArrayList` with checks | Cache-aligned array, unsafe ops |
 | Memory | Sparse `HashMap` | Word-aligned pages |
@@ -953,5 +956,4 @@ pub const FrameConfig = struct {
 | Fusion | None | 30+ synthetic opcodes |
 | Validation | Per-operation | Preprocessing |
 | Gas checking | Per-operation | Per-basic-block |
-| Files | ~46 | ~158 |
-| Total size | ~25KB core | ~270KB core |
+| Files | 3 in `src/tracer/` | Whole `src/` tree |

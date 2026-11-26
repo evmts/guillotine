@@ -10,6 +10,7 @@
 //! holding connection pointers across cleanup calls.
 
 const std = @import("std");
+const clock = @import("clock.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.connection_pool);
 
@@ -28,8 +29,8 @@ pub const PooledConnection = struct {
 
     pub fn init(allocator: Allocator) PooledConnection {
         return .{
-            .client = std.http.Client{ .allocator = allocator },
-            .last_used = std.time.milliTimestamp(),
+            .client = std.http.Client{ .allocator = allocator, .io = clock.io() },
+            .last_used = clock.milliTimestamp(),
             .in_use = false,
         };
     }
@@ -39,19 +40,19 @@ pub const PooledConnection = struct {
     }
 
     pub fn is_idle_expired(self: *const PooledConnection, timeout_ms: u64) bool {
-        const now = std.time.milliTimestamp();
+        const now = clock.milliTimestamp();
         const elapsed = @as(u64, @intCast(now - self.last_used));
         return !self.in_use and elapsed > timeout_ms;
     }
 
     pub fn mark_used(self: *PooledConnection) void {
         self.in_use = true;
-        self.last_used = std.time.milliTimestamp();
+        self.last_used = clock.milliTimestamp();
     }
 
     pub fn mark_available(self: *PooledConnection) void {
         self.in_use = false;
-        self.last_used = std.time.milliTimestamp();
+        self.last_used = clock.milliTimestamp();
     }
 };
 
@@ -60,7 +61,7 @@ pub const ConnectionPool = struct {
     allocator: Allocator,
     connections: std.ArrayList(PooledConnection),
     config: PoolConfig,
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
 
     const Self = @This();
 
@@ -74,13 +75,13 @@ pub const ConnectionPool = struct {
             .allocator = allocator,
             .connections = connections,
             .config = config,
-            .mutex = std.Thread.Mutex{},
+            .mutex = .init,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         for (self.connections.items) |*conn| {
             conn.deinit();
@@ -91,16 +92,16 @@ pub const ConnectionPool = struct {
     /// Acquire a connection from the pool
     /// Returns error if pool is exhausted and timeout is reached
     pub fn acquire(self: *Self) !*std.http.Client {
-        const start_time = std.time.milliTimestamp();
+        const start_time = clock.milliTimestamp();
 
         while (true) {
-            self.mutex.lock();
+            std.Io.Threaded.mutexLockUncancelable(&self.mutex);
 
             // Try to find an available connection
             for (self.connections.items) |*conn| {
                 if (!conn.in_use) {
                     conn.mark_used();
-                    self.mutex.unlock();
+                    std.Io.Threaded.mutexUnlock(&self.mutex);
                     return &conn.client;
                 }
             }
@@ -111,28 +112,28 @@ pub const ConnectionPool = struct {
                 new_conn.mark_used();
                 try self.connections.append(self.allocator, new_conn);
                 const client = &self.connections.items[self.connections.items.len - 1].client;
-                self.mutex.unlock();
+                std.Io.Threaded.mutexUnlock(&self.mutex);
                 return client;
             }
 
             // Check timeout
-            const now = std.time.milliTimestamp();
+            const now = clock.milliTimestamp();
             const elapsed = @as(u64, @intCast(now - start_time));
             if (elapsed > self.config.acquire_timeout_ms) {
-                self.mutex.unlock();
+                std.Io.Threaded.mutexUnlock(&self.mutex);
                 return error.PoolExhausted;
             }
 
             // Release mutex and sleep briefly before retry
-            self.mutex.unlock();
-            std.Thread.sleep(10 * std.time.ns_per_ms);
+            std.Io.Threaded.mutexUnlock(&self.mutex);
+            try clock.sleep(10 * std.time.ns_per_ms);
         }
     }
 
     /// Release a connection back to the pool
     pub fn release(self: *Self, client: *std.http.Client) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         for (self.connections.items) |*conn| {
             if (&conn.client == client) {
@@ -144,8 +145,8 @@ pub const ConnectionPool = struct {
 
     /// Clean up idle connections that have exceeded timeout
     pub fn cleanup_idle(self: *Self) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         var i: usize = 0;
         while (i < self.connections.items.len) {
@@ -161,8 +162,8 @@ pub const ConnectionPool = struct {
 
     /// Get current pool statistics
     pub fn get_stats(self: *Self) PoolStats {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         var active: usize = 0;
         var idle: usize = 0;
@@ -331,7 +332,7 @@ test "connection pool cleanup removes idle connections" {
     try std.testing.expectEqual(@as(usize, 2), stats.idle);
 
     // Wait for connections to become idle
-    std.Thread.sleep(60 * std.time.ns_per_ms);
+    try clock.sleep(60 * std.time.ns_per_ms);
 
     try pool.cleanup_idle();
 
@@ -356,7 +357,7 @@ test "connection pool idle expiration check" {
     try std.testing.expect(!conn.is_idle_expired(1000));
 
     // Wait and check again
-    std.Thread.sleep(60 * std.time.ns_per_ms);
+    try clock.sleep(60 * std.time.ns_per_ms);
     try std.testing.expect(conn.is_idle_expired(50));
 }
 
@@ -466,7 +467,7 @@ test "connection pool acquire after cleanup" {
     const client1 = try pool.acquire();
     pool.release(client1);
 
-    std.Thread.sleep(60 * std.time.ns_per_ms);
+    try clock.sleep(60 * std.time.ns_per_ms);
     try pool.cleanup_idle();
 
     const stats = pool.get_stats();
@@ -516,7 +517,7 @@ test "connection pool partial cleanup" {
     const client1 = try pool.acquire();
     pool.release(client1);
 
-    std.Thread.sleep(60 * std.time.ns_per_ms);
+    try clock.sleep(60 * std.time.ns_per_ms);
 
     const client2 = try pool.acquire();
     pool.release(client2);
@@ -542,7 +543,7 @@ test "connection pool in_use flag prevents cleanup" {
 
     const client = try pool.acquire();
 
-    std.Thread.sleep(60 * std.time.ns_per_ms);
+    try clock.sleep(60 * std.time.ns_per_ms);
 
     // Connection is in use, should not be cleaned up
     try pool.cleanup_idle();

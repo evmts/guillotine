@@ -1,0 +1,57 @@
+---
+title: Changelog
+description: Release milestones for Guillotine.
+---
+
+# Changelog
+
+This page summarizes each release. The full Keep a Changelog ledger is
+[`CHANGELOG.md`](https://github.com/evmts/guillotine/blob/main/CHANGELOG.md) in
+the repository root. Release binaries and checksums are on
+[GitHub Releases](https://github.com/evmts/guillotine/releases).
+
+## `0.1.0` (2026-11-25)
+
+The first tagged release.
+
+### Results
+
+| Area | Result |
+| --- | --- |
+| Toolchain | Stock Zig 0.17.1 with native `preserve_none` tail-call dispatch; no compiler fork required |
+| Official EEST state tests | **66,652 / 66,652 (100.00%)** across all 14 mainnet hardforks (Frontier through Osaka), fusions on and off |
+| Lean 4 differential fuzzing | **116,384 / 116,384 (100.00%)** Zig-to-Lean 4.32.0 vectors |
+| SMT proofs | **32 / 32** theorems proved |
+| `contract/snailtracer`, x86_64 Linux | **37.86 ms** (6.21 GGas/s), 1.25x faster than revm (47.21 ms) |
+| Precompiles | ECRECOVER **0.171 ms** (182x faster), MODEXP-256 **2.82 µs**, BN254-mul **8.16 µs** |
+| Layer 2 | Full Base L2 / OP Stack, Bedrock through Jovian (pre-Azul), on the real EVM engine |
+
+See [Project status](/status) for sources and methodology.
+
+### SDKs
+
+- **Zig package**: public modules `evm`, `voltaire` and `layer2`; consume with
+  `dep.module("evm")`. See [Installation](/installation#use-it-from-a-zig-project).
+- **C FFI**: `libguillotine_ffi` and `guillotine.h`.
+- **TypeScript**: `@tevm/guillotine` over Bun FFI, 340 / 340 tests passing.
+- **Custom SDK Builder skill**: generates bindings for other languages over the
+  C ABI. See [Language bindings](/guides/bindings).
+
+### Release assets
+
+| Asset | Contents |
+| --- | --- |
+| `libguillotine_ffi.so` | Linux x86_64, glibc >= 2.28 |
+| `libguillotine_ffi.dylib` | macOS arm64 |
+| `guillotine.h` | C header |
+| `SHA256SUMS.txt` | SHA-256 checksums of the files above |
+
+See [Publishing and releases](/guides/publishing).
+
+### Removed
+
+The duplicated `mini/` tree, `docs/mini/` and the `test-mini*` build steps are
+gone. MinimalEvm, the in-repo reference interpreter, lives in
+`src/tracer/minimal_evm.zig`. The standalone readable reference EVM is the
+separate repository
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini).

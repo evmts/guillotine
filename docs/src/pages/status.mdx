@@ -8,9 +8,9 @@ description: What actually works today, measured rather than claimed.
 Guillotine is **early alpha**. The repository's own words: *do not use in
 production*. Any use should be considered purely experimental.
 
-This page records measured results. Each number names its source. The runs
-below were made on `maint/unified-v8` (`d4c0725d`, 2026-11-25, Linux x86_64,
-Zig 0.17.1) and are recorded in that lineage's integration report.
+This page records the measured results for v0.1.0. Each number names its
+source. The runs used Linux x86_64 and stock Zig 0.17.1 with native
+`preserve_none` tail-call dispatch; no compiler fork is required.
 
 ## Ethereum spec compliance
 
@@ -25,7 +25,7 @@ tag and SHA-256 in `scripts/fetch-eest-fixtures.sh`.
 | Fusion on (default) | 66,652 | 66,652 | 0 |
 | Fusion off (`-Devm-enable-fusion=false`) | 66,652 | 66,652 | 0 |
 
-- Forks: Frontier through Osaka, every fork at 100.00%.
+- Forks: all 14 mainnet hardforks, Frontier through Osaka, every fork at 100.00%.
 - 16,907 Amsterdam cases are skipped because Guillotine does not support that
   fork yet.
 - Crashes: 0.
@@ -43,13 +43,20 @@ tag and SHA-256 in `scripts/fetch-eest-fixtures.sh`.
 Every case passed in both runs. `specs/README.md` explains how to fetch the
 fixtures and run a subset.
 
-### Lean 4 differential fuzzing: 116,384 / 116,384
+### Lean 4 differential fuzzing: 116,384 / 116,384 (100.00%)
 
 `zig build test-lean-diff` generates inputs, runs them through Guillotine and
-through a Lean 4 reference model (`verify/lean`), and compares the results. The
+through a Lean 4.32.0 reference model (`verify/lean`), and compares the results. The
 recorded run (default seed, 2,000 iterations per campaign) matched on all
 116,384 cases, with zero mismatches and zero crashes, across word operations,
 gas and refunds, bytecode analysis, EVM execution, Base/OP Stack rules, and RLP.
+
+### SMT proofs: 32 / 32
+
+`zig build verify-smt` checks the SMT-LIB2 equivalence proofs under
+`verify/smt/proofs` (fast paths against reference definitions, for example
+`BYTE`, `CLZ`, `EXP` gas and dense jump-table bounds). All 32 theorems are
+proved. `zig build verify` runs the LLVM IR, SMT and Lean 4 suites together.
 
 ### Legacy filler specs
 
@@ -68,15 +75,18 @@ implementation.
 
 ## Performance
 
-`zig build bench` runs the in-repository benchmarks in ReleaseFast. The recorded
-run (5 iterations, 1 warmup) completed 41 of 41 benchmarks.
+`zig build bench` runs the in-repository benchmarks in ReleaseFast on x86_64
+Linux.
 
 | Workload | Guillotine median | Reference |
 | --- | ---: | --- |
-| `contract/snailtracer` | 38.11 ms | revm 47.21 ms (`revme bench snailtracer`, a different harness) |
+| `contract/snailtracer` | 37.86 ms (6.21 GGas/s) | 1.25x faster than revm 47.21 ms (`revme bench snailtracer`, a different harness) |
+| `precompile/ECRECOVER` | 0.171 ms | 182x faster than before the v0.1.0 rewrite |
+| `precompile/MODEXP-256` | 2.82 µs | |
+| `precompile/BN254-mul` | 8.16 µs | |
 
 The revm figure comes from a different harness on the same host, so treat the
-ratio as approximate.
+ratio as approximate. See [Benchmarks and native JIT](/guides/benchmarks-and-jit).
 
 ## Checks
 
@@ -87,14 +97,14 @@ ratio as approximate.
 | Job | What it runs |
 | --- | --- |
 | `ast-check` | `zig ast-check` on every tracked `*.zig` file |
-| `build-test` (macOS arm64, Ubuntu x86_64) | `cargo test --locked`, `zig build`, `test-unit`, `test-opcodes`, `test-modexp`, `test-precompiles`, `test-layer2`, `test-bench`, `test-fusions`, `shared static -Doptimize=ReleaseFast`, the C SDK tests and the TypeScript SDK tests |
+| `build-test` (macOS arm64, Ubuntu x86_64) | `cargo test --locked`, `zig build`, `test-unit`, `test-opcodes`, `test-modexp`, `test-precompiles`, `test-layer2`, `test-bench`, `test-fusions`, `shared static -Doptimize=ReleaseFast`, the C SDK tests and the TypeScript SDK tests. Linux also runs `test-integration` and a 5-second `fuzz-campaign`; macOS arm64 also runs `test-jit`. |
 | `state-tests` (fusion on, fusion off) | `zig build state-tests -Doptimize=ReleaseSafe`, then asserts 66,652 of 66,652 cases passed |
 
 `.github/workflows/fuzz.yml` runs the Zig fuzz targets, a multi-threaded fuzz
 campaign, the Rust BN254/BLS12-381 FFI fuzz tests, and the TypeScript SDK fuzz
 suite, nightly and on pull requests. `.github/workflows/release.yml` builds and
 publishes a release when a `v*` tag is pushed. See
-[Language bindings](/guides/bindings#npm-packaging).
+[Publishing and releases](/guides/publishing).
 
 ### Documentation examples
 
@@ -106,14 +116,15 @@ The examples in [Getting started](/getting-started) were compiled and run with
 
 | Area | State |
 | --- | --- |
-| Ethereum mainnet | The only network `Evm` executes |
-| OP Stack (Optimism, Base) | `src/layer2/` implements fee, deposit and precompile rules and a transaction executor for an execution host (`src/layer2/executor.zig`, `zig build test-layer2`). `EvmConfig` has no Layer 2 field. |
+| Ethereum mainnet | Frontier through Osaka |
+| Base L2 / OP Stack | Bedrock through Jovian (pre-Azul). `src/layer2/` implements fee, deposit and precompile rules and a transaction executor; `src/layer2/evm_host.zig` runs it on the real `Evm` engine (the type behind `DefaultEvm`), one comptime instance per OP Stack spec. `zig build test-layer2` tests it. |
 | Arbitrum Nitro | Not implemented. Planned for beta. |
 | Hardforks | `Hardfork` spans `FRONTIER` through `AMSTERDAM`; the default is `OSAKA`. `state-tests` covers Frontier through Osaka. |
 | Precompiles | `0x01`–`0x11` and `P256VERIFY` (`0x100`, Osaka) in `lib/voltaire/src/precompiles/` |
-| C ABI | Experimental (`sdks/c/`, `src/evm_c_api.zig`) |
-| TypeScript (`@tevm/guillotine`) | Experimental; Bun only, over the native library. Prebuilds for `darwin-arm64` and `linux-x64`. |
-| WASM | No root build step for the `src/` engine. guillotine-mini builds with `cd mini && zig build wasm`. |
+| Zig package | Public modules `evm`, `voltaire` and `layer2` (`dep.module("evm")`) |
+| C ABI | Experimental (`sdks/c/`, `src/evm_c_api.zig`). Releases ship `libguillotine_ffi.so` (x86_64, glibc >= 2.28), `libguillotine_ffi.dylib` (arm64), `guillotine.h` and `SHA256SUMS.txt`. |
+| TypeScript (`@tevm/guillotine`) | Experimental; Bun only, over the native library; 340 / 340 tests pass. Prebuilds for `darwin-arm64` and `linux-x64`. |
+| WASM | No root build step for the `src/` engine. The separate [`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini) repository has a WASM build. |
 
 ## Following along
 

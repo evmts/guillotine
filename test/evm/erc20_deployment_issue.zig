@@ -249,7 +249,8 @@ test "Snailtracer deployment comparison" {
             .caller = caller_address,
             .value = 0,
             .init_code = init_code,
-            .gas = 500_000_000,
+            // Osaka caps transaction gas at 2^24 (EIP-7825); a larger limit is invalid.
+            .gas = 16_777_216,
         },
     };
     
@@ -259,7 +260,7 @@ test "Snailtracer deployment comparison" {
     log.info("Snailtracer deployment: success={}, gas_left={}, gas_used={}", .{
         deploy_result.success,
         deploy_result.gas_left,
-        500_000_000 - deploy_result.gas_left,
+        16_777_216 - deploy_result.gas_left,
     });
     
     try std.testing.expect(deploy_result.success);

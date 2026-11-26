@@ -2,6 +2,35 @@ const std = @import("std");
 const DifferentialTestor = @import("differential_testor.zig").DifferentialTestor;
 
 const testing = std.testing;
+const Keccak256 = std.crypto.hash.sha3.Keccak256;
+
+// MinimalEvm's CREATE and CREATE2 push 0 without running init code, so these
+// tests assert Guillotine against addresses derived from the specification.
+// The harness runs code at 0xc0de00..00 with account nonce 1.
+const creator = [_]u8{ 0xc0, 0xde } ++ @as([18]u8, @splat(0));
+const zero_word: [32]u8 = @splat(0);
+
+/// CREATE address: keccak256(rlp([creator, nonce]))[12..], for 1 <= nonce <= 0x7f.
+fn createAddress(nonce: u8) [20]u8 {
+    const rlp = [_]u8{ 0xd6, 0x94 } ++ creator ++ [_]u8{nonce};
+    var hash: [32]u8 = undefined;
+    Keccak256.hash(&rlp, &hash, .{});
+    return hash[12..32].*;
+}
+
+/// CREATE2 address (EIP-1014): keccak256(0xff ++ creator ++ salt ++ keccak256(init_code))[12..].
+fn create2Address(salt: [32]u8, init_code: []const u8) [20]u8 {
+    var code_hash: [32]u8 = undefined;
+    Keccak256.hash(init_code, &code_hash, .{});
+    const preimage = [_]u8{0xff} ++ creator ++ salt ++ code_hash;
+    var hash: [32]u8 = undefined;
+    Keccak256.hash(&preimage, &hash, .{});
+    return hash[12..32].*;
+}
+
+fn word(address: [20]u8) [32]u8 {
+    return @as([12]u8, @splat(0)) ++ address;
+}
 
 test "differential: CREATE with insufficient gas" {
     const allocator = testing.allocator;
@@ -72,8 +101,8 @@ test "differential: CREATE with invalid bytecode" {
     
     // Test CREATE with invalid/malformed bytecode
     const bytecode = [_]u8{
-        // Store invalid bytecode (incomplete PUSH32)
-        0x7f, 0xff, // PUSH32 with incomplete data (only 2 bytes instead of 32)
+        // Store init code 0x7f 0xff: a PUSH32 truncated by the end of code
+        0x60, 0x7f, // PUSH1 0x7f (PUSH32 opcode)
         0x60, 0x00, // PUSH1 0
         0x53,       // MSTORE8 (store 0x7f at memory[0])
         0x60, 0xff, // PUSH1 0xff
@@ -96,7 +125,10 @@ test "differential: CREATE with invalid bytecode" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    // The truncated PUSH32 reads zero bytes past the end of the init code and
+    // execution then stops, so CREATE deploys empty code and returns the address.
+    const expected = word(createAddress(1));
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }
 
 test "differential: CREATE2 with invalid salt" {
@@ -153,7 +185,11 @@ test "differential: CREATE2 with invalid salt" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    // The first CREATE2 deploys; the second collides with it and pushes 0.
+    // Memory word 0 still holds the 10-byte init code.
+    const init_code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+    const expected = (init_code ++ @as([22]u8, @splat(0))) ++ word(create2Address(zero_word, &init_code)) ++ zero_word;
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }
 
 test "differential: CREATE2 with maximum salt value" {
@@ -189,7 +225,8 @@ test "differential: CREATE2 with maximum salt value" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    const expected = word(create2Address(@splat(0xff), &[_]u8{0x00}));
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }
 
 test "differential: CREATE with zero-length bytecode" {
@@ -223,7 +260,9 @@ test "differential: CREATE with zero-length bytecode" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    // Empty init code deploys an account with no code.
+    const expected = word(createAddress(1)) ++ zero_word;
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }
 
 test "differential: CREATE with contract that immediately self-destructs" {
@@ -270,7 +309,10 @@ test "differential: CREATE with contract that immediately self-destructs" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    // CREATE succeeds; the init code returns no code, so EXTCODESIZE is 0 and
+    // ISZERO(address) is 0.
+    const expected = word(createAddress(1)) ++ zero_word ++ zero_word;
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }
 
 test "differential: CREATE with maximum size contract" {
@@ -346,5 +388,7 @@ test "differential: CREATE with maximum size contract" {
         0xf3,       // RETURN
     };
     
-    try testor.test_bytecode(&bytecode);
+    // The init code (PUSH1 0, POP, then zero bytes) stops with empty output.
+    const expected = word(createAddress(1));
+    try testor.expect_guillotine(&bytecode, &.{}, true, &expected);
 }

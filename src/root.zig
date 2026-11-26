@@ -200,13 +200,11 @@ pub const verified_ops = @import("core/verified_ops.zig");
 //   storage/{access_list,cache_storage,forked_storage,journal_bench,memory_database,
 //   storage,rpc_client}.zig, tracer/{tracer,minimal_frame,minimal_evm_precompile_test}.zig,
 //   preprocessor/{dispatch_test,dispatch_layout_test}.zig, every instructions/handlers_*.zig
-//   except handlers_advanced_synthetic.zig, trie/{hash_builder_optimized,memory_tests,
-//   serialization_test,benchmarks,performance_validation,stress_tests}.zig, root_c.zig.
-// - Compile but fail: storage/database.zig ("Database state root - account with
-//   storage"), storage/static_wrappers.zig (1), eips_and_hardforks/{beacon_roots,
-//   historical_block_hashes,validator_deposits,validator_withdrawals}.zig (1 each),
-//   trie/iterator_test.zig (3), tracer/minimal_host.zig (run step fails after
-//   all tests pass), tracer/pc_tracker.zig and tracer/events/{events,lifecycle}.zig.
+//   except handlers_advanced_synthetic.zig, trie/{memory_tests,serialization_test,
+//   stress_tests}.zig, root_c.zig.
+// - Compile but fail: eips_and_hardforks/{beacon_roots,historical_block_hashes}.zig
+//   (1 each), trie/iterator_test.zig (3), tracer/minimal_host.zig (run step fails
+//   after all tests pass), tracer/pc_tracker.zig and tracer/events/{events,lifecycle}.zig.
 // Repair a file's tests before importing it here.
 test {
     _ = @import("preprocessor/dispatch.zig");
@@ -229,6 +227,8 @@ test {
     _ = @import("opcodes/opcode_data.zig");
     _ = @import("opcodes/opcode_synthetic.zig");
     _ = @import("storage/database.zig");
+    _ = @import("storage/slot_store.zig");
+    _ = @import("storage/database_proxy.zig");
     _ = @import("storage/journal.zig");
     _ = @import("eips_and_hardforks/validator_deposits.zig");
     _ = @import("eips_and_hardforks/validator_withdrawals.zig");

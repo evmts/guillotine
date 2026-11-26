@@ -559,35 +559,38 @@ pub const HashBuilder = struct {
         if (new_branch.children_mask.is_set(@intCast(key))) {
             // Update existing child
             const child = new_branch.children[key].?;
+            if (child == .Raw and remaining_path.len == 0) {
+                // The key ends at this slot. Keep the value inline, as split_leaf,
+                // split_extension and a new child store it, so the node (and the
+                // root hash) does not depend on whether the key was overwritten.
+                const replacement = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
+                new_branch.children[key].?.deinit(self.allocator);
+                new_branch.children[key] = replacement;
+                return TrieNode{ .Branch = new_branch };
+            }
             const updated_node = switch (child) {
                 .Raw => |data| blk: {
-                    // Handle raw value directly without creating temp node
-                    if (remaining_path.len == 0) {
-                        // Direct replacement with new value
-                        const new_leaf = try LeafNode.init(self.allocator, try self.allocator.alloc(u8, 0), HashValue{ .Raw = try self.allocator.dupe(u8, value) });
-                        break :blk TrieNode{ .Leaf = new_leaf };
+                    // The key continues past this slot: the inline value moves into a
+                    // new branch's value and the new key goes below it.
+                    var sub_branch = BranchNode.init();
+
+                    // Add existing value at remaining_path[0]
+                    if (remaining_path.len == 1) {
+                        sub_branch.children[remaining_path[0]] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
+                        sub_branch.children_mask.set(@intCast(remaining_path[0]));
                     } else {
-                        // Need to create a branch to hold both the existing data and new value
-                        var sub_branch = BranchNode.init();
-
-                        // Add existing value at remaining_path[0]
-                        if (remaining_path.len == 1) {
-                            sub_branch.children[remaining_path[0]] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
-                            sub_branch.children_mask.set(@intCast(remaining_path[0]));
-                        } else {
-                            const leaf_path = try self.allocator.dupe(u8, remaining_path[1..]);
-                            const new_leaf = try LeafNode.init(self.allocator, leaf_path, HashValue{ .Raw = try self.allocator.dupe(u8, value) });
-                            const leaf_node = TrieNode{ .Leaf = new_leaf };
-                            const leaf_hash = try self.store_node(leaf_node);
-                            sub_branch.children[remaining_path[0]] = HashValue{ .Hash = leaf_hash };
-                            sub_branch.children_mask.set(@intCast(remaining_path[0]));
-                        }
-
-                        // Set the existing data as the branch value
-                        sub_branch.value = HashValue{ .Raw = try self.allocator.dupe(u8, data) };
-
-                        break :blk TrieNode{ .Branch = sub_branch };
+                        const leaf_path = try self.allocator.dupe(u8, remaining_path[1..]);
+                        const new_leaf = try LeafNode.init(self.allocator, leaf_path, HashValue{ .Raw = try self.allocator.dupe(u8, value) });
+                        const leaf_node = TrieNode{ .Leaf = new_leaf };
+                        const leaf_hash = try self.store_node(leaf_node);
+                        sub_branch.children[remaining_path[0]] = HashValue{ .Hash = leaf_hash };
+                        sub_branch.children_mask.set(@intCast(remaining_path[0]));
                     }
+
+                    // Set the existing data as the branch value
+                    sub_branch.value = HashValue{ .Raw = try self.allocator.dupe(u8, data) };
+
+                    break :blk TrieNode{ .Branch = sub_branch };
                 },
                 .Hash => |hash| blk: {
                     const hash_str = try bytes_to_hex_string(self.allocator, &hash);
@@ -776,9 +779,20 @@ pub const HashBuilder = struct {
 
                                 const result = try self.delete_node(next_node, nibbles[1..]);
                                 if (result) |new_next| {
-                                    const new_hash = try self.store_node(new_next);
-                                    new_branch.children[key].?.deinit(self.allocator);
-                                    new_branch.children[key] = HashValue{ .Hash = new_hash };
+                                    if (new_next == .Leaf and new_next.Leaf.nibbles.len == 0 and new_next.Leaf.value == .Raw) {
+                                        // The remaining key ends at this slot. Store its value
+                                        // inline, as insertion does, so the root hash does not
+                                        // depend on the order of inserts and deletes.
+                                        const inline_value = HashValue{ .Raw = try self.allocator.dupe(u8, new_next.Leaf.value.Raw) };
+                                        var discarded = new_next;
+                                        discarded.deinit(self.allocator);
+                                        new_branch.children[key].?.deinit(self.allocator);
+                                        new_branch.children[key] = inline_value;
+                                    } else {
+                                        const new_hash = try self.store_node(new_next);
+                                        new_branch.children[key].?.deinit(self.allocator);
+                                        new_branch.children[key] = HashValue{ .Hash = new_hash };
+                                    }
                                 } else {
                                     new_branch.children[key].?.deinit(self.allocator);
                                     new_branch.children[key] = null;

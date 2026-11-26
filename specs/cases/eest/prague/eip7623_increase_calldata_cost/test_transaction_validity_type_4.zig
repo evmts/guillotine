@@ -7,7 +7,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -22,7 +22,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -37,7 +37,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -52,7 +52,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -67,7 +67,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -82,7 +82,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -97,7 +97,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -112,7 +112,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -127,7 +127,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -142,7 +142,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -157,7 +157,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -172,7 +172,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -187,7 +187,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -202,7 +202,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -217,7 +217,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -232,7 +232,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -247,7 +247,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -262,7 +262,7 @@ test "transaction validity type 4: type 4 multiple authorizations multiple acces
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -277,7 +277,7 @@ test "transaction validity type 4: type 4 multiple authorizations no access list
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -292,7 +292,7 @@ test "transaction validity type 4: type 4 multiple authorizations no access list
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -307,7 +307,7 @@ test "transaction validity type 4: type 4 multiple authorizations no access list
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -322,7 +322,7 @@ test "transaction validity type 4: type 4 multiple authorizations no access list
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -337,7 +337,7 @@ test "transaction validity type 4: type 4 multiple authorizations no access list
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -352,7 +352,7 @@ test "transaction validity type 4: type 4 multiple authorizations no access list
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -367,7 +367,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -382,7 +382,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -397,7 +397,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -412,7 +412,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -427,7 +427,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -442,7 +442,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -457,7 +457,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -472,7 +472,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -487,7 +487,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -502,7 +502,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -517,7 +517,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -532,7 +532,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -547,7 +547,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -562,7 +562,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -577,7 +577,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -592,7 +592,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -607,7 +607,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -622,7 +622,7 @@ test "transaction validity type 4: type 4 multiple authorizations single access 
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -637,7 +637,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -652,7 +652,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -667,7 +667,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -682,7 +682,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -697,7 +697,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -712,7 +712,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -727,7 +727,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -742,7 +742,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -757,7 +757,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -772,7 +772,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -787,7 +787,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -802,7 +802,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -817,7 +817,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -832,7 +832,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -847,7 +847,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -862,7 +862,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -877,7 +877,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -892,7 +892,7 @@ test "transaction validity type 4: type 4 single authorization multiple access l
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -907,7 +907,7 @@ test "transaction validity type 4: type 4 single authorization no access list ex
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -922,7 +922,7 @@ test "transaction validity type 4: type 4 single authorization no access list ex
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -937,7 +937,7 @@ test "transaction validity type 4: type 4 single authorization no access list ex
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -952,7 +952,7 @@ test "transaction validity type 4: type 4 single authorization no access list ex
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -967,7 +967,7 @@ test "transaction validity type 4: type 4 single authorization no access list in
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -982,7 +982,7 @@ test "transaction validity type 4: type 4 single authorization no access list in
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -997,7 +997,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1012,7 +1012,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1027,7 +1027,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1042,7 +1042,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1057,7 +1057,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1072,7 +1072,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1087,7 +1087,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1102,7 +1102,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1117,7 +1117,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1132,7 +1132,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1147,7 +1147,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1162,7 +1162,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1177,7 +1177,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1192,7 +1192,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1207,7 +1207,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1222,7 +1222,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1237,7 +1237,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -1252,7 +1252,7 @@ test "transaction validity type 4: type 4 single authorization single access lis
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});

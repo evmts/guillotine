@@ -277,28 +277,28 @@ test "differential: precompile-blake2f" {
     }
 }
 
+// fixtures/precompile-pointevaluation/calldata.txt has an odd number of hex
+// digits, so this test builds a valid EIP-4844 input instead: the zero
+// polynomial, whose commitment and proof are the compressed G1 point at
+// infinity (0xc0 followed by 47 zero bytes), evaluated at z = 0 with y = 0.
 test "differential: precompile-pointevaluation" {
     const allocator = testing.allocator;
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    const cwd = std.Io.Dir.cwd();
-    const bc_path = "fixtures/precompile-pointevaluation/bytecode.txt";
-    const cd_path = "fixtures/precompile-pointevaluation/calldata.txt";
+    const infinity = [_]u8{0xc0} ++ @as([47]u8, @splat(0));
+    var versioned_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(&infinity, &versioned_hash, .{});
+    versioned_hash[0] = 0x01; // VERSIONED_HASH_VERSION_KZG
+    const calldata = versioned_hash ++ @as([64]u8, @splat(0)) ++ infinity ++ infinity;
 
-    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
-    defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
-    defer allocator.free(cd_text);
-
-    const bc_bytes = try parse_hex_alloc(allocator, bc_text);
-    defer allocator.free(bc_bytes);
-
-    if (std.mem.eql(u8, std.mem.trim(u8, cd_text, &std.ascii.whitespace), "0x")) {
-        try testor.test_bytecode(bc_bytes);
-    } else {
-        const cd_bytes = try parse_hex_alloc(allocator, cd_text);
-        defer allocator.free(cd_bytes);
-        try testor.test_bytecode_with_calldata(bc_bytes, cd_bytes);
-    }
+    // CALLDATACOPY(0, 0, CALLDATASIZE); STATICCALL(GAS, 0x0a, 0, 192, 0, 64);
+    // MSTORE(64, success); RETURN(0, 96)
+    const bytecode = [_]u8{
+        0x36, 0x60, 0x00, 0x60, 0x00, 0x37,
+        0x60, 0x40, 0x60, 0x00, 0x60, 0xc0, 0x60, 0x00, 0x60, 0x0a, 0x5a, 0xfa,
+        0x60, 0x40, 0x52,
+        0x60, 0x60, 0x60, 0x00, 0xf3,
+    };
+    try testor.test_bytecode_with_calldata(&bytecode, &calldata);
 }

@@ -5,18 +5,20 @@ description: Verified toolchain prerequisites and build commands for Guillotine.
 
 # Installation
 
-Guillotine is a Zig library with vendored C and Rust dependencies. There is no
-package to `npm install` for the core engine. Build it from a checkout, or use
-one of the [language bindings](/guides/bindings).
+Guillotine is a Zig library with vendored C and Rust dependencies. Add it to a
+Zig project as a package ([Use it from a Zig project](#use-it-from-a-zig-project)),
+build it from a checkout, download the C FFI libraries from a
+[GitHub Release](https://github.com/evmts/guillotine/releases), or use one of the
+[language bindings](/guides/bindings).
 
 ## Prerequisites
 
 | Requirement | Version used to verify these docs | Why |
 | --- | --- | --- |
-| [Zig](https://ziglang.org/download/) | `0.17.1` | The whole engine. `build.zig.zon` declares `minimum_zig_version = "0.17.1"`. |
+| [Zig](https://ziglang.org/download/) | `0.17.1` | The whole engine. The stock release compiles the `preserve_none` tail-call dispatch natively; no compiler fork is required. `build.zig.zon` declares `minimum_zig_version = "0.17.1"`. |
 | [Rust / Cargo](https://rustup.rs) | stable | `lib/voltaire` builds a `crypto_wrappers` staticlib (arkworks BN254/BLS12-381 + keccak) that the Zig build links. |
 | A C/C++ toolchain | Apple Clang 17 (Xcode CLT) | `blst`, `c-kzg-4844` and `libc++` linkage. |
-| Python 3 | 3.11+ | Only for `zig build test-mini-full` and some spec-fixture tooling. Not needed for a normal build. |
+| Python 3 | 3.11+ | Only for spec-fixture tooling and `zig build verify`. Not needed for a normal build. |
 
 Check what you have:
 
@@ -48,10 +50,42 @@ ships prebuilt libraries for those two platforms. The results on
 | --- | --- |
 | macOS arm64 | Built and tested in CI; release prebuild |
 | macOS x86_64 | The build graph maps it to `x86_64-apple-darwin`; not in CI |
-| Linux x86_64 | Built and tested in CI; release prebuild |
+| Linux x86_64 | Built and tested in CI; release prebuild (`libguillotine_ffi.so`, glibc >= 2.28) |
 | Linux arm64 | The build graph maps it to `aarch64-unknown-linux-gnu`; not in CI |
 | Windows | Best-effort, not in CI. `lib/voltaire/lib/build.zig` builds Voltaire's crate for `*-pc-windows-gnu` so Cargo emits `lib*.a`; the root `build.zig` builds the root Cargo workspace for `x86_64-pc-windows-msvc`. |
-| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. guillotine-mini builds its own WASM with `cd mini && zig build wasm`. |
+| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. The standalone reference EVM [`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini) has its own WASM build. |
+
+## Use it from a Zig project
+
+Fetch the tagged source archive. The `=guillotine` suffix sets the dependency
+key; without it, `zig fetch` uses the package name `Guillotine`.
+
+```bash
+zig fetch --save=guillotine https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz
+```
+
+`zig fetch --save` writes the entry, including the content hash, into your
+`build.zig.zon`:
+
+```zig
+.dependencies = .{
+    .guillotine = .{
+        .url = "https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz",
+        .hash = "...", // filled in by zig fetch --save
+    },
+},
+```
+
+Then import the `evm` module in `build.zig`:
+
+```zig
+const guillotine = b.dependency("guillotine", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("evm", guillotine.module("evm"));
+```
+
+The package also exports `voltaire` (primitives: `Address`, `U256`, RLP, ABI,
+crypto) and `layer2` (Base and OP Stack). Your machine still needs Cargo and a C
+compiler, because the dependency builds its native crypto libraries.
 
 ## Clone and build
 
@@ -94,11 +128,13 @@ See [Configuring the EVM](/guides/configuration).
 ## Running the tests
 
 ```bash
-zig build test              # specs, integration, unit, and lib tests
+zig build test              # unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz
 zig build test-unit         # src/**/*.zig
 zig build test-integration  # test/**/*.zig
 zig build test-lib          # lib/**/*.zig
 zig build test-opcodes      # per-opcode tests (the CI gate)
+zig build test-jit          # src/jit/root.zig (native code runs on aarch64)
+zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8
 zig build state-tests       # official EEST state tests (fetch fixtures first)
 zig build specs             # legacy filler specs
 ```

@@ -37,18 +37,27 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run Zig fuzz corpus & leak regression suite
-        run: |
-          zig build test-fuzz
-          zig build test-mini-fuzz
+        run: zig build test-fuzz
 
       - name: Run multi-threaded cross-subsystem fuzz campaign
+        env:
+          SECONDS_INPUT: ${{ inputs.duration_seconds || (github.event_name == 'schedule' && '300' || '45') }}
         run: |
-          DURATION="${{ github.event.inputs.duration_seconds || (github.event_name == 'schedule' && '300' || '45') }}"
-          zig build fuzz-campaign -- --seconds="${DURATION}" --threads="$(nproc)"
+          set -euo pipefail
+          case "$SECONDS_INPUT" in
+            ''|*[!0-9]*) echo "::error::duration_seconds must be a positive integer" >&2; exit 1 ;;
+          esac
+          THREADS_INPUT="$(nproc)"
+          zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds="$SECONDS_INPUT" --threads="$THREADS_INPUT"
 
       - name: Run Zig LLVM coverage-guided --fuzz on differential EVM & precompiles
+        env:
+          SECONDS_INPUT: ${{ inputs.duration_seconds || (github.event_name == 'schedule' && '180' || '30') }}
         run: |
-          DURATION="${{ github.event.inputs.duration_seconds || (github.event_name == 'schedule' && '180' || '30') }}"
+          case "$SECONDS_INPUT" in
+            ''|*[!0-9]*) echo "::error::duration_seconds must be a positive integer" >&2; exit 1 ;;
+          esac
+          DURATION="$SECONDS_INPUT"
           for TARGET in \
             "fuzz differential EVM execution" \
             "fuzz bytecode jumpdest reference oracle" \

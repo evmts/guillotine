@@ -86,6 +86,9 @@ pub fn createRustBuildStep(b: *std.Build, requested: ?[]const u8, optimize: std.
         "--workspace",
         "--locked",
     });
+    // The workspace and its `target/` outputs (read back through `b.path`) live in
+    // this package's root, which is not the process cwd when Guillotine is a dependency.
+    cargo_build.setCwd(b.path("."));
 
     // Map Zig optimize modes to Rust build profiles
     switch (optimize) {

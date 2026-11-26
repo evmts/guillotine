@@ -1,4 +1,5 @@
 const std = @import("std");
+const clock = @import("clock.zig");
 
 /// Token bucket rate limiter for controlling request rates
 ///
@@ -20,7 +21,7 @@ pub const RateLimiter = struct {
     current_tokens: u64,
 
     /// Last time tokens were added
-    last_refill: i128,
+    last_refill: i96,
 
     /// Mutex for thread-safe access
     mutex: std.Io.Mutex,
@@ -52,7 +53,7 @@ pub const RateLimiter = struct {
             .max_tokens = config.max_tokens,
             .tokens_per_second = config.tokens_per_second,
             .current_tokens = config.max_tokens,
-            .last_refill = std.time.nanoTimestamp(),
+            .last_refill = clock.nanoTimestamp(),
             .mutex = .init,
         };
     }
@@ -83,20 +84,20 @@ pub const RateLimiter = struct {
 
     /// Wait and acquire a token, sleeping until one is available
     /// This method will spin-wait with small sleeps until a token is available
-    pub fn waitAndAcquire(self: *RateLimiter) void {
+    pub fn waitAndAcquire(self: *RateLimiter) std.Io.Cancelable!void {
         while (!self.tryAcquire()) {
             // Calculate sleep time based on token refill rate
             const nanos_per_token = std.time.ns_per_s / self.tokens_per_second;
             // Sleep for slightly longer than one token's worth of time
             const sleep_nanos = nanos_per_token + (nanos_per_token / 10);
-            std.posix.nanosleep(0, sleep_nanos);
+            try clock.sleep(sleep_nanos);
         }
     }
 
     /// Refill tokens based on elapsed time since last refill
     /// Must be called with mutex held
     fn refillTokens(self: *RateLimiter) void {
-        const now = std.time.nanoTimestamp();
+        const now = clock.nanoTimestamp();
         const elapsed = now - self.last_refill;
 
         if (elapsed <= 0) {
@@ -105,11 +106,11 @@ pub const RateLimiter = struct {
 
         // Calculate tokens to add based on elapsed time
         // tokens = (elapsed_nanos / nanos_per_second) * tokens_per_second
-        const nanos_per_second: i128 = std.time.ns_per_s;
-        const tokens_to_add_i128 = @divFloor(elapsed * @as(i128, @intCast(self.tokens_per_second)), nanos_per_second);
+        const nanos_per_second: i96 = std.time.ns_per_s;
+        const tokens_to_add_wide = @divFloor(elapsed * @as(i96, @intCast(self.tokens_per_second)), nanos_per_second);
 
-        if (tokens_to_add_i128 > 0) {
-            const tokens_to_add: u64 = @intCast(tokens_to_add_i128);
+        if (tokens_to_add_wide > 0) {
+            const tokens_to_add: u64 = @intCast(tokens_to_add_wide);
             self.current_tokens = @min(self.max_tokens, self.current_tokens + tokens_to_add);
             self.last_refill = now;
         }
@@ -121,7 +122,7 @@ pub const RateLimiter = struct {
         defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         self.current_tokens = self.max_tokens;
-        self.last_refill = std.time.nanoTimestamp();
+        self.last_refill = clock.nanoTimestamp();
     }
 
     /// Get current available tokens (for testing/monitoring)
@@ -244,7 +245,7 @@ test "RateLimiter token refill" {
     }
 
     // Sleep for 1 second to allow refill (5 tokens should be added)
-    std.posix.nanosleep(1, 0);
+    try clock.sleep(std.time.ns_per_s);
 
     // Should be able to acquire 5 more tokens
     i = 0;
@@ -263,7 +264,7 @@ test "RateLimiter refill respects max tokens" {
     });
 
     // Don't consume any tokens, just wait
-    std.posix.nanosleep(1, 0);
+    try clock.sleep(std.time.ns_per_s);
 
     // Should still be at max, not exceeded
     try std.testing.expectEqual(@as(u64, 5), limiter.getAvailableTokens());
@@ -350,12 +351,12 @@ test "RateLimiter waitAndAcquire" {
     try limiter.acquire();
     try limiter.acquire();
 
-    const start = std.time.nanoTimestamp();
+    const start = clock.nanoTimestamp();
 
     // This should wait for a token to become available
-    limiter.waitAndAcquire();
+    try limiter.waitAndAcquire();
 
-    const elapsed = std.time.nanoTimestamp() - start;
+    const elapsed = clock.nanoTimestamp() - start;
 
     // Should have waited at least 90ms (with 10ms tolerance)
     try std.testing.expect(elapsed >= 90 * std.time.ns_per_ms);
@@ -384,7 +385,7 @@ test "RateLimiter low rate limit" {
     try std.testing.expect(!limiter.tryAcquire());
 
     // Wait for 1 second
-    std.posix.nanosleep(1, 0);
+    try clock.sleep(std.time.ns_per_s);
 
     // Should be able to acquire one more
     try std.testing.expect(limiter.tryAcquire());

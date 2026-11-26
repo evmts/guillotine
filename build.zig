@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) void {
     // Install Guillotine-specific libraries
     if (bn254_lib) |bn254| b.installArtifact(bn254);
 
-    // Modules (zbench no longer needed for core evm_mod)
+    // Modules
     const modules = Modules.createModules(b, target, optimize, options_mod, primitives_dep, bn254_lib, foundry_lib);
 
     // Importing an external module's functions does not run its inline tests.
@@ -88,9 +88,6 @@ pub fn build(b: *std.Build) void {
     // Executables
     const guillotine_exe = GuillotineExe.createExecutable(b, modules.exe_mod);
     _ = GuillotineExe.createRunStep(b, guillotine_exe);
-
-    // Bench runner executables are removed (moved to separate repo)
-
 
     // Shared library for FFI bindings. Release packaging passes -Dstrip=true:
     // DWARF is about 80% of a ReleaseFast libguillotine_ffi.
@@ -234,32 +231,24 @@ pub fn build(b: *std.Build) void {
     const fixture_test_step = b.step("test-fixtures", "Run fixture tests comparing MainEvm and MinimalEvm");
     fixture_test_step.dependOn(&run_fixture_tests.step);
 
-    // Main test step runs tests in priority order: specs -> integration -> unit
-    const test_step = b.step("test", "Run all tests (specs -> integration -> unit)");
+    // `test` runs every suite that is self-contained in this repository; see the
+    // end of this function. `specs` and `state-tests` need fetched fixtures.
+    const test_step = b.step("test", "Run unit, opcode, integration, layer 2, precompile, fusion, ModExp, fuzz and JIT tests");
 
-    // Mini EVM unit tests (guillotine-mini)
-    const mini_test_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "unit" });
-    mini_test_cmd.setCwd(b.path("mini"));
-    const mini_test_step = b.step("test-mini", "Run guillotine-mini unit tests");
-    mini_test_step.dependOn(&mini_test_cmd.step);
+    // Native JIT (src/jit): depends only on std; its execution tests run on AArch64.
+    const jit_tests = b.addTest(.{
+        .name = "jit-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/jit/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = true,
+    });
+    if (test_filter) |filter| jit_tests.filters = b.dupeStrings(&.{filter});
+    const jit_test_step = b.step("test-jit", "Run native JIT tests (src/jit)");
+    jit_test_step.dependOn(&b.addRunArtifact(jit_tests).step);
 
-    // Mini EVM full tests (requires Python dependencies for spec tests)
-    const mini_full_test_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test" });
-    mini_full_test_cmd.setCwd(b.path("mini"));
-    const mini_full_test_step = b.step("test-mini-full", "Run all guillotine-mini tests (requires Python)");
-    mini_full_test_step.dependOn(&mini_full_test_cmd.step);
-
-    // Mini EVM specs tests
-    const mini_specs_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "specs" });
-    mini_specs_cmd.setCwd(b.path("mini"));
-    const mini_specs_step = b.step("test-mini-specs", "Run guillotine-mini spec tests");
-    mini_specs_step.dependOn(&mini_specs_cmd.step);
-
-    // Mini EVM fuzz tests (uses current zig executable so custom zig paths work)
-    const mini_fuzz_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test-fuzz" });
-    mini_fuzz_cmd.setCwd(b.path("mini"));
-    const mini_fuzz_step = b.step("test-mini-fuzz", "Run guillotine-mini fuzz tests");
-    mini_fuzz_step.dependOn(&mini_fuzz_cmd.step);
 
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
@@ -792,12 +781,16 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .linux) layer2_host_tests.root_module.linkSystemLibrary("unwind", .{});
     layer2_tests_step.dependOn(&b.addRunArtifact(layer2_host_tests).step);
 
-    // Self-contained in-repo benchmark steps (`bench`, `bench-build`, `test-bench`)
-    _ = bench_step.addBenchSteps(b, .{
-        .target = target,
-        .evm = modules.evm_mod,
-        .optimize = .fast,
-    });
+    // Self-contained in-repo benchmark steps (`bench`, `bench-build`, `test-bench`).
+    // The benchmark links a host-built Rust crypto archive, so they exist only for
+    // native builds; `-Dtarget=` cross builds (release prebuilds) skip them.
+    if (target.query.isNative()) {
+        _ = bench_step.addBenchSteps(b, .{
+            .target = target,
+            .evm = modules.evm_mod,
+            .optimize = .fast,
+        });
+    }
 
     // Bun specs runner (kept as alternative)
     const bun_check = b.addSystemCommand(&[_][]const u8{ "which", "bun" });
@@ -1017,16 +1010,19 @@ pub fn build(b: *std.Build) void {
         verify_all_step.dependOn(verify_lean_step);
     }
 
-    // Configure main test step dependencies in priority order:
-    // 1. First: Run specs tests (Ethereum compliance)
-    test_step.dependOn(specs_step);
-
-    // 2. Second: Run integration tests (test/**/*.zig)
-    test_step.dependOn(&run_integration_tests.step);
-
-    // 3. Third: Run unit tests (src/**/*.zig)
-    test_step.dependOn(&run_unit_tests.step);
-
-    // 4. Fourth: Run library tests (lib/**/*.zig)
-    test_step.dependOn(&run_lib_tests.step);
+    // `test` aggregates the self-contained suites. Each name is a step defined above.
+    for ([_][]const u8{
+        "test-unit",
+        "test-opcodes",
+        "test-integration",
+        "test-layer2",
+        "test-precompiles",
+        "test-fusions",
+        "test-modexp",
+        "test-fuzz",
+        "test-jit",
+    }) |name| {
+        const suite = b.top_level_steps.get(name) orelse std.debug.panic("test suite step '{s}' is not defined", .{name});
+        test_step.dependOn(&suite.step);
+    }
 }

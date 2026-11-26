@@ -89,7 +89,7 @@ fn mutateHavoc(rng: std.Random, buf: []u8, cur_len: usize, max_len: usize) usize
         switch (rng.uintLessThan(u8, 8)) {
             0 => { // Bit flip
                 const idx = rng.uintLessThan(usize, len);
-                buf[idx] ^= @as(u8, 1) << rng.uintLessThan(u3, 8);
+                buf[idx] ^= @as(u8, 1) << rng.int(u3);
             },
             1 => { // Interesting EVM byte overwrite
                 const idx = rng.uintLessThan(usize, len);
@@ -144,29 +144,39 @@ const WorkerConfig = struct {
     worker_id: usize,
     base_seed: u64,
     max_iters: u64,
-    end_ns: ?i128,
+    end_ns: ?i96,
     filter: ?[]const u8,
+    io: std.Io,
     total_execs: *std.atomic.Value(u64),
     failures: *std.atomic.Value(u64),
     stop_flag: *std.atomic.Value(bool),
 };
 
-fn saveCrash(target_name: []const u8, seed: u64, iter: u64, input: []const u8, err: anyerror) void {
-    std.fs.cwd().makeDir(".fuzz-crashes") catch {};
+fn saveCrash(io: std.Io, target_name: []const u8, seed: u64, iter: u64, input: []const u8, err: anyerror) void {
     var path_buf: [256]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, ".fuzz-crashes/{s}_seed{d}_iter{d}.bin", .{ target_name, seed, iter }) catch return;
-    const file = std.fs.cwd().createFile(path, .{}) catch return;
-    defer file.close();
-    file.writeAll(input) catch {};
+    const saved: []const u8 = if (writeCrash(io, &path_buf, target_name, seed, iter, input)) |path| path else |save_err| @errorName(save_err);
 
     std.debug.print(
         "\n[FUZZ FAILURE] target={s} err={s} seed={d} iter={d} len={d} saved={s}\n  hex=",
-        .{ target_name, @errorName(err), seed, iter, input.len, path },
+        .{ target_name, @errorName(err), seed, iter, input.len, saved },
     );
     for (input[0..@min(input.len, 128)]) |b| {
         std.debug.print("{x:0>2}", .{b});
     }
     std.debug.print("\n", .{});
+}
+
+/// Write the failing input to `.fuzz-crashes/` and return its path.
+fn writeCrash(io: std.Io, path_buf: []u8, target_name: []const u8, seed: u64, iter: u64, input: []const u8) ![]const u8 {
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, ".fuzz-crashes");
+    const path = try std.fmt.bufPrint(path_buf, ".fuzz-crashes/{s}_seed{d}_iter{d}.bin", .{ target_name, seed, iter });
+    try cwd.writeFile(io, .{ .sub_path = path, .data = input });
+    return path;
+}
+
+fn nowNs(io: std.Io) i96 {
+    return std.Io.Timestamp.now(io, .awake).nanoseconds;
 }
 
 fn workerMain(cfg: WorkerConfig) void {
@@ -205,7 +215,7 @@ fn workerMain(cfg: WorkerConfig) void {
     while (!cfg.stop_flag.load(.acquire)) {
         if (cfg.max_iters > 0 and iter >= cfg.max_iters) break;
         if (cfg.end_ns) |deadline| {
-            if ((iter & 0x3f) == 0 and std.time.nanoTimestamp() >= deadline) break;
+            if ((iter & 0x3f) == 0 and nowNs(cfg.io) >= deadline) break;
         }
 
         // Weighted target selection
@@ -228,7 +238,7 @@ fn workerMain(cfg: WorkerConfig) void {
 
         // Execute target!
         target.func({}, work_buf[0..mutated_len]) catch |err| {
-            saveCrash(target.name, cfg.base_seed, iter, work_buf[0..mutated_len], err);
+            saveCrash(cfg.io, target.name, cfg.base_seed, iter, work_buf[0..mutated_len], err);
             _ = cfg.failures.fetchAdd(1, .acq_rel);
             cfg.stop_flag.store(true, .release);
             return;
@@ -246,18 +256,16 @@ fn workerMain(cfg: WorkerConfig) void {
     }
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     var seconds: u64 = 10;
     var max_iters: u64 = 0;
     var threads: usize = 1;
-    var seed: u64 = @intCast(@as(u128, @bitCast(std.time.nanoTimestamp())) & 0xffff_ffff_ffff_ffff);
+    var seed: u64 = @truncate(@as(u96, @bitCast(std.Io.Timestamp.now(io, .real).nanoseconds)));
     var filter: ?[]const u8 = null;
 
     for (args[1..]) |arg| {
@@ -293,8 +301,8 @@ pub fn main() !void {
         }
     }
 
-    const start_ns = std.time.nanoTimestamp();
-    const end_ns: ?i128 = if (seconds > 0) start_ns + @as(i128, seconds) * std.time.ns_per_s else null;
+    const start_ns = nowNs(io);
+    const end_ns: ?i96 = if (seconds > 0) start_ns + @as(i96, seconds) * std.time.ns_per_s else null;
 
     var total_execs = std.atomic.Value(u64).init(0);
     var failures = std.atomic.Value(u64).init(0);
@@ -316,6 +324,7 @@ pub fn main() !void {
             .max_iters = max_iters,
             .end_ns = end_ns,
             .filter = filter,
+            .io = io,
             .total_execs = &total_execs,
             .failures = &failures,
             .stop_flag = &stop_flag,
@@ -328,7 +337,7 @@ pub fn main() !void {
         h.join();
     }
 
-    const elapsed_ms: f64 = @as(f64, @floatFromInt(std.time.nanoTimestamp() - start_ns)) / 1_000_000.0;
+    const elapsed_ms: f64 = @as(f64, @floatFromInt(nowNs(io) - start_ns)) / 1_000_000.0;
     const execs = total_execs.load(.acquire);
     const exec_per_sec: f64 = if (elapsed_ms > 0) (@as(f64, @floatFromInt(execs)) * 1000.0 / elapsed_ms) else 0;
     const fail_count = failures.load(.acquire);

@@ -7,7 +7,7 @@ test "gas refunds from data floor: AUTHORIZATION EXISTING AUTHORITY EXECUTION GA
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -22,7 +22,7 @@ test "gas refunds from data floor: AUTHORIZATION EXISTING AUTHORITY EXECUTION GA
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -37,7 +37,7 @@ test "gas refunds from data floor: AUTHORIZATION EXISTING AUTHORITY EXECUTION GA
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -52,7 +52,7 @@ test "gas refunds from data floor: STORAGE CLEAR EXECUTION GAS MINUS REFUND EQUA
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -67,7 +67,7 @@ test "gas refunds from data floor: STORAGE CLEAR EXECUTION GAS MINUS REFUND GREA
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -82,7 +82,7 @@ test "gas refunds from data floor: STORAGE CLEAR EXECUTION GAS MINUS REFUND LESS
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -97,7 +97,7 @@ test "gas refunds from data floor: STORAGE CLEAR and AUTHORIZATION EXISTING AUTH
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -112,7 +112,7 @@ test "gas refunds from data floor: STORAGE CLEAR and AUTHORIZATION EXISTING AUTH
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
@@ -127,7 +127,7 @@ test "gas refunds from data floor: STORAGE CLEAR and AUTHORIZATION EXISTING AUTH
     const allocator = testing.allocator;
 
     const json_path = "specs/cases/eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});

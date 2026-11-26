@@ -46,18 +46,18 @@
         },
         .zbench = .{
             // Pinned release tag; the content hash guards against tag moves.
+            // Lazy: no build step uses it, so package consumers never fetch it.
             .url = "https://github.com/hendriknielaender/zBench/archive/refs/tags/v0.14.1.tar.gz",
             .hash = "zbench-0.14.1-YTdc781OAQCR6wxqkgAwm9bG4TnFGzm8c9aE-ZPiTAU1",
+            .lazy = true,
         },
         .clap = .{
             // Tag 0.12.0 uses the removed `**` operator and does not parse on Zig 0.17.1.
             // This master commit (2026-11-10) passes its own test suite on Zig 0.17.1.
             .url = "https://github.com/Hejsil/zig-clap/archive/d7b9b5727f2ad156144a889141b14bbfc45de687.tar.gz",
             .hash = "clap-0.12.0-oBajB2npAQA1NBv-WsHcHjCiIFFuo5cP4uXaferyf5V2",
-        },
-        .mini = .{
-            // Minimal EVM implementation (guillotine-mini)
-            .path = "mini",
+            // Lazy: no build step uses it, so package consumers never fetch it.
+            .lazy = true,
         },
     },
 
@@ -75,7 +75,8 @@
         "src",
         "lib",
         "bench",
-        "mini",
+        "Cargo.toml",
+        "Cargo.lock",
         "LICENSE",
         "README.md",
     },

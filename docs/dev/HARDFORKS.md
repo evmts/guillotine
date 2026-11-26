@@ -455,13 +455,12 @@ zig build specs -Devm-hardfork=CANCUN
 ## Testing Hardfork-Specific Features
 
 ```bash
-# Mini EVM granular targets
-zig build specs-cancun-tstore-basic      # EIP-1153
-zig build specs-cancun-mcopy             # EIP-5656
-zig build specs-cancun-selfdestruct      # EIP-6780
-zig build specs-shanghai-push0           # EIP-3855
-zig build specs-shanghai-warmcoinbase    # EIP-3651
-zig build specs-berlin-acl               # EIP-2929/2930
+# Official EEST state tests for one fork
+zig build state-tests -Doptimize=ReleaseSafe -Dspec-fork=Cancun
+
+# Opcode-level tests, e.g. TSTORE (0x5D) and MCOPY (0x5E)
+zig build test-opcodes-0x5d
+zig build test-opcodes-0x5e
 ```
 
 ## Implementation Checklist

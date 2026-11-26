@@ -136,6 +136,19 @@ jobs:
       - name: Fusion tests
         if: ${{ !cancelled() }}
         run: zig build test-fusions
+      - name: Integration tests
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: zig build test-integration
+      - name: Fuzz campaign smoke run (5 s)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=5
+      - name: JIT tests (macOS arm64)
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          zig build test-jit
       - name: FFI libraries (ReleaseFast)
         if: ${{ !cancelled() }}
         run: zig build shared static -Doptimize=ReleaseFast

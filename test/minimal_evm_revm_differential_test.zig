@@ -107,6 +107,11 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
         }
     }
     
+    // set_storage records each slot's pre-write value as its original value
+    // (EIP-2200), which for pre-state is 0. Pre-state is the original value,
+    // so drop those records before the transaction runs.
+    evm.original_storage.clearRetainingCapacity();
+
     // Set contract code
     try evm.setCode(contract_addr, bytecode);
     

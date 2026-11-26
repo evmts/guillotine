@@ -82,6 +82,14 @@ fn deployContract(testor: *differential_testor.DifferentialTestor, init_code: []
         .code_hash = code_hash,
         .storage_root = @as([32]u8, @splat(0)),
     });
+    // The no-trace instance below runs the init code, so its database needs it too.
+    const code_hash_no_trace = try testor.guillotine_db_no_trace.set_code(init_code);
+    try testor.guillotine_db_no_trace.set_account(testor.contract.bytes, .{
+        .balance = 0,
+        .nonce = 1,
+        .code_hash = code_hash_no_trace,
+        .storage_root = @as([32]u8, @splat(0)),
+    });
     
     // Use Guillotine EVM for deployment since we don't have revm_instance anymore
     var execution_success = false;

@@ -105,8 +105,9 @@ frame. Handlers live in `src/instructions/handlers_*.zig`, grouped by category:
 A sequential `switch`-loop interpreter in `minimal_evm.zig`, `minimal_frame.zig`,
 and `minimal_host.zig`. No dispatch schedule, no fusion, no tail calls. Its job
 is to be obviously correct and readable so it can serve as the oracle in
-differential tests. guillotine-mini (`mini/`) is the standalone version with its
-own WASM build (`cd mini && zig build wasm`).
+differential tests. The standalone readable reference EVM, with its own WASM
+build, is the separate repository
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini).
 
 ## State
 

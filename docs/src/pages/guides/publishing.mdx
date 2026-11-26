@@ -1,0 +1,138 @@
+---
+title: Publishing and releases
+description: How a v* tag builds the C FFI libraries, creates the GitHub Release with checksums, publishes @tevm/guillotine to npm, and versions the Zig package.
+---
+
+# Publishing and releases
+
+One semver tag publishes four surfaces:
+
+| Surface | Artifact | Trigger |
+| --- | --- | --- |
+| GitHub Releases | `libguillotine_ffi.so`, `libguillotine_ffi.dylib`, `guillotine.h`, `SHA256SUMS.txt` | Push tag `v*` |
+| npm (`@tevm/guillotine`) | ESM package with `darwin-arm64` and `linux-x64` prebuilds, signed with npm provenance | Push tag `v*`, once the `NPM_TOKEN` secret exists |
+| Zig package | Source archive `refs/tags/v<version>.tar.gz` for `zig fetch --save` | Push tag `v*` |
+| Docs (`guillotine.tevm.sh`) | Vocs site built from `docs/` | Vercel deploys every push to `main` |
+
+## Release assets
+
+| Asset | Contents |
+| --- | --- |
+| `libguillotine_ffi.so` | C FFI shared library, Linux x86_64, glibc >= 2.28 |
+| `libguillotine_ffi.dylib` | C FFI shared library, macOS arm64 |
+| `guillotine.h` | C header (`sdks/c/include/guillotine.h`) |
+| `SHA256SUMS.txt` | SHA-256 checksums of the three files above |
+
+Verify a download:
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing        # Linux
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing    # macOS
+```
+
+The static archive (`zig build static`) is not a release asset. It does not
+bundle `libblst`, `libcrypto_wrappers` or `libckzg`, so a consumer cannot link
+it alone.
+
+## Cutting a release
+
+1. Set the same version in `build.zig.zon` (`.version`) and
+   `sdks/typescript/package.json` (`"version"`), without a leading `v`.
+2. Add a `## [<version>] - <date>` section to `CHANGELOG.md`. The release
+   workflow uses that section as the GitHub Release notes; without it, GitHub
+   generates notes.
+3. Land the change on `main`, then tag that commit `v<version>` and push the
+   tag.
+
+Run `workflow_dispatch` on the Release workflow to rehearse: it runs every build
+and test, packs the npm tarball, uploads the release assets as a workflow
+artifact, and publishes nothing.
+
+## Release workflow (`.github/workflows/release.yml`)
+
+The workflow sets `permissions: {}` at the top level. Each job requests only
+what it needs.
+
+### 1. `version`
+
+`contents: read`. Fails unless `build.zig.zon`, `sdks/typescript/package.json`
+and the tag name agree.
+
+### 2. `build` (matrix)
+
+`contents: read`. Builds with stock Zig 0.17.1 and recursive submodules:
+
+| Runner | Platform | Build command | Library |
+| --- | --- | --- | --- |
+| `macos-latest` (arm64) | `darwin-arm64` | `zig build shared -Doptimize=ReleaseFast -Dstrip=true` | `libguillotine_ffi.dylib` |
+| `ubuntu-latest` (x86_64) | `linux-x64` | `zig build shared -Doptimize=ReleaseFast -Dstrip=true -Dtarget=x86_64-linux-gnu.2.28` | `libguillotine_ffi.so` |
+
+The Linux leg targets glibc 2.28 so the library loads on older distributions,
+then checks with `objdump -T` that no symbol needs a newer glibc. The macOS leg
+first runs the same Xcode SDK probe as `.github/workflows/ci.yml`. Each leg runs
+the C SDK tests and the TypeScript SDK tests against the library it built, then
+uploads the library as a workflow artifact.
+
+### 3. `github-release`
+
+`contents: write`; the only job that can write to the repository. It downloads
+both libraries, copies `sdks/c/include/guillotine.h`, writes `SHA256SUMS.txt`
+with `sha256sum`, extracts the version's `CHANGELOG.md` section, and on a tag
+runs `gh release create --verify-tag` with the four assets.
+
+### 4. `npm`
+
+`contents: read` and `id-token: write`; the OIDC token signs
+[npm provenance](https://docs.npmjs.com/generating-provenance-statements).
+
+1. Combines both prebuilds into `sdks/typescript/prebuilds/`.
+2. Runs `bun run build`, `bun run typecheck`, `bun test` and
+   `bun run lint:package`, then `npm pack --dry-run`.
+3. On a tag, runs `npm publish --provenance --access public --ignore-scripts`.
+   `--ignore-scripts` skips `prepublishOnly`, which would rebuild only the host
+   platform's library.
+
+`NODE_AUTH_TOKEN` comes from `secrets.NPM_TOKEN` in the publish step's `env:`
+only. The job exposes `HAS_NPM_TOKEN` (`true` or `false`) instead of the token,
+and gates the publish step on it. Until the secret exists, the step is skipped
+with a notice and the GitHub Release still publishes.
+
+## Zig package
+
+Every `v*` tag makes a source archive available to the Zig package manager.
+`build.zig` exports the public modules `evm`, `voltaire` and `layer2`:
+
+```bash
+zig fetch --save=guillotine https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz
+```
+
+```zig
+// build.zig.zon, written by zig fetch --save
+.guillotine = .{
+    .url = "https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz",
+    .hash = "...",
+},
+```
+
+```zig
+// build.zig
+const guillotine = b.dependency("guillotine", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("evm", guillotine.module("evm"));
+```
+
+The `=guillotine` suffix sets the dependency key; without it, `zig fetch` uses
+the package name `Guillotine`.
+
+## Documentation site
+
+`docs/` is a Vocs 2 site. Vercel uses `docs/` as the project root and deploys
+every push to `main`. `docs/vercel.json` sets the install and build commands and
+leaves `outputDirectory` unset, because `vocs build` detects the `VERCEL`
+environment variable and emits Build Output API artifacts. Build locally before
+pushing:
+
+```bash
+cd docs
+npm install
+npm run build
+```

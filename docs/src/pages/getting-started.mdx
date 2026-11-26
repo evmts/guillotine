@@ -11,13 +11,11 @@ example below was compiled and run. See [Running it](#running-it).
 
 ## Where to put the code
 
-Build inside a checkout of the repository. The root `build.zig` does not export
-any named module: it creates the `evm` module with `b.createModule`
-(`src/modules.build.zig`) and never calls `b.addModule`, so a project that
-adds Guillotine with `zig fetch --save` cannot call
-`dependency("Guillotine", .{}).module("evm")`.
+In your own project, add Guillotine as a Zig package and import
+`guillotine.module("evm")` (see [Use it from a Zig project](/installation#use-it-from-a-zig-project)).
+The package also exports `voltaire` and `layer2`.
 
-Inside the checkout, `zig build test-integration` compiles `test/root.zig` with
+Inside a checkout of the repository, `zig build test-integration` compiles `test/root.zig` with
 the `evm` and `voltaire` imports already wired (`build.zig`). Put the examples
 below in a file under `test/` and register it in `test/root.zig`:
 

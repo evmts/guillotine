@@ -10,9 +10,10 @@ execution **fast**, **configurable at compile time**, and **embeddable** from
 other languages through a C ABI (`src/evm_c_api.zig`).
 
 :::warning[Alpha software]
-Guillotine is early alpha and is **not suitable for production use**. It passes
-all 66,652 official EEST state-test cases (Frontier through Osaka) but has had
-no external audit. See [Project status](/status) for the measured numbers and
+Guillotine is early alpha and is **not suitable for production use**. v0.1.0
+passes all 66,652 official EEST state-test cases across the 14 mainnet
+hardforks (Frontier through Osaka), with fusions on and off, but has had no
+external audit. See [Project status](/status) for the measured numbers and
 their sources.
 :::
 
@@ -59,16 +60,18 @@ codebase:
 
 ## Two EVMs, one repository
 
-| | Performance EVM (`src/`) | `MinimalEvm` (`src/tracer/`) and guillotine-mini (`mini/`) |
+| | Performance EVM (`src/`) | `MinimalEvm` (`src/tracer/`) |
 | --- | --- | --- |
 | Execution model | Dispatch schedule + tail calls | Sequential `switch` over bytecode |
 | Optimised for | Throughput | Readability and correctness |
 | Role | The product | Reference oracle for differential tests |
-| Size | Whole `src/` tree | `minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig`; `mini/` has its own `build.zig` |
+| Size | Whole `src/` tree | `minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` |
 
 They are not competitors. `MinimalEvm` is the thing that lets you *trust* the
 fast one: the tracer steps both machines forward together and asserts they agree
-on stack, memory, gas, and storage after every instruction.
+on stack, memory, gas, and storage after every instruction. The standalone
+readable reference EVM is a separate repository,
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini).
 
 ## Where to go next
 
@@ -76,8 +79,8 @@ on stack, memory, gas, and storage after every instruction.
 
 ### Install the toolchain
 
-[Installation](/installation) lists the prerequisites: Zig 0.17.1, a Rust
-toolchain for the vendored crypto wrappers, and a C compiler.
+[Installation](/installation) lists the prerequisites: stock Zig 0.17.1 (no
+compiler fork), a Rust toolchain for the vendored crypto wrappers, and a C compiler.
 
 ### Run your first execution
 

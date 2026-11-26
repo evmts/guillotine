@@ -126,9 +126,10 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
                 try db.set_storage(addr, @intCast(slot_idx), val);
                 ref.storage[a_idx][slot_idx] = val;
             },
-            5 => { // delete_account
+            5 => { // delete_account (removes the account and its storage)
                 try db.delete_account(addr);
                 ref.accounts[a_idx] = .{};
+                ref.storage[a_idx] = @splat(0);
             },
             6 => { // create_snapshot (up to depth 6)
                 if (snaps.items.len < 6) {
@@ -321,4 +322,17 @@ test "fuzz journal O(1) original storage index vs brute-force log under nested r
 
 test "fuzz EIP-2929 access list warm/cold gas accounting and cloning" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzAccessListWarmCold), .{ .corpus = seed_corpus });
+}
+
+// Found by `zig build fuzz-campaign` (seed 1795676221327508486, iteration 47):
+// set_storage on account 1, then delete_account(1). The reference model kept
+// the deleted account's storage while Database.delete_account clears it.
+test "storage_db: delete_account clears storage under snapshots" {
+    const input = [_]u8{
+        0xdd, 0x70, 0x52, 0x71, 0x40, 0xf5, 0xe8, 0xb3, 0xad, 0x88, 0xf7, 0x73, 0x53, 0xec, 0xea, 0xc5,
+        0xdd, 0x9b, 0xee, 0x35, 0x3d, 0xeb, 0x5a, 0x14, 0xce, 0x42, 0x49, 0x62, 0x19, 0x49, 0x22, 0x77,
+        0xd8, 0xe4, 0x42, 0x32, 0x09, 0x28, 0x41, 0x52, 0xd3, 0x7b, 0xcc, 0xd1, 0x16, 0x3d, 0xeb, 0x5a,
+        0x14, 0xce, 0x42, 0x49, 0x62, 0x19, 0x49, 0x22, 0x77, 0xd8, 0xe4, 0x42, 0x32,
+    };
+    try fuzzDatabaseSnapshotsAndViews({}, &input);
 }

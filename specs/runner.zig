@@ -711,7 +711,7 @@ fn parseHexData(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     // Handle concatenated :raw data
     if (std.mem.indexOf(u8, clean_data, ",:raw ")) |_| {
         var parts = std.mem.tokenizeSequence(u8, clean_data, ",:raw ");
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         while (parts.next()) |part| {
@@ -733,7 +733,7 @@ fn parseHexData(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     // 1. First replace placeholders with their hex addresses (without 0x)
     // 2. Then ensure the entire string is valid hex
     if (is_raw and std.mem.indexOf(u8, clean_data, "<") != null) {
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         // Remove 0x prefix if present for processing

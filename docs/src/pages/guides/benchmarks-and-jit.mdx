@@ -1,0 +1,107 @@
+---
+title: Benchmarks and native JIT
+description: The self-contained ReleaseFast benchmark runner, the v0.1.0 numbers, and the standalone ARM64 JIT library.
+---
+
+# Benchmarks and native JIT
+
+Guillotine ships a self-contained ReleaseFast benchmark runner under `bench/`.
+It needs no external `evmts/evm-benchmarks` checkout, `zbench` dependency, or
+RPC endpoint. The repository also contains a zero-dependency ARM64 JIT library
+under `src/jit/`.
+
+## v0.1.0 numbers
+
+Measured with the in-repo runner in ReleaseFast on x86_64 Linux, stock Zig
+0.17.1, gas accounting on and tracing off:
+
+| Workload | Median | Comparison |
+| --- | ---: | --- |
+| `contract/snailtracer` | **37.86 ms** (6.21 GGas/s) | 1.25x faster than revm (47.21 ms) |
+| `precompile/ECRECOVER` | **0.171 ms** | 182x faster than before the v0.1.0 rewrite |
+| `precompile/MODEXP-256` | **2.82 µs** | |
+| `precompile/BN254-mul` | **8.16 µs** | |
+
+The revm figure comes from `revme bench snailtracer`, a different harness on the
+same host, so treat the 1.25x ratio as indicative.
+
+## Running the benchmarks
+
+Run every command from the repository root with Zig 0.17.1. The runner builds
+the EVM and its dependencies in ReleaseFast and refuses timing runs in any other
+optimization mode.
+
+```bash
+# Full suite from the root build (Osaka, 16,777,216 gas budget)
+zig build bench
+
+# Filter and set sample and warmup counts
+zig build bench -- --filter opcode/ADD --iterations 1000 --warmup 100
+
+# Write JSON (default bench/results/latest.json)
+zig build bench -- --json bench/results/latest.json
+
+# Contract fixtures such as snailtracer need Prague's 1B off-chain budget;
+# -Dbench-hardfork is an option of the standalone bench/build.zig
+zig build --build-file bench/build.zig bench -Dbench-hardfork=PRAGUE -- --filter contract/
+
+# Harness tests
+zig build test-bench
+```
+
+`zig build bench-build` installs `zig-out/bin/guillotine-bench`.
+
+:::info[Hardfork and gas budget]
+Benchmarks default to Osaka with EIP-7825's 16,777,216 transaction gas cap.
+Snailtracer consumes about 235M gas per call, so contract runs use
+`-Dbench-hardfork=PRAGUE` (1B off-chain budget). `CLZ` and `P256VERIFY` require
+Osaka and are reported as unavailable on Prague.
+:::
+
+### What a sample measures
+
+- Each sample times `evm.simulate()`: the ephemeral state overlay, dispatch
+  analysis, execution, and owned result copying. Deployment, preflight
+  validation, warmups and result cleanup are outside the timed window.
+- Every sample must succeed and match the preflight gas and output. Failed or
+  unavailable cases never receive timing numbers.
+- `--compare` reports the loop-dispatch row as `unavailable`, because the engine
+  always uses tail-call dispatch.
+
+`bench/README.md` documents the workloads, the JSON schema and the statistics.
+
+## Native ARM64 JIT library
+
+`src/jit/` compiles side-effect-free EVM bytecode directly to AArch64 machine
+code. It depends only on Zig `std` and `builtin`: no LLVM and no external
+assembler at runtime.
+
+:::warning[Not wired into `Evm`]
+In v0.1.0 the JIT is a library with its own tests. `Evm` and `EvmConfig` do not
+call it, so contracts always run on the dispatch-schedule interpreter. Run its
+tests with `zig build test-jit`; native code executes only on `aarch64` (CI
+runs the step on `macos-latest`).
+:::
+
+| File | Role |
+| --- | --- |
+| `src/jit/root.zig` | Public types (`JitContext`, `ExitCode`, `RuntimeHelpers`) and the test root |
+| `src/jit/compiler.zig` | EVM-to-AArch64 compiler (`Program`, `Options`, `compile`) |
+| `src/jit/arm64_emitter.zig` | AArch64 instruction encoder |
+| `src/jit/x86_64_emitter.zig` | x86_64 instruction encoder; `compile` returns `null` unless `builtin.cpu.arch == .aarch64` |
+| `src/jit/jit_mem.zig` | Executable page mapping (`MAP_JIT` with per-thread `pthread_jit_write_protect_np` toggling on macOS) |
+| `src/jit/jit_cache.zig` | Bounded LRU cache (`capacity = 64`, `hot_threshold = 2`) |
+
+### Eligibility and fallback
+
+- **Supported:** arithmetic, bitwise, comparison and stack operations, memory
+  (`MLOAD`, `MSTORE`, `MSTORE8`, `MSIZE`, `MCOPY`), calldata reads, control flow
+  (`JUMP`, `JUMPI`, `JUMPDEST`, `PC`, `GAS`), `KECCAK256`, `STOP`, `RETURN` and
+  `REVERT`.
+- **Ineligible:** storage, logs, calls and `CREATE`/`CREATE2`. `compile`
+  returns `null` for such code.
+- **Fallback:** a JIT run has no external side effects. When it returns
+  `ExitCode.fallback`, or `compile` returns `null`, the host re-executes the
+  whole call in the interpreter with identical results.
+- **Safety:** compiled code checks stack bounds against a 1,024-word stack, and
+  `JitContext.instruction_budget` defaults to 300,000,000.

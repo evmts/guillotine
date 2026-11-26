@@ -12,13 +12,13 @@
   </a>
 </p>
 
-<a href="docs/pages"><img width="833" height="444" alt="Guillotine Logo" src="https://github.com/user-attachments/assets/1effa677-d931-4453-8e98-2a70372efd91" /></a>
+<a href="docs/src/pages"><img width="833" height="444" alt="Guillotine Logo" src="https://github.com/user-attachments/assets/1effa677-d931-4453-8e98-2a70372efd91" /></a>
 
 **The ultrafast EVM for every language and platform**
 
 ---
 
-> **🔄 Repository in Flux**: This repo is currently undergoing significant refactoring as we prepare to release a new Zig library that will be like ethers.js or alloy for Zig. More updates coming soon!
+> **v0.1.0**: the first tagged release. It builds with stock Zig 0.17.1 using native `preserve_none` tail-call dispatch; no compiler fork is required. See [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -28,31 +28,29 @@
 
 Guillotine is not suitable for production use at this time. Any use of Guillotine should be considered purely experimental.
 
-### 📊 Ethereum Specification Test Results
+### 📊 Verification Results (v0.1.0)
 
-**Official EEST state tests** (`tests@v21.0.3`, Frontier through Osaka):
-- ✅ **66,652 / 66,652 passing (100.00%)** with fusion on and with fusion off
-- 16,907 Amsterdam cases are skipped because the fork is not implemented yet
+| Check | Result |
+| --- | --- |
+| Official EEST state tests (`tests@v21.0.3`), all 14 mainnet hardforks, Frontier through Osaka | **66,652 / 66,652 (100.00%)** with fusions on and with fusions off |
+| Zig-to-Lean 4.32.0 differential fuzz vectors (`verify/lean`) | **116,384 / 116,384 (100.00%)** |
+| SMT theorems (`verify/smt`) | **32 / 32 proved** |
+
+The pinned EEST release also contains 16,907 Amsterdam cases. They are skipped
+because Amsterdam is not implemented yet.
 
 Fetch the pinned fixtures with `scripts/fetch-eest-fixtures.sh`, then run
-`zig build state-tests -Doptimize=ReleaseFast` (add `-Devm-enable-fusion=false`
-for the unfused dispatch). CI asserts both counts on every push.
-
-**Lean 4 differential fuzzing** against the reference specification in
-`verify/lean`: **116,384 / 116,384** cases match (`zig build test-lean-diff`,
-default seed, 2,000 iterations).
+`zig build state-tests -Doptimize=ReleaseSafe` (add `-Devm-enable-fusion=false`
+for the unfused dispatch). CI asserts both counts on every push. Run the Lean
+differential fuzzer with `zig build test-lean-diff` and the full formal
+verification suite with `zig build verify`.
 
 A full spec pass is not production readiness: see the status above.
 See [specs/README.md](specs/README.md) for detailed instructions on running the test suites.
 
-**Current Development Focus**: Our primary goal is achieving 100% Ethereum specification compliance while ensuring complete safety, debuggability, and observability through our tracer system ([`src/tracer/tracer.zig`](src/tracer/tracer.zig)). The tracer provides comprehensive execution monitoring, differential testing against a reference implementation, and detailed error reporting for every opcode.
+For an in-depth understanding of Guillotine's design and implementation, see the [Architecture Documentation](docs/src/pages/concepts/architecture.mdx). Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for planned features.
 
-For an in-depth understanding of Guillotine's design and implementation, see our comprehensive [Architecture Documentation](docs/src/pages/concepts/architecture.mdx). Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for features planned for Beta.
-
-**Network Support**: Currently only **Ethereum Mainnet** is supported. Planned for Beta:
-
-- **OP Stack** support (Optimism, Base, etc.)
-- **Arbitrum Nitro** support
+**Network Support**: Ethereum Mainnet (Frontier through Osaka) and Base L2 / OP Stack (Bedrock through Jovian, pre-Azul) on the real EVM engine (the `Evm` type behind `DefaultEvm`, `src/layer2/evm_host.zig`). Run the Layer 2 tests with `zig build test-layer2`. Arbitrum Nitro is not supported.
 
 ---
 
@@ -61,23 +59,18 @@ For an in-depth understanding of Guillotine's design and implementation, see our
 🚧 = Coming soon. Consider opening a discussion if you have any API recommendations or requested features.
 
 - ⚡ **Extreme speed**
-- 🌐 **Universal** - Planned and experimental support for many languages and platforms
-  - **Golang** - Available with FFI bindings
-  - **Zig**
-  - **C**
-  - **TypeScript** - Wasm or Bun
-  - **Rust**
-  - **Wasm**
-  - **🚧 Python** - Looking for contributors
-  - **🚧 Swift** - Looking for contributors
-  - **🚧 Kotlin** - Looking for contributors
+- 🌐 **Universal** - Shipped SDKs, plus a skill for building more
+  - **Zig** - Zig package (`dep.module("evm")`)
+  - **C** - `libguillotine_ffi` + `guillotine.h`
+  - **TypeScript** - `@tevm/guillotine`, Bun FFI
+  - **Other languages** (Go, Rust, Python, Swift, Kotlin) - generate bindings over the C FFI with the [Custom SDK Builder skill](.agents/skills/guillotine-sdk-builder/SKILL.md)
 - 📦 **Minimal bundle size**
   - Zig `comptime` configuration means you only pay for features you actually use
   - Skip precompiles or use specific hard forks without bundle size or runtime overhead
 - 📚 **Well documented**
 - 🎨 **Fun** - Guillotine is a fun way to dive into Zig and fun/easy to [contribute](./CONTRIBUTING.md) to
 - 🤖 **LLM-friendly**
-- 🧪 **Robust** - Guillotine takes testing and architecture very seriously with [full unit tests](./src) for all files, a robust [E2E test suite](./test/e2e), [fuzz testing](./test/fuzz), [differential testing](./test/differential) using MinimalEvm, and [benchmark testing](./test/benchmark)
+- 🧪 **Robust** - Guillotine takes testing and architecture very seriously with [full unit tests](./src) for all files, [fuzz testing](./test/fuzz), [differential testing](./test/differential) using MinimalEvm, and [benchmarks](./bench)
 - ✨ **Useful** - 🚧 Coming soon 🚧 Guillotine is building a powerful [CLI](https://github.com/evmts/Guillotine/issues) and [native app](https://github.com/evmts/Guillotine/issues) that you can think of as a local-first, Tenderly-like tool
 
 ---
@@ -88,7 +81,7 @@ For an in-depth understanding of Guillotine's design and implementation, see our
 
 ### Prerequisites
 
-- **Zig 0.17.1** (exactly - use [zvm](https://github.com/marler182/zvm) to manage versions)
+- **Zig 0.17.1** (the stock release; no compiler fork. Use [zvm](https://github.com/marler182/zvm) to manage versions)
 - **Rust toolchain** 1.75+ (for cryptographic dependencies)
 - **Git** (with submodule support)
 
@@ -113,73 +106,75 @@ zig build test-opcodes
 
 ## 🧰 SDKs (Experimental)
 
-Guillotine officially ships three integration surfaces:
+Guillotine v0.1.0 ships three integration surfaces:
 
-- **Zig native bindings** — the repository's native EVM API in `src/root.zig`.
-- **[C FFI](sdks/c)** — native embedding and custom language bindings.
-- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — Bun native FFI (`bun:ffi`) bindings to `libguillotine_ffi`, the library built from `src/evm_c_api.zig`.
+- **Zig package**: the public modules `evm`, `voltaire` and `layer2`, consumed with `dep.module("evm")`.
+- **[C FFI](sdks/c)**: `libguillotine_ffi` (built from `src/evm_c_api.zig`) and the header [`sdks/c/include/guillotine.h`](sdks/c/include/guillotine.h).
+- **[`@tevm/guillotine` TypeScript](sdks/typescript)**: Bun native FFI (`bun:ffi`) bindings to `libguillotine_ffi`; 340 / 340 tests pass.
 
 The C and TypeScript APIs are experimental and may change. For Python, Go,
-Rust, Swift, Kotlin/JNI, or native Bun FFI, use the
-[custom SDK guide](docs/building-custom-sdks.md) and
-[SDK builder skill](.agents/skills/guillotine-sdk-builder/SKILL.md).
+Rust, Swift, Kotlin/JNI, or other languages, use the
+[custom SDK guide](docs/building-custom-sdks.md) and the
+[Custom SDK Builder skill](.agents/skills/guillotine-sdk-builder/SKILL.md).
 See [sdks/README.md](sdks/README.md) for the maintained SDK scope and build commands.
 
----
+### Zig package
 
-## 📊 Benchmarks & Bundle Size 🚧
+Add the dependency. The `=guillotine` suffix names the dependency key; without
+it, `zig fetch` uses the package name `Guillotine`.
 
-Guillotine is fast.
-
-Benchmarks so far look very promising.
-
-- Guillotine shows measurable performance gains over [REVM](https://github.com/bluealloy/revm) and performance on par with [evmone](https://github.com/ethereum/evmone).
-- More major optimizations planned for Beta release
-
-### Overall Performance Summary (Per Run)
-
-These benchmarks were taken using the [evm-bench](https://github.com/ziyadedher/evm-bench) test cases with `hyperfine`.
-
-- Benchmarking infra can be seen in previous commits but is currently being moved to its [own dedicated repo](https://github.com/evmts/evm-benchmarks).
-- Looking for contributors to help set up easily reproducible benchmarks
-
-| Test Case               | evmone   | Guillotine | REVM     | Geth     |
-| ----------------------- | -------- | ---------- | -------- | -------- |
-| erc20-approval-transfer | 1.56 ms  | 1.59 ms    | 1.67 ms  | 3.65 ms  |
-| erc20-mint              | 4.26 ms  | 4.28 ms    | 5.76 ms  | 12.84 ms |
-| erc20-transfer          | 6.01 ms  | 6.65 ms    | 8.30 ms  | 17.50 ms |
-| ten-thousand-hashes     | 2.90 ms  | 2.46 ms    | 3.31 ms  | 9.36 ms  |
-| snailtracer             | 27.15 ms | 26.41 ms   | 39.01 ms | 86.02 ms |
-
-The table above is historical (evm-bench with `hyperfine`). The current in-repo
-runner (`zig build bench`, ReleaseFast) measured `contract/snailtracer` at a
-**38.11 ms** median on an AMD EPYC 7443P (Linux x86_64). `revme bench
-snailtracer` measured revm at 47.21 ms on the same host with its own harness, so
-treat the 1.24x ratio as indicative only. See [bench/README.md](bench/README.md).
-
----
-
-### Bundle size 🚧
-
-```
-WASM Bundle Sizes
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│ Package         │ Size                                      │ Mode         │ Precompiles   │
-├───────────────────────────────────────────────────────────────────────────────────────────┤
-│ MinimalEvm     │ ▓▓▓ 56KB                                   │ ReleaseSmall │ ✗ Not included│
-│ Guillotine EVM │ ▓▓▓▓▓▓ 119KB                              │ ReleaseSmall │ ✗ Not included│
-│ Primitives     │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 687KB │ ReleaseSmall │ ✗ Not included│
-│ Full Package   │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 1.1MB │ ReleaseFast  │ ✓ Included    │
-└───────────────────────────────────────────────────────────────────────────────────────────┘
+```bash
+zig fetch --save=guillotine https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz
 ```
 
-- **MinimalEvm**: Minimal implementation focused on tracing (57,641 bytes)
-- **Guillotine EVM**: Core EVM implementation
-- **Primitives**: Complete primitives library
-- **Full Package**: All features including precompiles
+`zig fetch` writes the entry and its hash into your `build.zig.zon`:
 
-Note: Smaller packages use `ReleaseSmall` optimization for size, while the full package uses `ReleaseFast` for performance.
-**ReleaseSafe** builds (recommended for alpha) are larger due to additional safety features and validation overhead.
+```zig
+.dependencies = .{
+    .guillotine = .{
+        .url = "https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz",
+        .hash = "...", // filled in by zig fetch --save
+    },
+},
+```
+
+Import the `evm` module in `build.zig`:
+
+```zig
+const guillotine = b.dependency("guillotine", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("evm", guillotine.module("evm"));
+```
+
+### Release assets
+
+Each GitHub Release attaches:
+
+| Asset | Contents |
+| --- | --- |
+| `libguillotine_ffi.so` | C FFI shared library, Linux x86_64, glibc >= 2.28 |
+| `libguillotine_ffi.dylib` | C FFI shared library, macOS arm64 |
+| `guillotine.h` | C header for both libraries |
+| `SHA256SUMS.txt` | SHA-256 checksums of the three files above |
+
+Verify downloads with `sha256sum -c SHA256SUMS.txt --ignore-missing` (Linux) or
+`shasum -a 256 -c SHA256SUMS.txt --ignore-missing` (macOS).
+
+---
+
+## 📊 Benchmarks
+
+Measured with the in-repo runner (`zig build bench`, ReleaseFast) on x86_64 Linux:
+
+| Workload | Guillotine | Comparison |
+| --- | --- | --- |
+| `contract/snailtracer` | **37.86 ms** (6.21 GGas/s) | 1.25x faster than revm (47.21 ms) |
+| `precompile/ECRECOVER` | **0.171 ms** | 182x faster than the previous implementation |
+| `precompile/MODEXP-256` | **2.82 µs** | |
+| `precompile/BN254-mul` | **8.16 µs** | |
+
+The revm figure comes from `revme bench snailtracer`, a different harness on the
+same host, so treat the ratio as indicative. See [bench/README.md](bench/README.md)
+and [Benchmarks and native JIT](docs/src/pages/guides/benchmarks-and-jit.mdx).
 
 ---
 
@@ -225,17 +220,13 @@ Guillotine is in early alpha, but we prioritize safety through multiple build mo
 
 #### ReleaseSafe Features
 
-**ReleaseSafe** includes a comprehensive safety system that runs a simplified EVM as a sidecar to validate execution:
+**ReleaseSafe** keeps Zig's runtime safety checks (bounds, overflow, unreachable) in an optimized build. The tracer adds opt-in checks on top:
 
-- ✅ **Parallel Validation**: Runs a minimal EVM implementation alongside to cross-check results
-- ✅ **Safety Checks**: Validates execution at every step to ensure correctness
-- ✅ **Infinite Loop Protection**: Prevents runaway execution with instruction limits
-- ✅ **Advanced Tracing**: Full event system for monitoring EVM execution
-- ✅ **Debugging Support**: Can run as a debugger with step-by-step execution
-- ✅ **Memory Safety**: Preserves all debug-mode defensive checks
-- ✅ **Comprehensive Logging**: Detailed logging of all EVM operations
+- ✅ **Differential validation**: with `TracerConfig.enabled` and `enable_validation` set (both default to `false`), the tracer runs MinimalEvm (`src/tracer/minimal_evm.zig`) beside the dispatch engine and compares state after every instruction
+- ✅ **Infinite loop protection**: `EvmConfig.loop_quota` caps loops in Debug and ReleaseSafe, and the tracer caps execution at 300M instructions
+- ✅ **Tracing and debugging**: an event system for step-by-step execution monitoring
 
-While ReleaseSafe has performance overhead compared to ReleaseFast, it provides critical safety guarantees during alpha development.
+While ReleaseSafe has performance overhead compared to ReleaseFast, it is the recommended mode during alpha.
 
 #### Additional Safety Measures
 
@@ -286,12 +277,8 @@ For most users who don't need customizations, we offer default options for all m
 
 ## 🔁 Relationship to Tevm
 
-Once stable, **Guillotine’s Wasm build** will replace the current JavaScript EVM in [Tevm](https://node.tevm.sh).
-Upgrades include:
-
-- 🚀 **Up to 1000x performance boost**
-- 📉 **300 KB (75%) bundle size reduction**
-- 🧱 **Fast Ethereum library** An ultrafast utility and client library wrapping the Guillotine primitives package
+Once stable, Guillotine will replace the current JavaScript EVM in [Tevm](https://node.tevm.sh).
+The `src/` engine has no WASM build today; `@tevm/guillotine` runs it through Bun FFI.
 
 ---
 

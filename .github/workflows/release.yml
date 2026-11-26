@@ -1,18 +1,22 @@
 name: Release
 
-# Push a `v*` tag to build the C FFI libraries on macOS arm64 and Linux x86_64,
-# publish @tevm/guillotine to npm with both prebuilds, and create a GitHub
-# Release with the C FFI tarballs. `workflow_dispatch` runs every build and
+# Push a `v*` tag to build the C FFI shared libraries on macOS arm64 and
+# Linux x86_64 (glibc >= 2.28), create a GitHub Release with
+# libguillotine_ffi.so, libguillotine_ffi.dylib, guillotine.h and
+# SHA256SUMS.txt, and publish @tevm/guillotine to npm with both prebuilds.
+# The npm publish runs only once the NPM_TOKEN secret exists; the GitHub
+# Release does not depend on it. `workflow_dispatch` runs every build and
 # check, packs the npm tarball, and publishes nothing.
+#
+# The static library (zig build static) is not shipped: it does not bundle
+# libblst, libcrypto_wrappers or libckzg, so consumers cannot link it alone.
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -23,6 +27,8 @@ jobs:
     name: Check versions
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
@@ -57,15 +63,22 @@ jobs:
             platform: darwin-arm64
             machine: arm64
             shared: libguillotine_ffi.dylib
+            # Native build for the runner's macOS.
+            zig_target: ''
           - os: ubuntu-latest
             platform: linux-x64
             machine: x86_64
             shared: libguillotine_ffi.so
+            # Link against glibc 2.28 so the library loads on older distributions.
+            zig_target: x86_64-linux-gnu.2.28
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    permissions:
+      contents: read
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       VERSION: ${{ needs.version.outputs.version }}
+      ZIG_TARGET: ${{ matrix.zig_target }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,8 +117,23 @@ jobs:
           cargo --version
           uname -sm
           test "$(uname -m)" = "${{ matrix.machine }}"
-      - name: Build FFI libraries (ReleaseFast, debug info stripped)
-        run: zig build shared static -Doptimize=ReleaseFast -Dstrip=true
+      - name: Build the FFI shared library (ReleaseFast, debug info stripped)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$ZIG_TARGET" ]; then
+            zig build shared -Doptimize=ReleaseFast -Dstrip=true -Dtarget="$ZIG_TARGET"
+          else
+            zig build shared -Doptimize=ReleaseFast -Dstrip=true
+          fi
+      - name: glibc symbol versions stay at or below 2.28
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          newest="$(objdump -T zig-out/lib/libguillotine_ffi.so | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)"
+          echo "newest GLIBC symbol version: $newest"
+          test "$(printf '%s\n2.28\n' "$newest" | sort -V | tail -n 1)" = "2.28"
       - name: C SDK tests
         run: make -f sdks/c/Makefile -o build-core test
       - name: Setup Bun
@@ -119,40 +147,103 @@ jobs:
           bun scripts/copy-native.ts
           test -f "prebuilds/${{ matrix.platform }}/${{ matrix.shared }}"
           bun test
-      - name: Package the C FFI tarball
-        shell: bash
-        run: |
-          set -euo pipefail
-          name="guillotine-ffi-v${VERSION}-${{ matrix.platform }}"
-          mkdir -p "dist/$name/lib" "dist/$name/include"
-          cp "zig-out/lib/${{ matrix.shared }}" zig-out/lib/libguillotine_ffi_static.a "dist/$name/lib/"
-          cp sdks/c/include/guillotine.h "dist/$name/include/"
-          cp LICENSE "dist/$name/"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          echo "FFI_TARBALL=dist/$name.tar.gz" >> "$GITHUB_ENV"
-      - name: Upload npm prebuild
+      - name: Upload the ${{ matrix.platform }} shared library
         uses: actions/upload-artifact@v4
         with:
           name: prebuild-${{ matrix.platform }}
-          path: sdks/typescript/prebuilds/${{ matrix.platform }}/${{ matrix.shared }}
-          if-no-files-found: error
-      - name: Upload C FFI tarball
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffi-${{ matrix.platform }}
-          path: ${{ env.FFI_TARBALL }}
+          path: zig-out/lib/${{ matrix.shared }}
           if-no-files-found: error
 
-  publish:
-    name: Publish
+  github-release:
+    name: GitHub Release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shared libraries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prebuild-*
+          path: artifacts/prebuilds
+      - name: Collect release assets and write SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp artifacts/prebuilds/prebuild-darwin-arm64/libguillotine_ffi.dylib release/
+          cp artifacts/prebuilds/prebuild-linux-x64/libguillotine_ffi.so release/
+          cp sdks/c/include/guillotine.h release/
+          (cd release && sha256sum libguillotine_ffi.so libguillotine_ffi.dylib guillotine.h > SHA256SUMS.txt)
+          cat release/SHA256SUMS.txt
+          ls -l release
+      - name: Upload release assets (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release/
+          if-no-files-found: error
+      - name: Extract this version's CHANGELOG.md section
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I - "$VERSION" CHANGELOG.md notes.md <<'PY'
+          import re, sys
+          from pathlib import Path
+          version, changelog, out = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+          text = changelog.read_text(encoding="utf-8") if changelog.is_file() else ""
+          match = re.search(rf"^##\s+\[?{re.escape(version)}\]?(?:\s.*)?$", text, re.MULTILINE)
+          body = ""
+          if match:
+              body = text[match.end():]
+              nxt = re.search(r"^##\s+", body, re.MULTILINE)
+              if nxt:
+                  body = body[:nxt.start()]
+              lines = body.strip().splitlines()
+              while lines and re.match(r"^\[[^\]]+\]:\s+\S+", lines[-1]):
+                  lines.pop()
+              body = "\n".join(lines).strip()
+          out.write_text(body + "\n" if body else "", encoding="utf-8")
+          print(f"CHANGELOG notes for {version}: {len(body)} characters")
+          PY
+      - name: Create GitHub Release
+        if: env.IS_TAG == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=(--generate-notes)
+          if [ -s notes.md ]; then notes=(--notes-file notes.md); fi
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "Guillotine $GITHUB_REF_NAME" \
+            "${notes[@]}" \
+            release/libguillotine_ffi.so \
+            release/libguillotine_ffi.dylib \
+            release/guillotine.h \
+            release/SHA256SUMS.txt
+
+  npm:
+    name: Publish @tevm/guillotine
     needs: [version, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # npm publish --provenance signs the package with the workflow's OIDC token.
+      id-token: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      # `secrets` is not available in `if:` expressions; read it through env.
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # `secrets` is not available in step `if:` expressions; expose only
+      # whether the token exists. The token itself stays in the publish step.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Download npm prebuilds
@@ -160,12 +251,6 @@ jobs:
         with:
           pattern: prebuild-*
           path: artifacts/prebuilds
-      - name: Download C FFI tarballs
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ffi-*
-          path: artifacts/ffi
-          merge-multiple: true
       - name: Combine prebuilds into sdks/typescript/prebuilds
         shell: bash
         run: |
@@ -176,8 +261,7 @@ jobs:
           done
           test -f sdks/typescript/prebuilds/darwin-arm64/libguillotine_ffi.dylib
           test -f sdks/typescript/prebuilds/linux-x64/libguillotine_ffi.so
-          cp sdks/c/include/guillotine.h artifacts/ffi/guillotine.h
-          ls -l sdks/typescript/prebuilds/* artifacts/ffi
+          ls -l sdks/typescript/prebuilds/*
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
       - name: Setup Node for npm
@@ -199,23 +283,11 @@ jobs:
       # prepublishOnly rebuilds one platform's library with Zig; the steps above
       # already built, tested and linted the two-platform package.
       - name: Publish @tevm/guillotine to npm
-        if: env.IS_TAG == 'true' && env.NPM_TOKEN != ''
+        if: ${{ env.IS_TAG == 'true' && env.HAS_NPM_TOKEN == 'true' }}
         working-directory: sdks/typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public --ignore-scripts
       - name: NPM_TOKEN is not set
-        if: env.IS_TAG == 'true' && env.NPM_TOKEN == ''
-        run: echo "::warning::NPM_TOKEN secret is not set; skipped npm publish of @tevm/guillotine@${VERSION}"
-      - name: Create GitHub Release
-        if: env.IS_TAG == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          --verify-tag
-          --title "Guillotine $GITHUB_REF_NAME"
-          --generate-notes
-          artifacts/ffi/guillotine-ffi-v${VERSION}-darwin-arm64.tar.gz
-          artifacts/ffi/guillotine-ffi-v${VERSION}-linux-x64.tar.gz
-          artifacts/ffi/guillotine.h
+        if: ${{ env.IS_TAG == 'true' && env.HAS_NPM_TOKEN != 'true' }}
+        run: echo "::notice::NPM_TOKEN secret is not set; skipped npm publish of @tevm/guillotine@${VERSION}. The GitHub Release still publishes."

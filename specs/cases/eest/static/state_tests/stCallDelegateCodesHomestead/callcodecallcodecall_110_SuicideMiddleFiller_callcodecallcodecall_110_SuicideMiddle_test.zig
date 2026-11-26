@@ -7,7 +7,7 @@ test "callcodecallcodecall_110_SuicideMiddle" {
     
     // Read and parse the JSON test file
     const json_path = "specs/execution-specs/tests/eest/static/state_tests/stCallDelegateCodesHomestead/callcodecallcodecall_110_SuicideMiddleFiller.json";
-    const json_content = try std.fs.cwd().readFileAlloc(allocator, json_path, 100 * 1024 * 1024);
+    const json_content = try std.Io.Dir.cwd().readFileAlloc(testing.io, json_path, allocator, .limited(100 * 1024 * 1024));
     defer allocator.free(json_content);
     
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});

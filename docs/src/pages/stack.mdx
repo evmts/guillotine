@@ -18,7 +18,7 @@ execute EVM bytecode. This page is the map.
 │  Guillotine      the performance EVM, Zig                │  engine
 │  guillotine.tevm.sh   dispatch schedule, fusion, FFI     │
 ├──────────────────────────────────────────────────────────┤
-│  guillotine-mini  the reference EVM, Zig                 │  oracle
+│  guillotine-mini  the reference EVM, Zig (separate repo) │  oracle
 │  mini.tevm.sh    readable switch loop, small WASM        │
 ├──────────────────────────────────────────────────────────┤
 │  ZEVM            Zig EVM experiments / alt engine        │
@@ -44,13 +44,13 @@ configuration, dispatch-schedule execution, opcode fusion, and a C ABI so any
 language can drive it. You want Guillotine when you are embedding an EVM and
 throughput or binary size matters.
 
-**guillotine-mini** is the readable EVM. In this repository it lives at `mini/`
-with its own `build.zig`, and the tracer's copy, `MinimalEvm`, lives in
-`src/tracer/minimal_evm.zig`; it is also published as its own project. It is a
-plain sequential interpreter with no schedule, no fusion, and no tail calls.
-Two jobs: be the oracle that differential tests compare Guillotine against, and
-be small enough to ship as a standalone WASM bundle
-(`cd mini && zig build wasm`). If you want to *read* an EVM, read this one.
+**guillotine-mini** is the readable EVM. It lives in its own repository,
+[`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini), and ships a
+standalone WASM bundle. This repository no longer carries a copy under `mini/`.
+Its in-tree counterpart is `MinimalEvm` in `src/tracer/minimal_evm.zig`: a
+plain sequential interpreter with no schedule, no fusion, and no tail calls,
+which the tracer and the differential tests in `test/differential` compare
+Guillotine against. If you want to *read* an EVM, read either one.
 
 **ZEVM** is the sibling Zig EVM effort. Where Guillotine optimises for raw
 execution throughput of a specialised, comptime-configured machine, ZEVM explores

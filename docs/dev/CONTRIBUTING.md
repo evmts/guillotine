@@ -7,7 +7,7 @@ This document covers development workflow, coding conventions, and patterns for 
 ### Prerequisites
 
 ```bash
-# Zig 0.15.1+
+# Zig 0.17.1 (stock release, no compiler fork)
 zig version
 
 # Cargo (for BN254/ARK dependencies)
@@ -144,30 +144,21 @@ std.debug.assert(condition);  // BAD - crashes are security bugs!
 
 ## Handler Patterns
 
-### Mini EVM Handler
+### MinimalEvm Handler
+
+MinimalEvm implements every opcode as a case in `MinimalFrame.executeOpcode`
+(`src/tracer/minimal_frame.zig`). A new opcode needs a case there too, or the
+differential tests diverge.
 
 ```zig
-pub fn Handlers(FrameType: type) type {
-    return struct {
-        pub fn add(frame: *FrameType) FrameType.EvmError!void {
-            // 1. Gas
-            try frame.consumeGas(GasConstants.GasFastestStep);
-
-            // 2. Stack operations (bounds checked)
-            const a = try frame.popStack();
-            const b = try frame.popStack();
-
-            // 3. Compute
-            const result = a +% b;
-
-            // 4. Push result
-            try frame.pushStack(result);
-
-            // 5. Advance PC
-            frame.pc += 1;
-        }
-    };
-}
+// ADD
+0x01 => {
+    try self.consumeGas(GasConstants.GasFastestStep);
+    const a = try self.popStack();   // bounds checked
+    const b = try self.popStack();
+    try self.pushStack(a +% b);
+    self.pc += 1;
+},
 ```
 
 ### Performance EVM Handler
@@ -299,9 +290,6 @@ zig build test-unit -Dtest-filter='ADD'
 
 # Specific hardfork
 zig build specs -Devm-hardfork=CANCUN
-
-# Isolate failing test (Mini)
-bun scripts/isolate-test.ts "test_name"
 ```
 
 ## Pull Request Process
@@ -392,9 +380,6 @@ From CLAUDE.md - these will block PRs:
 ```bash
 # Enable debug logging
 std.testing.log_level = .debug;
-
-# Isolate test (Mini)
-bun scripts/isolate-test.ts "test_name"
 
 # Trace comparison
 TEST_FILTER="test_name" zig build specs

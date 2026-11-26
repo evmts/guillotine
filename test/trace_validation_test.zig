@@ -98,8 +98,8 @@ test "trace validation - basic trace population on successful call" {
         // Verify we have trace steps
         try testing.expect(trace.steps.len > 0);
         
-        // We expect at least 8 steps for our bytecode (including potential metadata)
-        try testing.expect(trace.steps.len >= 8);
+        // One step per instruction: PUSH1, PUSH1, MSTORE, PUSH1, PUSH1, RETURN
+        try testing.expectEqual(@as(usize, 6), trace.steps.len);
         
         // Verify first few opcodes match our bytecode
         for (trace.steps, 0..) |step, i| {
@@ -476,9 +476,10 @@ test "trace validation - snapshot test" {
         try testing.expectEqual(@as(usize, 1), trace.steps[1].stack.len); // After first PUSH1
         try testing.expectEqual(@as(u256, 3), trace.steps[1].stack[0]);
         
+        // Trace stacks list the top of the stack first.
         try testing.expectEqual(@as(usize, 2), trace.steps[2].stack.len); // After second PUSH1
-        try testing.expectEqual(@as(u256, 3), trace.steps[2].stack[0]);
-        try testing.expectEqual(@as(u256, 2), trace.steps[2].stack[1]);
+        try testing.expectEqual(@as(u256, 2), trace.steps[2].stack[0]);
+        try testing.expectEqual(@as(u256, 3), trace.steps[2].stack[1]);
         
         try testing.expectEqual(@as(usize, 1), trace.steps[3].stack.len); // After ADD
         try testing.expectEqual(@as(u256, 5), trace.steps[3].stack[0]); // 3 + 2 = 5

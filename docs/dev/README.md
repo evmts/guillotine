@@ -7,12 +7,12 @@ Deep dive documentation for understanding and contributing to Guillotine. These 
     ┌─────────────────────────────────────────────────────────┐
     │                                                         │
     │   ┌─────────────┐              ┌─────────────────────┐  │
-    │   │  Mini EVM   │              │  Performance EVM    │  │
+    │   │ MinimalEvm  │              │  Performance EVM    │  │
     │   │  (Clarity)  │              │  (Speed)            │  │
     │   │             │              │                     │  │
     │   │  PC-based   │              │  Dispatch-based     │  │
-    │   │  46 files   │              │  158 files          │  │
-    │   │  ~25KB      │              │  ~270KB             │  │
+    │   │  3 files in │              │  whole src/ tree    │  │
+    │   │ src/tracer/ │              │                     │  │
     │   └─────────────┘              └─────────────────────┘  │
     │          │                              │               │
     │          └──────────────┬───────────────┘               │
@@ -26,13 +26,18 @@ Deep dive documentation for understanding and contributing to Guillotine. These 
 
 ### 1. Understand the Two EVMs
 
-| Aspect | Mini EVM | Performance EVM |
-|--------|----------|-----------------|
-| **Location** | `mini/src/` | `src/` |
+| Aspect | MinimalEvm | Performance EVM |
+|--------|------------|-----------------|
+| **Location** | `src/tracer/minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` | `src/` |
 | **Philosophy** | Clarity first | Speed first |
 | **Execution** | Sequential PC loop | Tail-call dispatch |
-| **Use case** | Learning, testing | Production |
-| **Start here** | `mini/src/frame.zig` | `src/frame/frame.zig` |
+| **Use case** | Differential testing reference | Production |
+| **Start here** | `src/tracer/minimal_frame.zig` | `src/frame/frame.zig` |
+
+MinimalEvm is the in-repo reference interpreter: the tracer and the differential
+tests in `test/differential` run it beside the performance EVM and compare state.
+The standalone, readable reference EVM lives in its own repository,
+[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ### 2. Read in This Order
 
@@ -49,7 +54,7 @@ START HERE
     ▼
 ┌─────────────────────────────────┐
 │ 2. EXECUTION-MODELS.md          │  ← See both EVMs side-by-side
-│    - Mini: while loop           │
+│    - MinimalEvm: while loop     │
 │    - Performance: tail calls    │
 └─────────────────────────────────┘
     │
@@ -95,7 +100,7 @@ zig build test-opcodes -Dtest-filter='ADD'
 | Document | Description | Read When... |
 |----------|-------------|--------------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Unified architecture with code excerpts | Understanding codebase structure |
-| [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Side-by-side Mini vs Performance | Comparing implementations |
+| [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Side-by-side MinimalEvm vs Performance | Comparing implementations |
 | [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md) | Storage, journal, warm/cold tracking | Working with storage |
 | [GAS-METERING.md](./GAS-METERING.md) | Gas calculation patterns and costs | Debugging gas issues |
 | [TESTING.md](./TESTING.md) | Test organization and debugging | Running/writing tests |
@@ -131,31 +136,27 @@ zig build test-opcodes -Dtest-filter='ADD'
 ## Key File Map
 
 ```
-src/                              mini/src/
-├── evm.zig (270KB)               ├── evm.zig (94KB)
-│   └── Orchestrates execution    │   └── Complete EVM
-│                                 │
-├── frame/                        ├── frame.zig (25KB)
-│   └── frame.zig (50KB)          │   └── Execution loop
-│       └── Dispatch execution    │
-│                                 │
-├── instructions/                 ├── instructions/
-│   ├── handlers_arithmetic.zig   │   ├── handlers_arithmetic.zig
-│   ├── handlers_storage.zig      │   ├── handlers_storage.zig
-│   ├── handlers_system.zig       │   ├── handlers_system.zig
-│   └── handlers_*_synthetic.zig  │   └── (no synthetics)
-│                                 │
-├── preprocessor/                 └── (no preprocessor)
-│   └── dispatch.zig (20KB)
-│       └── Schedule builder
-│
+src/
+├── evm.zig                       Orchestrates execution
+├── frame/
+│   └── frame.zig                 Dispatch execution
+├── instructions/
+│   ├── handlers_arithmetic.zig
+│   ├── handlers_storage.zig
+│   ├── handlers_system.zig
+│   └── handlers_*_synthetic.zig  Fused opcodes
+├── preprocessor/
+│   └── dispatch.zig              Schedule builder
 ├── storage/
-│   ├── database.zig (88KB)
-│   ├── journal.zig (34KB)
+│   ├── database.zig
+│   ├── journal.zig
 │   └── access_list.zig
-│
 └── tracer/
-    └── tracer.zig (50KB)
+    ├── tracer.zig                Frame/MinimalEvm synchronization
+    ├── minimal_evm.zig           MinimalEvm: state, accounts, calls
+    ├── minimal_frame.zig         MinimalFrame: PC loop, one switch over opcodes
+    ├── minimal_host.zig          Host interface for MinimalEvm
+    └── minimal_evm_sync.zig      Maps Frame handlers to MinimalEvm steps
 ```
 
 ## Core Concepts at a Glance
@@ -163,8 +164,8 @@ src/                              mini/src/
 ### Execution Flow
 
 ```
-                    MINI EVM                           PERFORMANCE EVM
-                    ────────                           ───────────────
+                   MINIMALEVM                          PERFORMANCE EVM
+                   ──────────                          ───────────────
                         │                                    │
               ┌─────────▼──────────┐              ┌─────────▼──────────┐
               │  Read bytecode[PC] │              │  Preprocess once   │
@@ -209,8 +210,8 @@ LIFO Stack (both implementations)
 ### Gas Metering
 
 ```
-MINI: Per-operation                PERFORMANCE: Per-block
-─────────────────                  ────────────────────
+MINIMALEVM: Per-operation          PERFORMANCE: Per-block
+───────────────────────            ────────────────────
 
   ADD: check 3 gas                  Block entry:
   SUB: check 3 gas                    check 9 gas (3+3+3)
@@ -261,10 +262,8 @@ operation() catch {};  // Propagate or handle!
 ## Related Documentation
 
 - **[CLAUDE.md](../../CLAUDE.md)** - Project-level instructions and rules
-- **[mini/CLAUDE.md](../../mini/CLAUDE.md)** - Mini EVM specific instructions
 - **[Performance EVM](../performance/)** - Performance-specific deep dives
-- **[Mini EVM](../mini/)** - Mini-specific documentation
-- **[TypeScript Port](../mini/typescript/)** - TypeScript implementation docs
+- **[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini)** - Standalone reference EVM (separate repository)
 
 ## Building Mental Models
 

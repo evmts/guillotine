@@ -156,10 +156,9 @@ zig build test-integration -Dtest-filter='storage' -Devm-hardfork='CANCUN'
 │   ───────────────────────────────                                           │
 │   $ zig build specs -Dtest-filter='stTransStorage_Cancun'                  │
 │                                                                             │
-│   Step 3: For Mini EVM, use isolate script                                  │
-│   ──────────────────────────────────────────                                │
-│   $ cd mini                                                                 │
-│   $ bun scripts/isolate-test.ts "stTransStorage_Cancun"                    │
+│   Step 3: Compare Frame with MinimalEvm                                     │
+│   ─────────────────────────────────────                                     │
+│   $ zig build test-integration -Dtest-filter='differential'                 │
 │                                                                             │
 │   Step 4: Read the trace output                                             │
 │   ─────────────────────────────                                             │
@@ -192,17 +191,14 @@ zig build test-integration -Dtest-filter='storage' -Devm-hardfork='CANCUN'
 ### Isolating Failures
 
 ```bash
-# Run isolated test with maximum debug output
-bun scripts/isolate-test.ts "test_name"
+# Run one spec test by name
+zig build specs -Dtest-filter='test_name'
 
-# Run subset by hardfork
-bun scripts/test-subset.ts --hardfork CANCUN
+# Run official EEST state tests for one fork
+zig build state-tests -Doptimize=ReleaseSafe -Dspec-fork=Cancun
 
-# Run subset by EIP
-bun scripts/test-subset.ts --eip 1153
-
-# Auto-fix spec tests
-bun scripts/fix-specs.ts
+# Compare Frame with MinimalEvm on the differential tests
+zig build test-integration -Dtest-filter='differential'
 ```
 
 ### Debug Logging
@@ -571,15 +567,13 @@ test/
 └── official/               # Official Ethereum tests
 ```
 
-### Mini EVM Tests
+### MinimalEvm Tests
 
-```
-mini/test/
-├── specs/
-│   ├── runner.zig          # Test runner infrastructure
-│   ├── test_host.zig       # Mock host implementation
-│   └── assembler.zig       # Bytecode assembly
-```
+MinimalEvm (`src/tracer/minimal_evm.zig`) is exercised as the reference side of
+the differential tests in `test/differential` (`DifferentialTestor` in
+`differential_testor.zig`), which `zig build test-integration` runs. The
+standalone reference EVM and its own spec runner live in the separate
+[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini) repository.
 
 ## Build Options
 
@@ -698,21 +692,14 @@ Test sometimes passes, sometimes fails:
    └── Use proper synchronization
 ```
 
-## Mini EVM Specific Commands
+## Spec Test Commands
 
 ```bash
-# Run all mini tests
-cd mini && zig build test
+# Ethereum execution spec tests
+zig build specs
 
-# Cancun-specific tests
-zig build specs-cancun-tstore-basic
-zig build specs-cancun-mcopy
-
-# Hardfork specs
-zig build specs-berlin
-zig build specs-london
-zig build specs-shanghai
-zig build specs-cancun
+# Official EEST state tests (Frontier through Osaka)
+zig build state-tests -Doptimize=ReleaseSafe
 ```
 
 ## Safety Counter

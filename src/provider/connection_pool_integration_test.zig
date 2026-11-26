@@ -1,4 +1,5 @@
 const std = @import("std");
+const clock = @import("clock.zig");
 const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
 const PoolConfig = @import("connection_pool.zig").PoolConfig;
 
@@ -56,7 +57,7 @@ test "connection pool cleanup task simulation" {
     try std.testing.expectEqual(@as(usize, 5), stats.idle);
 
     // Wait for idle timeout
-    std.Thread.sleep(150 * std.time.ns_per_ms);
+    try clock.sleep(150 * std.time.ns_per_ms);
 
     // Cleanup should remove all idle connections
     try pool.cleanup_idle();
