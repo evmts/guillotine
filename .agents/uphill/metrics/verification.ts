@@ -19,16 +19,44 @@ function isProdZig(path: string): boolean {
   );
 }
 
+function stripLeanBlockComments(src: string): string {
+  // Strip nested Lean 4 `/- ... -/` block comments while preserving line numbers.
+  let out = "";
+  let depth = 0;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    const next = src[i + 1];
+    if (ch === "/" && next === "-") {
+      depth++;
+      out += "  ";
+      i++;
+      continue;
+    }
+    if (depth > 0 && ch === "-" && next === "/") {
+      depth--;
+      out += "  ";
+      i++;
+      continue;
+    }
+    if (depth > 0) {
+      out += ch === "\n" ? "\n" : " ";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 // 1. Lean 4 proofs in verify/lean/
 const leanFiles = [...new Glob("verify/lean/**/*.lean").scanSync(".")].sort();
 let totalTheorems = 0;
 
 for (const file of leanFiles) {
   const raw = readFileSync(file, "utf8");
-  const fileLines = raw.split("\n");
+  const fileLines = stripLeanBlockComments(raw).split("\n");
   let sorryHit: string | null = null;
   for (let i = 0; i < fileLines.length; i++) {
-    const code = fileLines[i]!.replace(/--.*$/, "");
+    const code = fileLines[i]!.replace(/--.*$/, "").replace(/"(?:\\.|[^"\\])*"/g, '""');
     if (/^\s*(?:theorem|lemma)\s+/.test(code)) totalTheorems++;
     if (!sorryHit && /\bsorry\b/.test(code)) {
       sorryHit = `line ${i + 1}: unproved sorry in Lean proof`;

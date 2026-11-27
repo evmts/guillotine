@@ -44,3 +44,13 @@ Documentation link integrity and subsystem README coverage.
 
 - Fix broken relative and root-relative links in root Markdown files and docs/**/*.md.
 - Maintain a concise README.md in every production subsystem directory under src/.
+
+## Factory & Trust
+
+Smithers Cloud factory projection, shared object-store trust boundaries, wiki freshness, release parity, and playground CSP integrity.
+
+- Keep .smithers/factory.json and .smithers/home.json schema-valid with docs URL, person-only merge policy, and maintainer, contributor, and viewer sections.
+- Wire build.smithers.sh with split read and write secrets and never expose SMITHERS_CACHE_WRITE_TOKEN to pull_request jobs.
+- Keep every .smithers/wiki/*.md page frontmatter-valid with zero broken wikilinks, zero secret leaks, and a fresh docs/public/wiki.html build.
+- Keep build.zig.zon, sdks/typescript/package.json, CHANGELOG.md, and .github/workflows/release.yml aligned for automated main-branch releases and docs deploys.
+- Keep .smithers/workflows QuickJS-safe, .smithers/flows frontmatter-valid, and .smithers/playground CSP SHA-256 hashes exact.

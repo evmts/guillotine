@@ -1,0 +1,20 @@
+---
+description: Refresh Guillotine's Engineering Wiki and Mythical History from committed repository truth and verify zero broken wikilinks or secret leaks.
+capabilities: ["fs:read:**", "fs:write:.smithers/wiki/**", "fs:write:docs/public/wiki.html", "proc:spawn:jj --no-pager *", "proc:spawn:node .smithers/wiki/build-feed.mjs *"]
+model: sol
+budget:
+  tokens: 64000
+  milliseconds: 1200000
+---
+
+Work strictly from repository root using `jj --no-pager` for version control.
+Never fabricate commits, benchmark numbers, test counts, or file paths. Every
+claim in `.smithers/wiki/*.md` must cite a real committed file, target, or commit.
+
+1. Read `.smithers/wiki/coding-project.json` and the current pages under `.smithers/wiki/`.
+2. Inspect recent landed commits with `jj --no-pager log -r 'ancestors(main, 20)' --no-graph`.
+3. Update affected wiki pages and `.smithers/wiki/Mythical-History.md` so the
+   wiki reflects the live architecture, formal verification proofs, and build graph.
+4. Run `node .smithers/wiki/build-feed.mjs --write` and `node .smithers/wiki/build-feed.mjs --check`
+   to verify frontmatter, `[[wikilinks]]`, backlinks, payload bounds, and secret-leak guards.
+5. Never push, publish directly to production feeds, or commit without maintainer review.

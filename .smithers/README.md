@@ -1,59 +1,46 @@
-# Guillotine factory
+# Guillotine Smithers Cloud Factory
 
-The current `smthrs` CLI discovers `.smithers/WORKSPACE.ts` and
-`.smithers/PACKAGE.ts`. `WORKSPACE.smithers` re-exports them for tooling using
-the needlefish convention; the CLI does not discover that extension. The
-requested `~/voltaire-factory/.smithers` reference was absent when this factory
-was authored, so its formats were verified against the local Smithers source.
+Guillotine runs as a public Smithers Cloud coding factory at [smithers.sh/evmts/guillotine](https://smithers.sh/evmts/guillotine), mirroring to [github.com/evmts/guillotine](https://github.com/evmts/guillotine) and publishing documentation at [guillotine.tevm.sh](https://guillotine.tevm.sh).
 
-Targets use the `//.smithers:<name>` labels. Both build and test verbs require
-an explicit label or pattern; bare `build --plan` and `test --plan` are invalid.
+## Architecture
 
-| Target | Command / behavior |
-| --- | --- |
-| `build` | `zig build` (also compiles Voltaire's Rust crypto archive) |
-| `test-unit` | `zig build test-unit` |
-| `test-opcodes` | `zig build test-opcodes` |
-| `test-modexp` | `zig build test-modexp` |
-| `test-fusions` | `zig build test-fusions` |
-| `test-layer2` | `zig build test-layer2` |
-| `test-bench` | `zig build test-bench` |
-| `state-tests` | `zig build state-tests` (official EEST state fixtures) |
-| `test-lean-diff` | `zig build test-lean-diff` (manual; needs the Lean 4 toolchain) |
-| `bench-build` | `zig build bench-build --prefix zig-out/smithers`; caches the binary |
-| `bench` | Run `zig-out/smithers/bin/guillotine-bench` with a fresh timing measurement |
-| `test-foundry-link` | Verify the real Foundry configuration and Linux archive flattening/linking |
-| `factory-check` | Validate factory/home projections against their declarations and discovered flows |
-| `factory-write` | Regenerate factory/home projections through the target verb with `--write` |
+| Surface | Path | Purpose |
+| --- | --- | --- |
+| Workspace & Shared Cache | `.smithers/WORKSPACE.ts` | Wires `https://build.smithers.sh` with split `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN` |
+| Incremental Build Graph | `.smithers/PACKAGE.ts` | 10 surgical filegroups and 39 content-addressed targets across Zig, Rust, C SDK, TS SDK, docs, wiki, and audit |
+| Personalized Factory & Home | `.smithers/FACTORY.ts` | Generates `.smithers/factory.json` and `.smithers/home.json` tailored for Maintainers, Contributors, and Viewers |
+| Cloud Workflows | `.smithers/workflows/*.ts` | QuickJS-safe workflows for CI, Uphill audit, wiki refresh, and release readiness |
+| Agent Flows | `.smithers/flows/**/flow.mdx` | Bounded review, repro, PoC, PR triage, wiki refresh, release check, and playground execution flows |
+| EVM Playground | `.smithers/playground/` | CSP-hardened interactive bytecode analyzer and sandboxed runner |
+| Lighthouse Audit Report | `.smithers/reports/audit.mjs` | Renders Uphill backpressure telemetry into `docs/public/audit.html` and `.smithers/reports/lighthouse-audit.html` |
+| Engineering Wiki & History | `.smithers/wiki/` | Obsidian-compatible knowledge base, `Mythical-History.md`, feed validator, and `docs/public/wiki.html` |
+| Cloud MCP & One-Time Auth | `.smithers/mcp/`, `scripts/smithers-auth.mjs` | Live MCP verification, PKCE S256 BYOA attach claim/redeem (mode-`0600`), and attenuated sandbox env isolation |
 
-Every Zig target runs a step of the root `build.zig`; there is no
-supplemental build file.
+## Common Commands
 
-For example, the build plan is selected with `smthrs build //.smithers:build
---plan`; the complete test plan is selected with `smthrs test //...
---plan`. Each EVM suite depends on the build rather than other suites. Use one
-job when compiling the full suite on a memory-constrained host.
+Always run from the repository root using the toolchain-aware wrapper (`scripts/smthrs` pins Zig `0.17.1`):
 
-All commands run from the repository root. The toolchain is Zig 0.17.1 and
-Cargo/Rust; the CI matrix covers macOS and x86_64 Linux. Host tool identities,
-source files, fixtures, manifests, lockfiles and dependency edges contribute to
-target keys. A root-anchored Filegroup plus a separate factory Filegroup are required
-because globs remain package-scoped even with a `//` prefix. These source
-closures conservatively invalidate checks on source changes, while unchanged checks replay from the result cache. Zig global/local
-caches and Voltaire Cargo intermediates live under `.smithers/cache`; the root
-Cargo build requires `target/`, matching the existing Foundry artifact lookup.
-Build output, engine state and report directories are excluded from source keys.
-Cache paths use absolute URLs derived from PACKAGE.ts because the installed CLI
-does not expand the older `{smthrs:cache-directory}` environment token.
+```bash
+# List all 39 incremental build/test/lint/docs/factory targets
+scripts/smthrs targets
 
-`lib/voltaire/Cargo.toml` declares its own `[workspace]`. `lib/voltaire/build.zig`
-runs `cargo build --release --locked` for it with `--target-dir` set to a Zig
-cache output directory and links the resulting `libcrypto_wrappers.a`, so no
-separate crypto step exists. Foundry's legacy
-`rust_build.zig` points at `src/compilers` and is not used by the root build;
-the active integration is `lib/foundry.zig`.
+# Validate factory.json and home.json against FACTORY.ts
+scripts/smthrs target //.smithers:factory-check
 
-Factory flows cover consensus, memory ownership, state compliance, differential
-evidence and benchmark regressions. PR triage consumes supplied diffs without
-executing PR code. There are no scheduled or automatic publishing triggers.
-GitHub main remains maintainer-controlled; flows do not grant merge permission.
+# Regenerate factory.json and home.json after editing FACTORY.ts
+scripts/smthrs target //.smithers:factory-write --write
+
+# Run fast local factory, wiki, and Lighthouse backpressure checks
+node .smithers/wiki/build-feed.mjs --write --check
+node .smithers/reports/audit.mjs --write --run-uphill --check
+node --test .smithers/tests/*.test.mjs
+
+# Verify live Smithers Cloud MCP, OAuth, shared cache, and docs endpoints
+node scripts/smithers-auth.mjs verify
+```
+
+## Execution Trust Boundaries
+
+- **Community & fork PRs (untrusted)** are encouraged to run the full build, test, differential, and Uphill audit suites locally and in CI with **read-only** cache access (`SMITHERS_CACHE_READ_TOKEN`). They never receive `SMITHERS_CACHE_WRITE_TOKEN`, release tokens, or gate-bypass permissions.
+- **Smithers Cloud sandboxes** execute deterministic checks under scoped one-time PKCE tokens (`act: "agent"`) and cannot approve or merge changes.
+- **Maintainers (`roninjin10`, `fucory`) and `main`** hold person-only `approve` and `merge` gates, populate the shared cache on `main` pushes, and trigger automated GitHub Releases, npm provenance publishing, and Vocs docs deploys.

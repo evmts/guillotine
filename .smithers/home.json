@@ -1,33 +1,335 @@
 {
-  "blocks": [
+  "docs": "https://guillotine.tevm.sh/llms.txt",
+  "contributors": "role",
+  "sections": [
     {
-      "type": "text",
-      "title": "Guillotine EVM factory",
-      "text": "Consensus correctness and graceful errors are release gates. Incremental Zig and Cargo caches accelerate checks; benchmark timings are always fresh."
-    },
-    {
-      "type": "prompt",
-      "title": "Ask about Guillotine",
-      "placeholder": "Describe an EVM issue or change…"
-    },
-    {
-      "type": "flows",
-      "title": "Review and reproduce"
-    },
-    {
-      "type": "links",
-      "links": [
+      "title": "Maintainer Control Room",
+      "audience": "maintainer",
+      "blocks": [
         {
-          "label": "Repository",
-          "url": "https://github.com/evmts/guillotine"
+          "type": "action",
+          "flow": "branch.new",
+          "title": "New branch",
+          "key": "b"
         },
         {
-          "label": "CI",
-          "url": "https://github.com/evmts/guillotine/actions/workflows/ci.yml"
+          "type": "issues",
+          "title": "Triage and open pull requests"
         },
         {
-          "label": "Architecture",
-          "url": "https://github.com/evmts/guillotine/blob/main/docs/dev/ARCHITECTURE.md"
+          "type": "stack",
+          "title": "TODO and changeset stack"
+        },
+        {
+          "type": "runs",
+          "title": "Recent factory runs"
+        },
+        {
+          "type": "links",
+          "title": "Operations and trust gates",
+          "links": [
+            {
+              "label": "Factory dashboard",
+              "url": "https://smithers.sh/evmts/guillotine/-/factory"
+            },
+            {
+              "label": "Engineering Wiki",
+              "url": "https://smithers.sh/evmts/guillotine/-/wiki"
+            },
+            {
+              "label": "Lighthouse Audit Report",
+              "url": "https://guillotine.tevm.sh/audit.html"
+            },
+            {
+              "label": "Mythical History",
+              "url": "https://guillotine.tevm.sh/wiki.html#Mythical-History.md"
+            },
+            {
+              "label": "GitHub Releases",
+              "url": "https://github.com/evmts/guillotine/releases"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Contributor Workbench",
+      "audience": "contributor",
+      "blocks": [
+        {
+          "type": "code",
+          "title": "Verify locally with shared read-only cloud cache",
+          "language": "sh",
+          "code": "zig build && zig build test-opcodes\nscripts/smthrs test //.smithers:test-factory\nuphill --compact\nnode scripts/smithers-auth.mjs verify"
+        },
+        {
+          "type": "cards",
+          "title": "How a change lands",
+          "cards": [
+            {
+              "title": "Reproduce first",
+              "text": "Include a minimal failing Zig, C, or TypeScript test with hardfork, bytecode, and expected gas or output.",
+              "label": "Step 1"
+            },
+            {
+              "title": "Run untrusted freely",
+              "text": "Run builds, tests, and Uphill locally or in PR CI using read-only cache hits from build.smithers.sh. Untrusted runs never write to the cache or skip gates.",
+              "label": "Step 2"
+            },
+            {
+              "title": "Clear Lighthouse backpressure",
+              "text": "Keep safety, TigerStyle, verification, docs, and factory scores green. Every crash must become a graceful error.",
+              "label": "Step 3"
+            },
+            {
+              "title": "Connect your agent via MCP",
+              "text": "Point Claude Code, Codex, Cursor, or Antigravity at https://smithers.sh/evmts/guillotine/mcp with one-time PKCE auth. Maintainers approve and merge.",
+              "label": "Step 4"
+            }
+          ]
+        },
+        {
+          "type": "stack",
+          "title": "Public TODO stack"
+        },
+        {
+          "type": "flows",
+          "title": "Factory flows"
+        },
+        {
+          "type": "links",
+          "title": "Contributor resources",
+          "links": [
+            {
+              "label": "Issues",
+              "url": "https://smithers.sh/evmts/guillotine/issues"
+            },
+            {
+              "label": "Pull requests",
+              "url": "https://smithers.sh/evmts/guillotine/pulls"
+            },
+            {
+              "label": "Engineering Wiki",
+              "url": "https://smithers.sh/evmts/guillotine/-/wiki"
+            },
+            {
+              "label": "Lighthouse Backpressure Audit",
+              "url": "https://guillotine.tevm.sh/audit.html"
+            },
+            {
+              "label": "Contributing guide",
+              "url": "https://guillotine.tevm.sh/contributing"
+            }
+          ]
+        },
+        {
+          "type": "prompt",
+          "title": "Ask about Guillotine",
+          "placeholder": "Ask about dispatch schedules, formal proofs, gas rules, or SDKs…"
+        }
+      ]
+    },
+    {
+      "audience": "everyone",
+      "blocks": [
+        {
+          "type": "hero",
+          "title": "Guillotine",
+          "tagline": "An ultra-fast, formally verified Ethereum Virtual Machine written in Zig 0.17.1 with register-passing tailcall dispatch.",
+          "text": "Passes 66,652 / 66,652 official Ethereum Execution Spec Tests (Frontier through Osaka), 55 Zean Lean 4 proofs, 32 SMT theorems, and ships native Zig, C ABI, and Bun FFI TypeScript surfaces.",
+          "install": "zig fetch --save=guillotine https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz",
+          "actions": [
+            {
+              "label": "Read Docs",
+              "url": "https://guillotine.tevm.sh"
+            },
+            {
+              "label": "Audit Report",
+              "url": "https://guillotine.tevm.sh/audit.html"
+            },
+            {
+              "label": "Wiki and History",
+              "url": "https://guillotine.tevm.sh/wiki.html"
+            }
+          ],
+          "announcement": {
+            "label": "v0.1.0 Beta · 100% EEST + Zean direct Zig AIR to Lean 4.35 proofs",
+            "url": "https://github.com/evmts/guillotine/releases/tag/v0.1.0"
+          }
+        },
+        {
+          "type": "code",
+          "file": "execute.zig",
+          "language": "zig",
+          "code": "const std = @import(\"std\");\nconst evm = @import(\"evm\");\nconst primitives = @import(\"voltaire\");\n\npub fn main() !void {\n    var gpa = std.heap.GeneralPurposeAllocator(.{}){};\n    defer _ = gpa.deinit();\n    const allocator = gpa.allocator();\n\n    var db = evm.Database.init(allocator);\n    defer db.deinit();\n\n    const code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };\n    const target = primitives.Address.fromHex(\"0x2000000000000000000000000000000000000002\") catch unreachable;\n    try db.set_code(target.bytes, &code);\n\n    var instance = try evm.MainnetEvm.init(allocator, &db, .{}, .{}, 0, null);\n    defer instance.deinit();\n    const res = instance.call(.{ .call = .{ .caller = [_]u8{0} ** 20, .to = target.bytes, .value = 0, .input = &.{}, .gas = 100_000 } });\n    std.debug.print(\"success={} output={x}\\n\", .{ res.success, res.output });\n}"
+        },
+        {
+          "type": "stats",
+          "stats": [
+            {
+              "value": "66,652 / 66,652",
+              "label": "Official EEST (Frontier to Osaka)"
+            },
+            {
+              "value": "1.43x vs revm",
+              "label": "Classic interpreter suite (M3 Max)"
+            },
+            {
+              "value": "55 Lean + 32 SMT",
+              "label": "Machine-checked formal proofs"
+            },
+            {
+              "value": "116,384 / 116,384",
+              "label": "Zig to Lean 4 differential vectors"
+            },
+            {
+              "value": "Zig · C · Bun TS",
+              "label": "Native package and C ABI surfaces"
+            },
+            {
+              "value": "MIT",
+              "label": "Open source license"
+            }
+          ]
+        },
+        {
+          "type": "cards",
+          "title": "Why Guillotine",
+          "cards": [
+            {
+              "title": "Register-passing tailcall engine",
+              "text": "Preprocesses bytecode into 8-byte dispatch schedules with basic-block gas batching, synthetic opcode fusions, and stock Zig 0.17.1 preserve_none tailcalls.",
+              "label": "Dispatch",
+              "url": "https://guillotine.tevm.sh/concepts/dispatch"
+            },
+            {
+              "title": "Dual Zean and Lean 4 formal stack",
+              "text": "Direct Zig 0.17.1 AIR to Lean 4.35.0 proofs via Zean, hand-authored Lean specs, Bitwuzla and Z3 SMT bitvector proofs, and LLVM IR equivalence checks.",
+              "label": "Verification",
+              "url": "https://guillotine.tevm.sh/guides/testing-and-verification"
+            },
+            {
+              "title": "Frontier through Osaka and Base L2",
+              "text": "Complete mainnet hardfork coverage plus Base and OP Stack Bedrock through Jovian with EIP-7702 authorizations, L1 data fees, and deposits.",
+              "label": "Mainnet + L2",
+              "url": "https://guillotine.tevm.sh/reference/hardforks"
+            },
+            {
+              "title": "TigerStyle zero-crash posture",
+              "text": "Every runtime error returns gracefully, O(1) undo-log snapshots protect state atomicity, and Uphill Lighthouse audits enforce continuous backpressure.",
+              "label": "Safety",
+              "url": "https://guillotine.tevm.sh/guides/tigerstyle"
+            },
+            {
+              "title": "Fast native precompiles",
+              "text": "Pure-Zig secp256k1 ECRECOVER at 0.171 ms, adaptive Montgomery MODEXP, BN254 GLV, BLS12-381 via blst, KZG 4844, and SIMD calldata counting.",
+              "label": "Crypto",
+              "url": "https://guillotine.tevm.sh/guides/benchmarks-and-jit"
+            },
+            {
+              "title": "Built in public on Smithers Cloud",
+              "text": "Public MCP server, shared build.smithers.sh object store with untrusted-read isolation, Engineering Wiki, Mythical History, and automated releases.",
+              "label": "Factory",
+              "url": "https://guillotine.tevm.sh/audit.html"
+            }
+          ]
+        },
+        {
+          "type": "cards",
+          "title": "Surfaces and Tevm Ecosystem",
+          "cards": [
+            {
+              "title": "dep.module(\"evm\")",
+              "text": "Embed the dispatch EVM, Layer 2 module, and Voltaire primitives directly in Zig 0.17.1 projects.",
+              "label": "Zig",
+              "url": "https://guillotine.tevm.sh/installation"
+            },
+            {
+              "title": "libguillotine_ffi",
+              "text": "Prebuilt macOS arm64 and Linux x86_64 shared libraries with guillotine.h and Custom SDK Builder recipes.",
+              "label": "C ABI",
+              "url": "https://guillotine.tevm.sh/guides/bindings"
+            },
+            {
+              "title": "@tevm/guillotine",
+              "text": "Zero-overhead Bun FFI SDK shipping both prebuilds with 340 passing E2E and fuzz tests.",
+              "label": "TypeScript",
+              "url": "https://www.npmjs.com/package/@tevm/guillotine"
+            },
+            {
+              "title": "ZEVM",
+              "text": "Embeddable Zig Ethereum node with JSON-RPC and beacon light client built in the Tevm ecosystem.",
+              "label": "Node",
+              "url": "https://smithers.sh/evmts/zevm"
+            },
+            {
+              "title": "Voltaire",
+              "text": "High-performance Zig and TypeScript Ethereum primitives and cryptography powering Guillotine.",
+              "label": "Primitives",
+              "url": "https://smithers.sh/evmts/voltaire"
+            },
+            {
+              "title": "Guillotine Mini",
+              "text": "Standalone readable reference EVM for differential testing and educational clarity.",
+              "label": "Reference",
+              "url": "https://github.com/evmts/guillotine-mini"
+            }
+          ]
+        },
+        {
+          "type": "releases",
+          "title": "Releases",
+          "releases": [
+            {
+              "name": "v0.1.0",
+              "url": "https://github.com/evmts/guillotine/releases/tag/v0.1.0",
+              "date": "2026-11-25",
+              "summary": "First beta release: Zig 0.17.1 preserve_none dispatch, 66,652/66,652 EEST, Lean 4 and SMT formal verification, Base L2, C FFI, and @tevm/guillotine."
+            }
+          ],
+          "more": {
+            "label": "All releases",
+            "url": "https://github.com/evmts/guillotine/releases"
+          }
+        },
+        {
+          "type": "links",
+          "title": "Smithers Cloud, Wiki, and Community",
+          "links": [
+            {
+              "label": "Public MCP Endpoint",
+              "url": "https://smithers.sh/evmts/guillotine/mcp"
+            },
+            {
+              "label": "Engineering Wiki",
+              "url": "https://smithers.sh/evmts/guillotine/-/wiki"
+            },
+            {
+              "label": "Mythical History",
+              "url": "https://guillotine.tevm.sh/wiki.html#Mythical-History.md"
+            },
+            {
+              "label": "Lighthouse Audit Report",
+              "url": "https://guillotine.tevm.sh/audit.html"
+            },
+            {
+              "label": "Documentation",
+              "url": "https://guillotine.tevm.sh"
+            },
+            {
+              "label": "Telegram",
+              "url": "https://t.me/+ANThR9bHDLAwMjUx"
+            },
+            {
+              "label": "Twitter / X",
+              "url": "https://x.com/tevmtools"
+            }
+          ]
+        },
+        {
+          "type": "prompt",
+          "title": "Questions about Guillotine?",
+          "placeholder": "Ask Smithers about Guillotine EVM…"
         }
       ]
     }

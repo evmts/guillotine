@@ -11,10 +11,13 @@ if (!out) {
 const lines: string[] = [];
 const q = (s: string) => JSON.stringify(s);
 
-// 1. Broken local links in root *.md and docs/**/*.md
+// 1. Broken local links in root *.md, docs/**/*.md (excluding generated/vendor trees), and .smithers/wiki/**/*.md
 const mdFiles = [
   ...new Glob("*.md").scanSync("."),
-  ...new Glob("docs/**/*.md").scanSync("."),
+  ...[...new Glob("docs/**/*.md").scanSync(".")].filter(
+    (f) => !f.includes("node_modules/") && !f.startsWith("docs/dist/") && !f.startsWith("docs/.vocs/"),
+  ),
+  ...(existsSync(".smithers/wiki") ? [...new Glob(".smithers/wiki/**/*.md").scanSync(".")] : []),
 ].sort();
 
 for (const file of mdFiles) {
@@ -55,11 +58,13 @@ for (const file of mdFiles) {
   );
 }
 
-// 2. Subsystem README.md coverage under src/
+// 2. Subsystem README.md coverage under src/ (only directories containing source files)
 for (const entry of readdirSync("src").sort()) {
   if (entry.startsWith("_")) continue;
   const full = join("src", entry);
   if (!statSync(full).isDirectory()) continue;
+  const zigEntries = [...new Glob(`${full}/**/*.zig`).scanSync(".")];
+  if (zigEntries.length === 0) continue;
   const hasReadme = existsSync(join(full, "README.md"));
   lines.push(
     hasReadme

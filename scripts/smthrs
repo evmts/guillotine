@@ -1,0 +1,49 @@
+#!/bin/sh
+# Runs the Smithers CLI (`smthrs`) against Guillotine's .smithers/WORKSPACE.ts graph.
+#
+# Usage:
+#   scripts/smthrs targets
+#   scripts/smthrs ci '//...'
+#   scripts/smthrs test //.smithers:test-factory
+#   scripts/smthrs target //.smithers:factory-write --write
+#   scripts/smthrs target //.smithers:factory-check
+#   scripts/smthrs explain //.smithers:build
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
+# Prefer Zig 0.17.1 if zvm has it installed and PATH points elsewhere.
+if [ -x "$HOME/.zvm/0.17.1/zig" ]; then
+  PATH="$HOME/.zvm/0.17.1:$PATH"
+fi
+if [ -d "$HOME/.uphill/bin" ]; then
+  PATH="$HOME/.uphill/bin:$PATH"
+fi
+if [ -d "$HOME/.bun/bin" ]; then
+  PATH="$HOME/.bun/bin:$PATH"
+fi
+export PATH
+
+if [ -n "${SMTHRS_BIN:-}" ] && [ -x "$SMTHRS_BIN" ]; then
+  exec "$SMTHRS_BIN" "$@"
+fi
+
+if [ -x "$root/.smithers/node_modules/.bin/smthrs" ]; then
+  exec "$root/.smithers/node_modules/.bin/smthrs" "$@"
+fi
+
+if command -v smthrs >/dev/null 2>&1; then
+  exec smthrs "$@"
+fi
+
+for sibling in \
+  "$root/../smithers-mvp-deploy/node_modules/.bin/smthrs" \
+  "$root/../smithers/node_modules/.bin/smthrs"
+do
+  if [ -x "$sibling" ]; then
+    exec "$sibling" "$@"
+  fi
+done
+
+exec npx --yes --package=@smthrs/cli@1.0.0-rc.18 smthrs "$@"

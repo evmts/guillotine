@@ -101,3 +101,28 @@ documentation:
   # Every production subsystem directory under src/ should carry a README.md explaining invariants and layout.
   subdir-readme:
     description: Maintain a concise README.md in every production subsystem directory under src/.
+
+factory:
+  title: Factory & Trust
+  description: Smithers Cloud factory projection, shared object-store trust boundaries, wiki freshness, release parity, and playground CSP integrity.
+  run: bun .agents/uphill/metrics/factory.ts
+  # Factory JSON projections must stay valid, personalized for all three audiences, and clean of forbidden markup.
+  factory-projection:
+    description: Keep .smithers/factory.json and .smithers/home.json schema-valid with docs URL, person-only merge policy, and maintainer, contributor, and viewer sections.
+    weight: 2
+  # Shared object store must split read and write credentials so untrusted runs cannot poison the cache.
+  remote-cache-trust:
+    description: Wire build.smithers.sh with split read and write secrets and never expose SMITHERS_CACHE_WRITE_TOKEN to pull_request jobs.
+    weight: 2
+  # Engineering wiki and mythical history must stay frontmatter-valid, link-clean, secret-free, and built to HTML.
+  wiki-freshness:
+    description: Keep every .smithers/wiki/*.md page frontmatter-valid with zero broken wikilinks, zero secret leaks, and a fresh docs/public/wiki.html build.
+    weight: 1.5
+  # Release manifests and automation must stay aligned across Zig, TypeScript, changelog, and main-branch workflows.
+  release-alignment:
+    description: Keep build.zig.zon, sdks/typescript/package.json, CHANGELOG.md, and .github/workflows/release.yml aligned for automated main-branch releases and docs deploys.
+    weight: 1.5
+  # Cloud workflows, flows, and interactive playground must obey sandbox and CSP integrity constraints.
+  workflow-security:
+    description: Keep .smithers/workflows QuickJS-safe, .smithers/flows frontmatter-valid, and .smithers/playground CSP SHA-256 hashes exact.
+    weight: 2

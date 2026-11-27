@@ -58,6 +58,58 @@ jobs:
           print("TigerStyle hygiene check passed.")
           PY
 
+  smithers-factory:
+    name: Smithers Factory, Wiki, Audit & Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SMITHERS_CACHE_ENDPOINT: https://build.smithers.sh
+      SMITHERS_TRUST: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'trusted' || 'untrusted' }}
+      SMITHERS_CACHE_READ_TOKEN: ${{ secrets.SMITHERS_CACHE_READ_TOKEN }}
+      # Untrusted PRs get read-only cache access; only trusted pushes to main may populate the shared object store.
+      SMITHERS_CACHE_WRITE_TOKEN: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.SMITHERS_CACHE_WRITE_TOKEN || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Zig 0.17.1
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Verify execution trust isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/smithers-auth.mjs sandbox-env --trust "$SMITHERS_TRUST"
+      - name: Validate engineering wiki and Mythical History
+        run: node .smithers/wiki/build-feed.mjs --check
+      - name: Validate Lighthouse backpressure audit report
+        run: node .smithers/reports/audit.mjs --check
+      - name: Run Smithers factory, auth, playground, wiki, and audit tests
+        run: node --test .smithers/tests/*.test.mjs
+      - name: Build Vocs documentation site and verify llms.txt + audit + wiki
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build
+          test -f dist/public/llms.txt
+          test -f dist/public/audit.html
+          test -f dist/public/wiki.html
+      - name: Upload Lighthouse audit and wiki artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smithers-factory-reports
+          path: |
+            docs/public/audit.html
+            docs/public/wiki.html
+            .smithers/reports/audit-summary.json
+          if-no-files-found: error
+
   build-test:
     strategy:
       fail-fast: false
@@ -72,6 +124,10 @@ jobs:
       # build.zig links (lib/bn254.zig, lib/foundry.zig). Voltaire's
       # libcrypto_wrappers.a is built by `zig build` itself into the Zig cache.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      SMITHERS_CACHE_ENDPOINT: https://build.smithers.sh
+      SMITHERS_CACHE_READ_TOKEN: ${{ secrets.SMITHERS_CACHE_READ_TOKEN }}
+      # Never pass cache write credentials to pull_request runs.
+      SMITHERS_CACHE_WRITE_TOKEN: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.SMITHERS_CACHE_WRITE_TOKEN || '' }}
     steps:
       - uses: actions/checkout@v4
         with:

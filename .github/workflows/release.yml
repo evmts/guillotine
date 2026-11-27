@@ -1,20 +1,34 @@
-name: Release
+name: Release & Docs Publish
 
-# Push a `v*` tag to build the C FFI shared libraries on macOS arm64 and
-# Linux x86_64 (glibc >= 2.28), create a GitHub Release with
-# libguillotine_ffi.so, libguillotine_ffi.dylib, guillotine.h and
-# SHA256SUMS.txt, and publish @tevm/guillotine to npm with both prebuilds.
-# The npm publish runs only once the NPM_TOKEN secret exists; the GitHub
-# Release does not depend on it. `workflow_dispatch` runs every build and
-# check, packs the npm tarball, and publishes nothing.
+# Automated release and documentation publishing when changes land on `main`
+# (mirrored from Smithers Cloud) or when a `v*` tag is pushed:
 #
-# The static library (zig build static) is not shipped: it does not bundle
-# libblst, libcrypto_wrappers or libckzg, so consumers cannot link it alone.
+# 1. Version bump on `main` (or `v*` tag): builds C FFI shared libraries on
+#    macOS arm64 and Linux x86_64 (glibc >= 2.28), creates a GitHub Release
+#    with libguillotine_ffi.so, libguillotine_ffi.dylib, guillotine.h and
+#    SHA256SUMS.txt, and publishes @tevm/guillotine to npm with provenance
+#    when NPM_TOKEN is configured.
+# 2. Docs, wiki, audit, or factory changes on `main` (or `v*` tag): rebuilds
+#    docs/public/wiki.html, docs/public/audit.html, and Vocs docs (including
+#    llms.txt), deploys to Vercel when VERCEL_TOKEN is configured, and pushes
+#    fresh feeds to Smithers Cloud when SMITHERS_FEED_KEY is configured.
+# 3. `workflow_dispatch` lets maintainers force a docs deploy or run a full
+#    release dry-run / publish on demand.
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      force_docs_deploy:
+        description: 'Build and publish Vocs docs, wiki, and Lighthouse audit'
+        type: boolean
+        default: true
+      run_release_build:
+        description: 'Run full native release build and dry-run packaging'
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -23,17 +37,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  version:
-    name: Check versions
+  plan:
+    name: Plan release & docs publish
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
       version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
+      should_release: ${{ steps.read.outputs.should_release }}
+      publish_release: ${{ steps.read.outputs.publish_release }}
+      should_publish_docs: ${{ steps.read.outputs.should_publish_docs }}
     steps:
       - uses: actions/checkout@v4
-      - name: build.zig.zon, package.json and the tag agree
+        with:
+          fetch-depth: 0
+      - name: Check version parity and determine release/docs actions
         id: read
         shell: bash
         run: |
@@ -46,15 +66,60 @@ jobs:
             echo "::error::build.zig.zon ($zon) and sdks/typescript/package.json ($npm_version) disagree" >&2
             exit 1
           fi
-          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "${GITHUB_REF_NAME#v}" != "$zon" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match version $zon" >&2
-            exit 1
+
+          tag="v${zon}"
+          should_release="false"
+          publish_release="false"
+          should_publish_docs="false"
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [ "${GITHUB_REF_NAME#v}" != "$zon" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match version $zon" >&2
+              exit 1
+            fi
+            should_release="true"
+            publish_release="true"
+            should_publish_docs="true"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.run_release_build }}" = "true" ]; then
+              should_release="true"
+            fi
+            if [ "${{ inputs.force_docs_deploy }}" = "true" ]; then
+              should_publish_docs="true"
+            fi
+          elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            # Trigger a release automatically if this version has no git tag yet AND has a CHANGELOG.md entry.
+            if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              if grep -Eq "^##[[:space:]]+\[?${zon//./\\.}\]?" CHANGELOG.md; then
+                should_release="true"
+                publish_release="true"
+                should_publish_docs="true"
+              fi
+            fi
+
+            # Trigger docs/wiki/audit publish whenever docs, wiki, audit, factory, or changelog changed.
+            before="${{ github.event.before }}"
+            if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+              changed="$(git diff --name-only "$before" "$GITHUB_SHA")"
+            else
+              changed="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+            fi
+            if printf '%s\n' "$changed" | grep -Eq '^(docs/|\.smithers/wiki/|\.smithers/reports/|\.smithers/FACTORY\.ts|\.smithers/home\.json|\.agents/uphill/|CHANGELOG\.md|README\.md)'; then
+              should_publish_docs="true"
+            fi
           fi
+
           echo "version=$zon" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$publish_release" >> "$GITHUB_OUTPUT"
+          echo "should_publish_docs=$should_publish_docs" >> "$GITHUB_OUTPUT"
+          echo "Plan: version=$zon tag=$tag should_release=$should_release publish_release=$publish_release should_publish_docs=$should_publish_docs"
 
   build:
     name: Build ${{ matrix.platform }}
-    needs: version
+    needs: plan
+    if: ${{ needs.plan.outputs.should_release == 'true' }}
     strategy:
       fail-fast: true
       matrix:
@@ -63,13 +128,11 @@ jobs:
             platform: darwin-arm64
             machine: arm64
             shared: libguillotine_ffi.dylib
-            # Native build for the runner's macOS.
             zig_target: ''
           - os: ubuntu-latest
             platform: linux-x64
             machine: x86_64
             shared: libguillotine_ffi.so
-            # Link against glibc 2.28 so the library loads on older distributions.
             zig_target: x86_64-linux-gnu.2.28
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -77,7 +140,7 @@ jobs:
       contents: read
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      VERSION: ${{ needs.version.outputs.version }}
+      VERSION: ${{ needs.plan.outputs.version }}
       ZIG_TARGET: ${{ matrix.zig_target }}
     steps:
       - uses: actions/checkout@v4
@@ -156,13 +219,16 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [version, build]
+    needs: [plan, build]
+    if: ${{ needs.plan.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     env:
-      VERSION: ${{ needs.version.outputs.version }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      PUBLISH_RELEASE: ${{ needs.plan.outputs.publish_release }}
       IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v4
@@ -212,17 +278,23 @@ jobs:
           print(f"CHANGELOG notes for {version}: {len(body)} characters")
           PY
       - name: Create GitHub Release
-        if: env.IS_TAG == 'true'
+        if: env.PUBLISH_RELEASE == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Skipping duplicate release creation."
+            exit 0
+          fi
           notes=(--generate-notes)
           if [ -s notes.md ]; then notes=(--notes-file notes.md); fi
-          gh release create "$GITHUB_REF_NAME" \
-            --verify-tag \
-            --title "Guillotine $GITHUB_REF_NAME" \
+          target_args=(--target "$GITHUB_SHA")
+          if [ "$IS_TAG" = "true" ]; then target_args=(--verify-tag); fi
+          gh release create "$TAG" \
+            "${target_args[@]}" \
+            --title "Guillotine $TAG" \
             "${notes[@]}" \
             release/libguillotine_ffi.so \
             release/libguillotine_ffi.dylib \
@@ -231,18 +303,16 @@ jobs:
 
   npm:
     name: Publish @tevm/guillotine
-    needs: [version, build]
+    needs: [plan, build]
+    if: ${{ needs.plan.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      # npm publish --provenance signs the package with the workflow's OIDC token.
       id-token: write
     env:
-      VERSION: ${{ needs.version.outputs.version }}
-      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      # `secrets` is not available in step `if:` expressions; expose only
-      # whether the token exists. The token itself stays in the publish step.
+      VERSION: ${{ needs.plan.outputs.version }}
+      PUBLISH_RELEASE: ${{ needs.plan.outputs.publish_release }}
       HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -280,14 +350,73 @@ jobs:
       - name: Pack (dry run)
         working-directory: sdks/typescript
         run: npm pack --dry-run --ignore-scripts
-      # prepublishOnly rebuilds one platform's library with Zig; the steps above
-      # already built, tested and linted the two-platform package.
       - name: Publish @tevm/guillotine to npm
-        if: ${{ env.IS_TAG == 'true' && env.HAS_NPM_TOKEN == 'true' }}
+        if: ${{ env.PUBLISH_RELEASE == 'true' && env.HAS_NPM_TOKEN == 'true' }}
         working-directory: sdks/typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public --ignore-scripts
       - name: NPM_TOKEN is not set
-        if: ${{ env.IS_TAG == 'true' && env.HAS_NPM_TOKEN != 'true' }}
+        if: ${{ env.PUBLISH_RELEASE == 'true' && env.HAS_NPM_TOKEN != 'true' }}
         run: echo "::notice::NPM_TOKEN secret is not set; skipped npm publish of @tevm/guillotine@${VERSION}. The GitHub Release still publishes."
+
+  docs-publish:
+    name: Build & Publish Docs, Audit & Wiki
+    needs: plan
+    if: ${{ needs.plan.outputs.should_publish_docs == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
+      HAS_SMITHERS_FEED_KEY: ${{ secrets.SMITHERS_FEED_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - uses: oven-sh/setup-bun@v2
+      - name: Verify wiki and Lighthouse audit outputs
+        run: |
+          node .smithers/wiki/build-feed.mjs --write --check
+          node .smithers/reports/audit.mjs --check
+      - name: Build Vocs documentation site
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build
+          test -f dist/public/llms.txt
+          test -f dist/public/audit.html
+          test -f dist/public/wiki.html
+      - name: Upload built docs bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: guillotine-docs-site
+          path: docs/dist
+          if-no-files-found: error
+      - name: Deploy docs to Vercel production
+        if: ${{ env.HAS_VERCEL_TOKEN == 'true' }}
+        working-directory: docs
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+      - name: VERCEL_TOKEN notice
+        if: ${{ env.HAS_VERCEL_TOKEN != 'true' }}
+        run: echo "::notice::VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID not set; Vercel Git integration handles guillotine.tevm.sh deploys automatically on push to main."
+      - name: Publish wiki and backpressure audit feeds to Smithers Cloud
+        if: ${{ env.HAS_SMITHERS_FEED_KEY == 'true' }}
+        env:
+          SMITHERS_FEED_KEY: ${{ secrets.SMITHERS_FEED_KEY }}
+        run: |
+          node .smithers/wiki/build-feed.mjs --push
+          node .smithers/reports/audit.mjs --push
+      - name: SMITHERS_FEED_KEY notice
+        if: ${{ env.HAS_SMITHERS_FEED_KEY != 'true' }}
+        run: echo "::notice::SMITHERS_FEED_KEY not set; skipped pushing remote wiki/audit feeds to smithers.sh."

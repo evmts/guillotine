@@ -24,6 +24,9 @@ export default defineConfig({
   },
   topNav: [
     { text: 'Docs', link: '/', match: '/' },
+    { text: 'Factory', link: 'https://smithers.sh/evmts/guillotine' },
+    { text: 'Audit', link: 'https://guillotine.tevm.sh/audit.html' },
+    { text: 'Wiki', link: 'https://guillotine.tevm.sh/wiki.html' },
     {
       text: 'Ecosystem',
       items: [
@@ -71,6 +74,7 @@ export default defineConfig({
         { text: 'TigerStyle and safety guarantees', link: '/guides/tigerstyle' },
         { text: 'Benchmarks and native JIT', link: '/guides/benchmarks-and-jit' },
         { text: 'Language bindings', link: '/guides/bindings' },
+        { text: 'Smithers Cloud factory', link: '/guides/smithers-factory' },
         { text: 'Publishing and releases', link: '/guides/publishing' },
       ],
     },

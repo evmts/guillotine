@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "smithers-guillotine": {
+      "transport": "streamable-http",
+      "url": "https://smithers.sh/evmts/guillotine/mcp",
+      "auth": {
+        "mode": "oauth2-dcr-pkce",
+        "fallback": "byoa-one-time-attach",
+        "resourceMetadata": "https://smithers.sh/.well-known/oauth-protected-resource",
+        "authorizationServer": "https://smithers.sh/.well-known/oauth-authorization-server"
+      }
+    },
+    "smithers-zevm": {
+      "transport": "streamable-http",
+      "url": "https://smithers.sh/evmts/zevm/mcp",
+      "auth": {
+        "mode": "oauth2-dcr-pkce",
+        "fallback": "byoa-one-time-attach"
+      }
+    },
+    "smithers-voltaire": {
+      "transport": "streamable-http",
+      "url": "https://smithers.sh/evmts/voltaire/mcp",
+      "auth": {
+        "mode": "oauth2-dcr-pkce",
+        "fallback": "byoa-one-time-attach"
+      }
+    }
+  }
+}

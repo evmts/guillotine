@@ -432,7 +432,7 @@ Detailed documentation is available in `docs/`:
   - [TIGERSTYLE.md](docs/dev/TIGERSTYLE.md) - Safety guarantees, `ReleaseSafe`, EVM pooling, recursion & dependencies
   - [CONTRIBUTING.md](docs/dev/CONTRIBUTING.md) - Development workflow
 - **[docs/performance/](docs/performance/)** - Performance EVM specifics
-- **[docs/mini/](docs/mini/)** - Mini EVM specifics
+- **[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini)** - Standalone reference EVM (the in-repo differential oracle lives in [src/tracer/minimal_evm.zig](src/tracer/minimal_evm.zig))
 
 ## References
 
@@ -502,3 +502,13 @@ Options:
   -Devm-optimize=[string]      fast, small or safe (default: safe); validated, exported as `optimize_strategy`
   -Denable-tracing=[bool]      Build DefaultEvm with the debug tracer
   -Dstrip=[bool]               Strip debug info from the FFI shared/static libraries (release.yml sets it)
+
+## Smithers Cloud Factory, MCP Dogfooding & Backpressure
+
+Guillotine runs publicly on Smithers Cloud at `https://smithers.sh/evmts/guillotine` with live Streamable HTTP MCP at `https://smithers.sh/evmts/guillotine/mcp`.
+
+- **Dogfood via MCP**: Agents working on `evmts/guillotine`, `evmts/zevm`, and `evmts/voltaire` use the Smithers Cloud MCP server (`repo_read_file`, `docs_list`, `docs_read`, `flows_list`, `issues_list`, `pulls_list`, `todo_list`) and `.smithers/mcp/clients.json`.
+- **One-time sandbox auth**: Mint a 10-minute `XXXX-XXXX` attach reference in the Smithers Cloud UI and use `node scripts/smithers-auth.mjs claim` + `redeem` (writes credentials strictly to mode-`0600` `.smithers/.auth/token.json`; never echo bearer tokens).
+- **Shared object store & trust boundaries**: `.smithers/WORKSPACE.ts` targets `https://build.smithers.sh` with split `SMITHERS_CACHE_READ_TOKEN` (safe for untrusted local/PR runs) and `SMITHERS_CACHE_WRITE_TOKEN` (strictly `push` to `main` and attested sandboxes).
+- **Incremental build graph**: Run `scripts/smthrs targets`, `scripts/smthrs target //.smithers:factory-check`, and `scripts/smthrs test //...` from the repo root.
+- **Lighthouse backpressure & wiki**: Run `node .smithers/reports/audit.mjs --write --run-uphill --check` and `node .smithers/wiki/build-feed.mjs --write --check` to update `docs/public/audit.html` and `docs/public/wiki.html`.

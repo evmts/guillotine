@@ -233,7 +233,7 @@ footprint:
     src/bytecode/bytecode_c.zig: { baseline: 928 }
     src/bytecode/bytecode_config.zig: { baseline: 204 }
     src/bytecode/bytecode_stats.zig: { baseline: 1618 }
-    src/core/verified_ops.zig: { baseline: 386 }
+    src/core/verified_ops.zig: { baseline: 521 }
     src/core/wide_arith.zig: { baseline: 527 }
     src/eips_and_hardforks/authorization_processor.zig: { baseline: 720 }
     src/eips_and_hardforks/beacon_roots.zig: { baseline: 369 }
@@ -382,7 +382,7 @@ footprint:
     "src/(root)": { baseline: 532011B }
     src/block: { baseline: 27482B }
     src/bytecode: { baseline: 243811B }
-    src/core: { baseline: 37301B }
+    src/core: { baseline: 42256B }
     src/eips_and_hardforks: { baseline: 185791B }
     src/frame: { baseline: 170362B }
     src/instructions: { baseline: 617459B }
@@ -401,17 +401,24 @@ footprint:
 verification:
   lean-no-sorry:
     "*": { baseline: pass }
-  lean-theorems: { baseline: 43, target: 100 }
+  lean-theorems: { baseline: 183, target: 100 }
   smt-proofs: { baseline: 42, target: 80 }
   inline-test-coverage: { baseline: 77.1, target: 95 }
 
 documentation:
   broken-links:
     "*": { baseline: pass }
-    CLAUDE.md: { baseline: fail }
   subdir-readme:
     "*": { baseline: pass }
-    src/core: { baseline: fail }
-    src/jit: { baseline: fail }
-    src/layer2: { baseline: fail }
-    src/tracer: { baseline: fail }
+
+factory:
+  factory-projection:
+    "*": { baseline: pass }
+  remote-cache-trust:
+    "*": { baseline: pass }
+  wiki-freshness:
+    "*": { baseline: pass }
+  release-alignment:
+    "*": { baseline: pass }
+  workflow-security:
+    "*": { baseline: pass }

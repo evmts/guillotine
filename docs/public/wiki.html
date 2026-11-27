@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guillotine Engineering Wiki and Mythical History</title>
+<style>
+:root {
+  --bg: #0b0e14;
+  --panel: #111622;
+  --panel-2: #161d2d;
+  --border: #232d42;
+  --text: #e6ecf7;
+  --muted: #93a1bc;
+  --accent: #38bdf8;
+  --accent-soft: rgba(56, 189, 248, 0.14);
+  --green: #34d399;
+  --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  --sans: Inter, system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --panel-2: #f1f5f9;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --muted: #475569;
+    --accent: #0284c7;
+    --accent-soft: rgba(2, 132, 199, 0.1);
+    --green: #059669;
+  }
+}
+* { box-sizing: border-box }
+body { margin: 0; font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.65 }
+header {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em }
+.pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent) }
+.nav-links { display: flex; gap: 14px; font-size: 13px }
+.nav-links a { color: var(--muted); text-decoration: none }
+.nav-links a:hover { color: var(--accent) }
+.shell { display: grid; grid-template-columns: 260px minmax(0, 1fr) 250px; min-height: calc(100vh - 54px) }
+@media (max-width: 1040px) { .shell { grid-template-columns: 230px minmax(0, 1fr) } .right { display: none } }
+@media (max-width: 720px) { .shell { grid-template-columns: 1fr } .left { border-right: 0; border-bottom: 1px solid var(--border) } }
+aside { padding: 16px; background: var(--panel); border-right: 1px solid var(--border) }
+.right { border-right: 0; border-left: 1px solid var(--border) }
+input[type="search"] {
+  width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 13px; margin-bottom: 12px;
+}
+.nav-item {
+  display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text);
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13.5px; margin-bottom: 2px;
+}
+.nav-item:hover { background: var(--panel-2) }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600 }
+.meta-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 16px 0 8px }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border) }
+main { padding: clamp(20px, 4vw, 44px); max-width: 900px; width: 100%; margin: 0 auto }
+article h1 { margin-top: 0; font-size: clamp(26px, 4vw, 34px); line-height: 1.2; letter-spacing: -0.02em }
+article h2 { margin-top: 30px; font-size: 20px; border-bottom: 1px solid var(--border); padding-bottom: 6px }
+article h3 { margin-top: 22px; font-size: 16px }
+article p, article li { color: var(--text) }
+article code { font-family: var(--mono); font-size: 0.88em; background: var(--panel-2); padding: 2px 5px; border-radius: 5px }
+article pre { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto }
+article pre code { background: transparent; padding: 0; font-size: 12.5px; line-height: 1.55 }
+article table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px }
+article th, article td { padding: 8px 10px; border: 1px solid var(--border); text-align: left }
+article th { background: var(--panel-2) }
+a.wikilink { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); cursor: pointer }
+a.wikilink:hover { border-bottom-style: solid }
+.side-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 13px }
+.side-list a, .side-list button { color: var(--muted); text-decoration: none; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font: inherit }
+.side-list a:hover, .side-list button:hover { color: var(--accent) }
+.input-file { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span>Guillotine Wiki</span>
+    <span class="pill">evmts/guillotine</span>
+    <span class="pill">Obsidian-compatible</span>
+  </div>
+  <nav class="nav-links">
+    <a href="https://smithers.sh/evmts/guillotine">Smithers Factory</a>
+    <a href="https://smithers.sh/evmts/guillotine/-/wiki">Cloud Wiki</a>
+    <a href="./audit.html">Lighthouse Audit</a>
+    <a href="./">Docs</a>
+    <a href="https://github.com/evmts/guillotine">GitHub</a>
+  </nav>
+</header>
+<div class="shell">
+  <aside class="left">
+    <input id="q" type="search" placeholder="Search wiki and history…" aria-label="Search wiki notes">
+    <div id="nav"></div>
+  </aside>
+  <main>
+    <div id="tags" class="tags"></div>
+    <article id="doc"></article>
+  </main>
+  <aside class="right">
+    <div class="meta-label">Outline</div>
+    <ul id="outline" class="side-list"></ul>
+    <div class="meta-label">Backlinks</div>
+    <ul id="backlinks" class="side-list"></ul>
+    <div class="meta-label">Grounded Sources</div>
+    <ul id="inputs" class="side-list"></ul>
+  </aside>
+</div>
+<script>
+const DATA = {"repository":"evmts/guillotine","title":"Guillotine Engineering Wiki","description":"Obsidian-compatible engineering knowledge base and Mythical History for evmts/guillotine.","notes":[{"path":"Overview.md","title":"Overview","tags":["overview","architecture"],"inputs":["README.md","CLAUDE.md","build.zig","build.zig.zon"],"linksOut":["Mythical-History.md","Dispatch-Engine.md","Formal-Verification.md","TigerStyle-and-Safety.md","Trust-Model-and-Factory.md","Decisions.md","SDKs-and-ZEVM.md"],"backlinks":["Mythical-History.md","Dispatch-Engine.md","Formal-Verification.md","TigerStyle-and-Safety.md","Trust-Model-and-Factory.md","Decisions.md","SDKs-and-ZEVM.md"],"digest":"b0b55c75bc4f","body":"\n# Guillotine Engineering Wiki\n\nGuillotine is a formally verified, register-passing Ethereum Virtual Machine written in stock Zig `0.17.1` with a C ABI (`libguillotine_ffi`) and a Bun FFI TypeScript SDK (`@tevm/guillotine`). It runs in public as a Smithers Cloud coding factory at `https://smithers.sh/evmts/guillotine`.\n\n## System Architecture\n\n```text\n+-----------------------------------------------------------------------+\n|  Public Surfaces                                                      |\n|  Zig dep.module(\"evm\")  |  C ABI (guillotine.h)  |  @tevm/guillotine  |\n+-----------------------------------------------------------------------+\n                                  |\n                                  v\n+-----------------------------------------------------------------------+\n|  Bytecode Preprocessor & Dispatch Cache (src/preprocessor/)           |\n|  - Single-pass analysis into 8-byte untagged Dispatch.Item schedule   |\n|  - Basic-block static gas & stack bounds batching (BlockAccumulator)  |\n|  - O(1) dense JUMPDEST bitmap & synthetic opcode fusion               |\n+-----------------------------------------------------------------------+\n                                  |\n                                  v\n+-----------------------------------------------------------------------+\n|  Register-Passing Tailcall Engine (src/frame/, src/instructions/)     |\n|  - Stock Zig 0.17.1 preserve_none tailcalls (@call(.always_tail))     |\n|  - Top-of-stack u256 cached in 4x u64 registers (t0..t3)              |\n|  - Zero-cost comptime EvmConfig & Base/OP Stack Layer 2 (src/layer2/) |\n+-----------------------------------------------------------------------+\n                                  |\n                 +----------------+----------------+\n                 v                                 v\n+---------------------------------+  +----------------------------------+\n|  State, Storage & Crypto        |  |  Verification & Backpressure     |\n|  - O(1) undo-log snapshots      |  |  - 66,652/66,652 EEST (100%)     |\n|  - Pooled stack/memory buffers  |  |  - 55 Zean Lean 4.35 proofs      |\n|  - Voltaire native precompiles  |  |  - 116,384 Zig-Lean diff vectors |\n|  - Opt-in ARM64 JIT (src/jit/)  |  |  - 32 SMT + 19 LLVM IR proofs    |\n+---------------------------------+  +----------------------------------+\n```\n\n## Reading Guide\n\n- Start with [[Mythical-History]] for the clean epoch-by-epoch narrative of how Guillotine's design evolved from first principles to `v0.1.0`.\n- Read [[Dispatch-Engine]] to understand why `Frame` has no `pc` field and how `preserve_none` tailcalls eliminate interpreter loop overhead.\n- Read [[Formal-Verification]] for the dual Zean + Lean 4, Bitwuzla/Z3 SMT, LLVM IR, and EEST verification layers.\n- Read [[TigerStyle-and-Safety]] for our zero-crash invariant, `_unsafe` pre-validation contract, and Uphill Lighthouse audit backpressure.\n- Read [[Trust-Model-and-Factory]] for how Smithers Cloud runs CI, isolates untrusted contributor runs from the shared `build.smithers.sh` object store, serves public MCP, and automates releases.\n- Read [[Decisions]] for architectural decision records and rejected alternatives.\n- Read [[SDKs-and-ZEVM]] for how Guillotine integrates with `evmts/zevm`, `evmts/voltaire`, C, and TypeScript.\n"},{"path":"Mythical-History.md","title":"Mythical History","tags":["history","mythical","epochs"],"inputs":["CHANGELOG.md","README.md"],"linksOut":["Overview.md","Dispatch-Engine.md","Formal-Verification.md","Decisions.md","Trust-Model-and-Factory.md"],"backlinks":["Overview.md","Formal-Verification.md","Trust-Model-and-Factory.md","Decisions.md","SDKs-and-ZEVM.md"],"digest":"685673f42b97","body":"\n# Mythical History of Guillotine\n\nA mythical history is the clean, linear architectural story you would write if you built today's tree from scratch: small atomic concepts, docs and invariants before optimizations, and honest notes on what was tried, measured, and retired along the way. Every epoch below links directly to the committed subsystems and real milestone commits on `main`.\n\n## Epoch 1: Flat Dispatch Over Switch Loops\n\nMost EVMs execute a `while (pc \u003c code.len) switch (code[pc])` loop. Guillotine started from a different premise: separate bytecode analysis from bytecode execution completely.\n\n- **Core insight**: Contract bytecode is immutable once deployed. Analyze it once into a flat array of 8-byte untagged `Dispatch.Item` entries (`src/preprocessor/dispatch.zig`), batch static gas and stack bounds at basic-block boundaries, and pre-resolve jump tables into a dense bitmap (`src/bytecode/bytecode_analyze.zig`).\n- **What this unlocked**: Handler bodies skip per-opcode stack overflow/underflow branches via `_unsafe` stack operations whose preconditions are proved at analysis time (`[[Dispatch-Engine]]`).\n- **Retired detours**: Earlier prototypes experimented with larger tagged dispatch structs and 13 speculative multi-opcode fusions that added code size without improving median throughput. All 13 dead fusions were removed (`fe945ea7`, `76479f10`) once benchmarks showed cache-line pressure mattered more than exotic fusion count.\n\n## Epoch 2: Stock Zig 0.17.1 `preserve_none` Tailcalls\n\nMoving from a switch loop to indirect tailcalls still hit a ceiling when ABI prologues spilled hot interpreter state to the stack on every opcode transition.\n\n- **Breakthrough**: Stock Zig `0.17.1` exposed LLVM's native `preserve_none` calling convention. Guillotine defined a unified handler ABI in `src/preprocessor/handler_abi.zig` passing `(frame, cursor, sp, gas, t0, t1, t2, t3)` directly in callee registers (`41cc28e0`, `e91abdd8`, `9038aa65`).\n- **Register-cached Top of Stack**: Keeping the top 256-bit EVM stack word pinned in four 64-bit registers (`t0..t3`) with `sp[0]` as its spill slot eliminated redundant memory loads across arithmetic, bitwise, comparison, and control-flow chains.\n- **Multi-limb arithmetic without spills**: `src/core/wide_arith.zig` replaced LLVM's slow compiler-rt calls with inline Knuth Algorithm D and x86_64 `divq` so `DIV`/`MOD`/`MULMOD` never clobber the tailcall register set.\n- **Evidence**: `1.43x` faster than `revm` on the classic 7-workload interpreter suite on Apple M3 Max and `1.25x` faster on `snailtracer` on x86_64 Linux (`edeacbf3`, `76479f10`).\n\n## Epoch 3: O(1) State, Snapshots, and Bounded Memory\n\nA fast interpreter loses its lead if nested calls thrash the allocator or copy storage maps on revert.\n\n- **O(1) undo-log snapshots**: `src/storage/journal.zig` and `src/storage/database.zig` record reversible mutations in an append-only journal so `REVERT` unwinds in O(changed slots) instead of cloning state.\n- **Pooled call frames and memory**: `FrameStackPool` fixed a 4.4 GB leak under deep recursion (`859fbcf7`), and mmap-backed pooled buffers plus an 8,192-entry clock/LRU `DispatchCache` stabilized 100-block mainnet replay (`1138255c`, `1130e4f4`).\n- **DatabaseProxy**: Legacy `static_wrappers` were retired and replaced by a single comptime `DatabaseProxy` supporting `pass_through`, `static`, and `lru` modes (`57e7d712`).\n\n## Epoch 4: 100% Mainnet Parity (Frontier Through Osaka) and Base L2\n\nCorrectness is the hard release gate (`[[TigerStyle-and-Safety]]`).\n\n- **Official EEST compliance**: `specs/eest_runner.zig` runs the pinned `tests@v21.0.3` official Ethereum Execution Spec Tests (SHA-256 verified by `scripts/fetch-eest-fixtures.sh`). All `66,652 / 66,652` cases pass across all 14 mainnet hardforks (Frontier through Osaka) with bytecode fusions both ON and OFF (`76479f10`).\n- **100-block mainnet parity**: Offline replay of 100 contiguous Ethereum mainnet blocks (`26,498,000` to `26,498,099`, `29,560` transactions, `2.97` billion gas) achieved `29,560 / 29,560` (`100.00%`) receipt parity against `revm` (`4bf6a260`, `1130e4f4`).\n- **Base and OP Stack Layer 2**: `src/layer2/` brought full Bedrock through Jovian execution (deposits, EIP-2930 access lists, EIP-7702 authorizations, L1 data fees, operator fees, and precompile overrides) onto real fork-configured Guillotine `Evm` instances (`8f55ded2`, `7cec9954`).\n- **Native cryptography**: Pure-Zig secp256k1 `ECRECOVER` (`0.171 ms`), SIMD calldata token counting, adaptive Montgomery `MODEXP`, BN254 GLV, BLS12-381 via `blst`, and KZG 4844 via `c-kzg-4844` landed through vendored `lib/voltaire` (`c9eec19a`, `d27d1a33`).\n\n## Epoch 5: Separating `guillotine-mini` and Hardening the Reference Oracle\n\n- **What was retired**: A duplicated `mini/` sub-tree once lived inside this repository, creating drift and double maintenance. In `v0.1.0` (`9637eb56`, `d29ab542`), `mini/` was cleanly separated into its own standalone repository (`evmts/guillotine-mini`), while the lean in-repo differential oracle (`src/tracer/minimal_evm.zig`) stayed locked to `Frame` via `beforeInstruction()` synchronization.\n- **Zero-crash hardening**: Every crash surfaced by EEST, multi-threaded havoc fuzzing (`zig build fuzz-campaign`), and Lean differential runs was converted into boundary validation returning typed errors (`7cec9954`, `1138255c`).\n\n## Epoch 6: Dual Formal Verification (SMT + LLVM IR + Lean 4 + Zean)\n\nTesting finds bugs. Formal proofs eliminate entire classes of bugs (`[[Formal-Verification]]`).\n\n- **Layer 1 & 2 (SMT + LLVM IR)**: `32 / 32` Bitwuzla/Z3 SMT-LIB2 bitvector theorems and `19 / 19` LLVM IR equivalence + poison/UB pairs verify arithmetic, memory bounds, and fusion rewrites directly against compiler output (`verify/smt/`, `verify/llvm/`).\n- **Layer 3 (Hand-authored Lean 4)**: An executable Lean 4 reference EVM and Layer 2 specification checks `116,384 / 116,384` Zig-to-Lean differential fuzz vectors with zero mismatches (`verify/lean/`).\n- **Layer 4 (Zean direct Zig AIR to Lean 4.35.0)**: Commit `f51d0b73` integrated `okcontract/zean`, capturing 24 real Zig `0.17.1` kernels directly from `src/core/verified_ops.zig` into Lean `4.35.0` and closing `55` `#audit_proof`-verified theorems with zero `sorry` and only standard Lean logical axioms.\n\n## Epoch 7: Public Smithers Cloud Coding Factory and `v0.1.0`\n\n- **First beta release (`v0.1.0`, 2026-11-25)**: Shipped native Zig package exports (`evm`, `voltaire`, `layer2`), stripped `ReleaseFast` C FFI libraries for macOS arm64 and Linux x86_64 (`glibc >= 2.28`), `@tevm/guillotine` Bun FFI SDK, and `guillotine.tevm.sh` Vocs documentation (`d37ddba6`, `76479f10`).\n- **Uphill Lighthouse backpressure & Smithers Cloud switchover**: Continuous Uphill metrics (`e932a6ca`), granular incremental `smthrs` targets connected to the shared `build.smithers.sh` object store with untrusted-read isolation, personalized Maintainer / Contributor / Viewer home views on `smithers.sh/evmts/guillotine`, public MCP with one-time PKCE auth, this Wiki, and automated merge-to-GitHub releases and docs publishing (`[[Trust-Model-and-Factory]]`).\n\n## Related Pages\n\n- [[Overview]]\n- [[Dispatch-Engine]]\n- [[Formal-Verification]]\n- [[Decisions]]\n- [[Trust-Model-and-Factory]]\n"},{"path":"Dispatch-Engine.md","title":"Dispatch Engine","tags":["architecture","dispatch","performance"],"inputs":["src/preprocessor/dispatch.zig","src/preprocessor/handler_abi.zig","src/frame/frame.zig","src/core/verified_ops.zig"],"linksOut":["Overview.md","Formal-Verification.md","TigerStyle-and-Safety.md","Decisions.md"],"backlinks":["Overview.md","Mythical-History.md","Formal-Verification.md","TigerStyle-and-Safety.md","Decisions.md"],"digest":"b3ef5385e429","body":"\n# Dispatch Engine and Tailcall Execution\n\nGuillotine does not run a bytecode interpreter loop. Instead, bytecode is preprocessed once into an executable schedule of 8-byte dispatch items and driven via register-passing tailcalls.\n\n## Schedule Layout\n\n`src/preprocessor/dispatch.zig` compiles raw EVM bytecode into a contiguous array of `Dispatch.Item` values:\n\n1. **Function pointers** to opcode handlers (regular or synthetic fused ops).\n2. **Inline metadata** embedded directly after handlers (`first_block_gas`, `push_inline`, `jump_dest`, `jump_static`), eliminating runtime bytecode indexing and branch mispredictions.\n3. **Dense JUMPDEST bitmap** (`src/bytecode/bytecode_analyze.zig`) plus sorted jump-target lookup (`src/core/verified_ops.zig`) for O(1) dynamic jump validation.\n\nBecause metadata items share the schedule array, **a Frame cursor is a schedule pointer, never a bytecode PC**. Translating back to canonical EVM PCs for tracing or `PC` opcode execution happens through `src/tracer/pc_tracker.zig`.\n\n## Basic-Block Pre-Validation\n\nAt every basic-block entry (frame start, `JUMPDEST`, and untaken `JUMPI` fallthrough), `BlockAccumulator` (`src/core/verified_ops.zig`) computes:\n\n- `gas`: saturating static gas sum for the block.\n- `min_stack`: minimum signed prefix stack depth (required incoming items).\n- `max_stack`: maximum signed prefix stack growth (required spare headroom).\n\nChecking `[min_stack, capacity - max_stack]` and subtracting block `gas` once per block guarantees that every `_unsafe` stack operation inside the block is memory-safe by construction (`[[TigerStyle-and-Safety]]`).\n\n## `preserve_none` Register-Passing ABI\n\n`src/preprocessor/handler_abi.zig` defines the handler signature:\n\n```zig\nfn (\n    frame: *FrameType,\n    cursor: [*]const Dispatch.Item,\n    sp: [*]WordType,\n    gas: FrameType.GasType,\n    t0: u64,\n    t1: u64,\n    t2: u64,\n    t3: u64,\n) callconv(handler_abi.handler_cc) ExitCode\n```\n\n- `t0..t3` hold the top-of-stack `u256` word in four 64-bit registers (`sp[0]` is its backing spill slot).\n- Every handler exits via `@call(.always_tail, ...)` to the next handler, keeping the hot state pinned in registers with zero prologue/epilogue spills.\n- On LLVM x86_64 and aarch64, `preserve_none` cannot return a Zig error union directly, so handlers return a compact `ExitCode` mapped back by `errorFromExit`.\n\n## Synthetic Opcode Fusion and Differential Sync\n\nCommon sequences (`PUSH+ADD`, `PUSH+SUB`, `PUSH+MUL`, `PUSH+MSTORE`, `ISZERO+PUSH+JUMPI`, `DUP+MSTORE`, inline multi-limb `PUSH9` through `PUSH32`) collapse into single handlers in `src/instructions/handlers_*_synthetic.zig`.\n\nWhen the debug tracer is active, every handler calls `beforeInstruction(opcode, cursor)`. `src/tracer/minimal_evm_sync.zig` steps the sequential `MinimalEvm` oracle by the exact number of primitive opcodes represented by a synthetic handler (e.g., 2 steps for `PUSH_MSTORE_INLINE`, 3 steps for `ISZERO_PUSH_JUMPI`) and verifies identical stack, memory, and gas state.\n\n## Related Pages\n\n- [[Overview]]\n- [[Formal-Verification]]\n- [[TigerStyle-and-Safety]]\n- [[Decisions]]\n"},{"path":"Formal-Verification.md","title":"Formal Verification","tags":["verification","lean4","zean","smt"],"inputs":["zean.json","zean.outputs.json","verify/lean/GuillotineZean.lean","verify/smt/model_pins.json","verify/llvm/llvm_ir_verify.py"],"linksOut":["Overview.md","Dispatch-Engine.md","Mythical-History.md","TigerStyle-and-Safety.md"],"backlinks":["Overview.md","Mythical-History.md","Dispatch-Engine.md","TigerStyle-and-Safety.md","Decisions.md"],"digest":"5d6fb5cfe50c","body":"\n# Formal Verification Stack\n\nGuillotine pairs exhaustive Ethereum spec testing with four complementary formal verification layers, all wired under `zig build verify` and tracked continuously by Uphill (`[[TigerStyle-and-Safety]]`).\n\n## Verification Matrix\n\n| Layer | Scope | Current Result | Command |\n| --- | --- | --- | --- |\n| Official EEST (`tests@v21.0.3`) | All 14 mainnet forks, Frontier through Osaka, fusions ON and OFF | `66,652 / 66,652` (100%) | `zig build state-tests -Doptimize=ReleaseSafe` |\n| Zean Direct Zig AIR -> Lean 4.35.0 | 24 real Zig `0.17.1` kernels in `src/core/verified_ops.zig` | `55` `#audit_proof` theorems, 0 `sorry` | `zig build verify-zean` |\n| Hand-Authored Lean 4 Spec | Executable EVM + Layer 2 semantics + differential fuzzer | `116,384 / 116,384` vectors, 0 mismatches | `zig build verify-lean` and `zig build test-lean-diff` |\n| Bitwuzla + Z3 SMT-LIB2 | Arithmetic, memory bounds, jump bounds, fusion equivalences | `32 / 32` theorems proved (`unsat`) | `zig build verify-smt` |\n| LLVM IR Equivalence | `-OReleaseFast` LLVM IR `Fast` vs `Ref` pairs + poison/UB | `19 / 19` pairs proved | `zig build verify-ir` |\n\n## Dual Zean and Lean 4 Stack\n\n1. **Direct Zig AIR capture (`verify/zean/`, `verify/lean/GuillotineZean/`)**: `okcontract/zean` extracts Zig `0.17.1` AIR directly from `src/core/verified_ops.zig` into Lean `4.35.0` modules (`ScalarOps`, `Word256Ops`, `StackOps`, `JumpBsearch`, `BytecodeJumpdest`, `MemoryCopy`). Every proof is audited with `#audit_proof` to guarantee zero `sorry` and only standard Lean logical axioms.\n2. **Executable reference spec (`verify/lean/`)**: Models full EVM state transitions and Base/OP Layer 2 rules independently, then fuzzes the compiled Zig engine against the Lean reference across `116,384` randomized vectors.\n\n## SMT and Compiler IR Pinning\n\n- `verify/smt/model_pins.json` pins every SMT model to exact source digests so any edit to a verified Zig kernel forces re-verification rather than silently drifting.\n- `verify/llvm/llvm_ir_verify.py` verifies the actual `-OReleaseFast` LLVM IR emitted by Zig `0.17.1`, catching optimizer UB or poison-value regressions that source-level proofs alone might miss.\n\n## Related Pages\n\n- [[Overview]]\n- [[Dispatch-Engine]]\n- [[Mythical-History]]\n- [[TigerStyle-and-Safety]]\n"},{"path":"TigerStyle-and-Safety.md","title":"TigerStyle and Safety","tags":["safety","tigerstyle","uphill"],"inputs":["docs/dev/TIGERSTYLE.md",".agents/uphill/uphill.yaml","src/internal/safety_counter.zig","src/tracer/tracer.zig"],"linksOut":["Overview.md","Dispatch-Engine.md","Formal-Verification.md","Trust-Model-and-Factory.md"],"backlinks":["Overview.md","Dispatch-Engine.md","Formal-Verification.md","Trust-Model-and-Factory.md","SDKs-and-ZEVM.md"],"digest":"342ce92eef76","body":"\n# TigerStyle Safety and Lighthouse Backpressure\n\nGuillotine is financial execution infrastructure where a consensus bug or crash causes fund loss. Safety invariants are enforced both in code (`docs/dev/TIGERSTYLE.md`) and continuously through Uphill Lighthouse-style audit reports.\n\n## Zero-Crash Contract\n\n- **No crashes in production**: Every malformed input, OOM, stack limit, gas limit, or precompile failure returns a typed Zig error gracefully. `std.debug.assert` and `std.debug.print` are forbidden in production modules under `src/`.\n- **No swallowed errors**: Empty `catch {}` blocks, silent fallbacks, and `error.NotImplemented` stubs are rejected in CI (`tigerstyle-check` and Uphill `safety` category).\n- **Pre-validated `_unsafe` contract**: Functions suffixed `_unsafe` intentionally omit runtime bounds checks because `Dispatch` pre-validates basic-block stack depth and headroom upfront (`[[Dispatch-Engine]]`). `tracer.assert()` calls inside `_unsafe` helpers act as debug/test checks and never abort embedded FFI hosts (`guillotine_embedded = true`).\n- **Loop bounds**: `SafetyCounter` (`src/internal/safety_counter.zig`) caps bytecode analysis loops at 1M iterations in Debug and ReleaseSafe. Gas bounds runtime execution.\n- **Explicit ownership**: Every allocation pairs immediately with `defer` or `errdefer`.\n\n## Continuous Lighthouse Backpressure (Uphill)\n\n`.agents/uphill/uphill.yaml` scores six independent categories on a `0` to `100` Lighthouse scale (`90+` green, `50-89` amber, `0-49` red):\n\n1. **Safety and TigerStyle**: Zero `@panic`/`unreachable`, zero forbidden debug calls, zero swallowed errors, assertion density, Rust FFI `.unwrap()` and `unsafe` boundaries.\n2. **Style and Limits**: `zig fmt --check src/`, 70-line function bound, 120-column line bound, zero unresolved TODO markers.\n3. **Footprint and Modularity**: 500-line file modularity target and 80 kB subsystem ceiling.\n4. **Verification and Tests**: Zero `sorry`/`axiom` in Lean 4, proven Lean theorem count, SMT proof count, inline Zig test coverage.\n5. **Documentation**: Zero broken local links across root docs, `docs/`, and `.smithers/wiki/`, plus `README.md` coverage for every `src/` subsystem.\n6. **Smithers Factory**: Valid factory/home projections, shared cloud cache trust separation, Engineering Wiki freshness, release version lockstep, and workflow capability hygiene.\n\nRun `uphill --compact` locally or generate the interactive Lighthouse HTML dashboard with `node .smithers/reports/audit.mjs --write` (published to `https://guillotine.tevm.sh/audit.html`).\n\n## Related Pages\n\n- [[Overview]]\n- [[Dispatch-Engine]]\n- [[Formal-Verification]]\n- [[Trust-Model-and-Factory]]\n"},{"path":"Trust-Model-and-Factory.md","title":"Trust Model and Factory","tags":["smithers","security","ci","mcp"],"inputs":[".smithers/WORKSPACE.ts",".smithers/FACTORY.ts",".smithers/PACKAGE.ts",".github/workflows/ci.yml",".github/workflows/release.yml"],"linksOut":["Overview.md","Mythical-History.md","TigerStyle-and-Safety.md","Decisions.md"],"backlinks":["Overview.md","Mythical-History.md","TigerStyle-and-Safety.md","Decisions.md","SDKs-and-ZEVM.md"],"digest":"efa66f2b9351","body":"\n# Trust Model, Shared Cache, and Smithers Cloud Factory\n\nGuillotine runs publicly on Smithers Cloud at `https://smithers.sh/evmts/guillotine`, mirroring to `https://github.com/evmts/guillotine`. Every design decision below protects build integrity while keeping contribution completely open.\n\n## Execution Trust Boundary\n\nWe actively encourage non-maintainers and external contributors to run builds, tests, Uphill audits, and local agents freely. At the same time, untrusted execution can never poison shared caches or bypass merge gates.\n\n| Execution Context | Cache Read (`build.smithers.sh`) | Cache Write (`build.smithers.sh`) | Secrets | Can Satisfy Merge / Release Gate |\n| --- | --- | --- | --- | --- |\n| External contributor laptop / fork PR | Allowed (`SMITHERS_CACHE_READ_TOKEN`) | Denied (empty / refused 403) | None (`secrets: false`) | No (advisory evidence only) |\n| Smithers-controlled sandbox on untrusted PR | Allowed (read-only) | Denied | None (`secrets: false`) | Re-verified in trusted gate |\n| Maintainer run or trusted `main` push | Allowed | Allowed (`SMITHERS_CACHE_WRITE_TOKEN`) | Scoped release/CI secrets | Yes (person approves and merges) |\n\n### How Cache Poisoning Is Prevented\n\n1. `.smithers/WORKSPACE.ts` splits remote cache credentials into `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN`.\n2. `.github/workflows/ci.yml` withholds `SMITHERS_CACHE_WRITE_TOKEN` on every pull request and grants it only on trusted pushes to `refs/heads/main`.\n3. `scripts/smithers-auth.mjs sandbox-env --trust untrusted` strips all write credentials and secrets before launching an untrusted agent sandbox.\n4. `FACTORY.ts` lists critical consensus, build, workflow, and Uphill paths in `protectedPaths`, and enforces `approvals: { approve: \"person\", merge: \"person\" }`.\n\n## Public Cloud MCP and One-Time-Use Authentication\n\n- **Public MCP endpoint**: `https://smithers.sh/evmts/guillotine/mcp` (Streamable HTTP + OAuth 2.1 DCR with PKCE `S256`).\n- **One-time BYOA attach**: Maintainers and contributors mint single-use 10-minute attach references (`XXXX-XXXX`), which an agent claims with a PKCE `S256` challenge and 6-digit pairing verification via `scripts/smithers-auth.mjs`. Redeeming yields an attenuated 8-hour `smat_...` bearer token written strictly to a mode-`0600` file (never passed on `argv`, never holding `person_only` authority).\n- **Attribution**: Every MCP write is attributed as `\u003clogin> (agent)`. Merging, approving, committing TODOs, and rotating secrets remain strictly person-only.\n\n## Personalized Factory UI\n\n`.smithers/FACTORY.ts` projects `.smithers/home.json` with three audience-scoped views (`contributors: \"role\"`):\n\n- **Maintainer**: New branch action (`b`), live triage and PR board, TODO and changeset stack, recent factory runs, and operations links.\n- **Contributor**: Local verification commands, 4-step contribution workflow, public TODO stack, featured flows, and workspace prompt.\n- **Viewer (`everyone`)**: Public showcase hero, runnable Zig example, verified EEST/benchmark/proof stats, ecosystem cards, releases, MCP endpoint, Wiki, Mythical History, and Lighthouse Audit Report.\n\n## Automated Releases and Docs Publishing\n\nMerging a change from Smithers Cloud to GitHub `main` triggers `.github/workflows/release.yml`:\n\n- If `build.zig.zon` and `sdks/typescript/package.json` advance to an untagged version, GitHub Actions waits for green CI, builds stripped `ReleaseFast` macOS arm64 and Linux x86_64 (`glibc >= 2.28`) shared libraries, runs C and TypeScript SDK tests, creates the GitHub Release with `SHA256SUMS.txt`, and publishes `@tevm/guillotine` to npm with OIDC provenance.\n- Whenever docs, wiki, or audit assets change on `main`, Vocs rebuilds `guillotine.tevm.sh` (including `llms.txt`, `audit.html`, and `wiki.html`) and deploys automatically when `VERCEL_TOKEN` is configured.\n\n## Related Pages\n\n- [[Overview]]\n- [[Mythical-History]]\n- [[TigerStyle-and-Safety]]\n- [[Decisions]]\n"},{"path":"Decisions.md","title":"Architectural Decisions","tags":["decisions","adr"],"inputs":["CHANGELOG.md","docs/dev/ARCHITECTURE.md","build.zig.zon"],"linksOut":["Overview.md","Mythical-History.md","Dispatch-Engine.md","Formal-Verification.md","Trust-Model-and-Factory.md"],"backlinks":["Overview.md","Mythical-History.md","Dispatch-Engine.md","Trust-Model-and-Factory.md"],"digest":"b030aa02be7c","body":"\n# Architectural Decision Records\n\nKey engineering trade-offs behind Guillotine, with the rejected alternatives preserved so future contributors and agents do not revisit settled dead ends.\n\n## ADR-001: Dispatch Schedule and Tailcall Engine Over Switch Loop\n\n- **Decision**: Preprocess bytecode into 8-byte `Dispatch.Item` schedules and jump between handlers via `@call(.always_tail)` (`[[Dispatch-Engine]]`).\n- **Rejected alternative**: Traditional `while (pc \u003c code.len) switch (opcode)` interpreter.\n- **Why**: Single switch dispatch suffers indirect branch misprediction and repeated stack/gas checks per opcode. Pre-validating basic blocks once shifts overhead out of hot loops and yields `1.43x` over `revm` on classic workloads.\n\n## ADR-002: Stock Zig 0.17.1 `preserve_none` Over Compiler Fork\n\n- **Decision**: Standardize on stock Zig `0.17.1` with native `preserve_none` handlers and 4x `u64` top-of-stack register caching.\n- **Rejected alternative**: Maintaining a custom Zig/LLVM compiler fork for tailcall calling conventions.\n- **Why**: A compiler fork breaks downstream `zig fetch` adoption and doubles CI maintenance. Stock Zig `0.17.1` ships native `preserve_none` directly.\n\n## ADR-003: Dual Zean + Hand-Authored Lean 4 Formal Verification\n\n- **Decision**: Pair direct Zig `0.17.1` AIR extraction (`okcontract/zean` -> Lean `4.35.0`) with a hand-authored executable Lean reference spec, Bitwuzla/Z3 SMT proofs, and LLVM IR checks (`[[Formal-Verification]]`).\n- **Rejected alternative**: Relying on EEST state tests alone, or hand-translating Zig kernels into Lean manually.\n- **Why**: Manual translation risks model-to-code drift; Zean proves properties on the actual Zig AIR emitted for `src/core/verified_ops.zig`, while the executable Lean spec covers full EVM semantics via `116,384` differential vectors.\n\n## ADR-004: Separate `evmts/guillotine-mini` From the Performance Engine\n\n- **Decision**: Keep `src/tracer/minimal_evm.zig` as the focused in-repo differential oracle and host the standalone educational reference EVM in `evmts/guillotine-mini` (`[[Mythical-History]]`).\n- **Rejected alternative**: Maintaining a duplicated `mini/` workspace tree inside `evmts/guillotine`.\n- **Why**: Eliminated dangling submodules, duplicate build steps, and documentation drift before `v0.1.0`.\n\n## ADR-005: Split Read/Write Cloud Object Store Credentials\n\n- **Decision**: Configure `.smithers/WORKSPACE.ts` with separate `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN` secrets pointing at `https://build.smithers.sh` (`[[Trust-Model-and-Factory]]`).\n- **Rejected alternative**: Sharing a single read-write cache token across PRs, or disabling remote caching for contributors.\n- **Why**: Contributors enjoy fast cache hits on untrusted runs while cache writes stay strictly confined to trusted `main` and maintainer-controlled sandboxes, preventing cache poisoning.\n\n## Related Pages\n\n- [[Overview]]\n- [[Mythical-History]]\n- [[Dispatch-Engine]]\n- [[Formal-Verification]]\n- [[Trust-Model-and-Factory]]\n"},{"path":"SDKs-and-ZEVM.md","title":"SDKs and ZEVM Integration","tags":["sdks","ffi","zevm","voltaire"],"inputs":["src/evm_c_api.zig","sdks/c/include/guillotine.h","sdks/typescript/package.json","docs/building-custom-sdks.md"],"linksOut":["Overview.md","Trust-Model-and-Factory.md","TigerStyle-and-Safety.md","Mythical-History.md"],"backlinks":["Overview.md"],"digest":"5c53a5470e8e","body":"\n# SDKs and Tevm / ZEVM Ecosystem\n\nGuillotine is designed to be embedded cleanly from Zig, C, TypeScript, and any language with a C FFI, while dogfooding Smithers Cloud across the Tevm ecosystem.\n\n## Three Supported Surfaces\n\n1. **Zig package (`build.zig`, `build.zig.zon`)**: Exports `evm`, `voltaire`, and `layer2` via `b.addModule`. Consumers install with `zig fetch --save=guillotine https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0.tar.gz`.\n2. **C ABI (`src/evm_c_api.zig`, `sdks/c/include/guillotine.h`)**: Builds `libguillotine_ffi.dylib` (macOS arm64) and `libguillotine_ffi.so` (Linux x86_64, `glibc >= 2.28`). Runs in embedded mode (`guillotine_embedded = true`), guaranteeing monotonic handles and zero host aborts.\n3. **TypeScript Bun FFI SDK (`@tevm/guillotine`, `sdks/typescript/`)**: Ships both native prebuilds with zero-overhead Bun FFI bindings, strict TypeScript types, and `340 / 340` passing E2E and fuzz tests.\n\nFor Python, Go, Rust, Swift, or Kotlin bindings, use the Custom SDK Builder skill (`.agents/skills/guillotine-sdk-builder/SKILL.md` and `docs/building-custom-sdks.md`).\n\n## Dogfooding Across Tevm Repositories\n\n- **`evmts/voltaire`** (`https://smithers.sh/evmts/voltaire`): Supplies core Ethereum primitives and native cryptography (`blst`, `c-kzg-4844`, `libcrypto_wrappers.a`) vendored into `lib/voltaire/`.\n- **`evmts/zevm`** (`https://smithers.sh/evmts/zevm`): Embeddable Zig Ethereum node with JSON-RPC, beacon light client, and N-API bindings sharing the same `smthrs` incremental graph and `build.smithers.sh` cloud object store.\n- **`evmts/guillotine-mini`**: Standalone readable reference EVM for spec clarity and cross-checking.\n\nAll agents operating across these repositories connect to their respective `https://smithers.sh/evmts/\u003crepo>/mcp` endpoints using one-time PKCE auth (`scripts/smithers-auth.mjs`) to create issues, draft TODOs, inspect PRs, and land stacked changesets cleanly (`[[Trust-Model-and-Factory]]`).\n\n## Related Pages\n\n- [[Overview]]\n- [[Trust-Model-and-Factory]]\n- [[TigerStyle-and-Safety]]\n- [[Mythical-History]]\n"}]};
+const navEl = document.getElementById("nav");
+const docEl = document.getElementById("doc");
+const tagsEl = document.getElementById("tags");
+const outlineEl = document.getElementById("outline");
+const backlinksEl = document.getElementById("backlinks");
+const inputsEl = document.getElementById("inputs");
+const searchEl = document.getElementById("q");
+
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function resolveNote(target) {
+  const low = target.toLowerCase();
+  const withMd = low.endsWith(".md") ? low : low + ".md";
+  return DATA.notes.find(n => n.path.toLowerCase() === withMd || n.path.toLowerCase() === low || n.path.replace(/\.md$/i, "").toLowerCase() === low);
+}
+
+function inlineMd(text) {
+  let out = esc(text);
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  out = out.replace(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/g, (_, target, alias) => {
+    const note = resolveNote(target.trim());
+    const label = alias ? alias.trim() : (note ? note.title : target.trim());
+    return note ? `<a class="wikilink" href="#${encodeURIComponent(note.path)}" data-note="${esc(note.path)}">${esc(label)}</a>` : esc(label);
+  });
+  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  return out;
+}
+
+function renderMarkdown(md) {
+  const lines = md.split("\n");
+  const html = [];
+  const headings = [];
+  let inCode = false, codeBuf = [];
+  let inList = false, inTable = false, tableRows = [];
+
+  function flushList() { if (inList) { html.push("</ul>"); inList = false; } }
+  function flushTable() {
+    if (!inTable) return;
+    const head = tableRows[0];
+    const body = tableRows.slice(2);
+    html.push("<table><thead><tr>" + head.map(c => "<th>" + inlineMd(c) + "</th>").join("") + "</tr></thead><tbody>");
+    for (const r of body) html.push("<tr>" + r.map(c => "<td>" + inlineMd(c) + "</td>").join("") + "</tr>");
+    html.push("</tbody></table>");
+    inTable = false; tableRows = [];
+  }
+
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      flushList(); flushTable();
+      if (!inCode) { inCode = true; codeBuf = []; }
+      else { html.push("<pre><code>" + esc(codeBuf.join("\n")) + "</code></pre>"); inCode = false; }
+      continue;
+    }
+    if (inCode) { codeBuf.push(line); continue; }
+    if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      flushList();
+      inTable = true;
+      tableRows.push(line.trim().slice(1, -1).split("|").map(c => c.trim()));
+      continue;
+    } else {
+      flushTable();
+    }
+    const hm = line.match(/^(#{1,3})\s+(.*)$/);
+    if (hm) {
+      flushList();
+      const level = hm[1].length;
+      const text = hm[2].trim();
+      const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      if (level >= 2) headings.push({ level, text, id });
+      html.push(`<h${level} id="${esc(id)}">${inlineMd(text)}</h${level}>`);
+      continue;
+    }
+    const lm = line.match(/^\s*[-*]\s+(.*)$/) || line.match(/^\s*\d+\.\s+(.*)$/);
+    if (lm) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      html.push("<li>" + inlineMd(lm[1]) + "</li>");
+      continue;
+    }
+    flushList();
+    if (line.trim() === "") continue;
+    html.push("<p>" + inlineMd(line) + "</p>");
+  }
+  flushList(); flushTable();
+  return { html: html.join("\n"), headings };
+}
+
+let activePath = DATA.notes[0]?.path ?? "";
+
+function renderNav(filter = "") {
+  const q = filter.trim().toLowerCase();
+  const visible = DATA.notes.filter(n => !q || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q) || n.tags.some(t => t.toLowerCase().includes(q)));
+  navEl.innerHTML = visible.map(n => `<button class="nav-item ${n.path === activePath ? "active" : ""}" data-note="${esc(n.path)}">${esc(n.title)}</button>`).join("");
+  for (const btn of navEl.querySelectorAll("button")) {
+    btn.addEventListener("click", () => selectNote(btn.dataset.note));
+  }
+}
+
+function selectNote(path) {
+  const note = DATA.notes.find(n => n.path === path) ?? DATA.notes[0];
+  if (!note) return;
+  activePath = note.path;
+  if (location.hash !== "#" + encodeURIComponent(note.path)) {
+    history.replaceState(null, "", "#" + encodeURIComponent(note.path));
+  }
+  renderNav(searchEl.value);
+  tagsEl.innerHTML = note.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("") + `<span class="tag">sha:${esc(note.digest)}</span>`;
+  const rendered = renderMarkdown(note.body);
+  docEl.innerHTML = rendered.html;
+  for (const a of docEl.querySelectorAll("a.wikilink")) {
+    a.addEventListener("click", (e) => { e.preventDefault(); selectNote(a.dataset.note); window.scrollTo(0, 0); });
+  }
+  outlineEl.innerHTML = rendered.headings.length
+    ? rendered.headings.map(h => `<li style="padding-left:${(h.level - 2) * 12}px"><a href="#${esc(h.id)}">${esc(h.text)}</a></li>`).join("")
+    : '<li class="input-file">No subsections</li>';
+  backlinksEl.innerHTML = note.backlinks.length
+    ? note.backlinks.map(p => {
+        const src = DATA.notes.find(n => n.path === p);
+        return `<li><button data-note="${esc(p)}">${esc(src ? src.title : p)}</button></li>`;
+      }).join("")
+    : '<li class="input-file">No incoming links</li>';
+  for (const btn of backlinksEl.querySelectorAll("button")) {
+    btn.addEventListener("click", () => { selectNote(btn.dataset.note); window.scrollTo(0, 0); });
+  }
+  inputsEl.innerHTML = note.inputs.map(f => `<li class="input-file">${esc(f)}</li>`).join("");
+}
+
+searchEl.addEventListener("input", () => renderNav(searchEl.value));
+window.addEventListener("hashchange", () => {
+  const target = decodeURIComponent(location.hash.replace(/^#/, ""));
+  if (target) selectNote(target);
+});
+
+const initial = decodeURIComponent(location.hash.replace(/^#/, ""));
+selectNote(initial || "Overview.md");
+</script>
+</body>
+</html>

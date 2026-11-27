@@ -1,0 +1,2223 @@
+{
+  "schemaVersion": 1,
+  "repository": "evmts/guillotine",
+  "version": "0.1.0",
+  "zigVersion": "0.17.1",
+  "hardfork": "OSAKA",
+  "generatedAt": "2026-11-27T08:07:13.963Z",
+  "compositeScore": 80,
+  "compositeBand": "average",
+  "totals": {
+    "categories": 6,
+    "metrics": 23,
+    "passing": 14,
+    "warning": 6,
+    "failing": 3
+  },
+  "factoryMeta": {
+    "flows": 11,
+    "rules": 7,
+    "issueViews": 6,
+    "audiences": [
+      "maintainer",
+      "contributor",
+      "everyone"
+    ],
+    "docsUrl": "https://guillotine.tevm.sh/llms.txt",
+    "wikiPages": 8
+  },
+  "verificationScorecard": {
+    "eestCases": "66,652 / 66,652",
+    "eestCoverage": "100.00% Frontier through Osaka (fusion on and off)",
+    "leanDiffVectors": "116,384 / 116,384",
+    "leanTheorems": 183,
+    "leanNoSorry": "29 / 29 pass",
+    "smtProofs": 42,
+    "inlineTestCoverage": "77.10"
+  },
+  "trustMatrix": [
+    {
+      "capability": "Shared Object Store Read (build.smithers.sh)",
+      "untrusted": {
+        "status": "allowed",
+        "label": "Allowed (read-only token)"
+      },
+      "sandbox": {
+        "status": "allowed",
+        "label": "Allowed (read + verified write)"
+      },
+      "maintainer": {
+        "status": "allowed",
+        "label": "Allowed (read + write on main)"
+      }
+    },
+    {
+      "capability": "Shared Object Store Write (Cache Population)",
+      "untrusted": {
+        "status": "blocked",
+        "label": "Blocked (cannot poison cache)"
+      },
+      "sandbox": {
+        "status": "allowed",
+        "label": "Allowed (attested sandbox)"
+      },
+      "maintainer": {
+        "status": "allowed",
+        "label": "Allowed (push to main only)"
+      }
+    },
+    {
+      "capability": "Local & Fork PR Execution (Build, Tests, Audit)",
+      "untrusted": {
+        "status": "allowed",
+        "label": "Encouraged (full feedback loop)"
+      },
+      "sandbox": {
+        "status": "allowed",
+        "label": "Automated (deterministic runners)"
+      },
+      "maintainer": {
+        "status": "allowed",
+        "label": "Authoritative gate"
+      }
+    },
+    {
+      "capability": "Gate Bypass, Approvals, and Merge to Main",
+      "untrusted": {
+        "status": "blocked",
+        "label": "Blocked (person-only gate)"
+      },
+      "sandbox": {
+        "status": "blocked",
+        "label": "Blocked (cannot self-merge)"
+      },
+      "maintainer": {
+        "status": "allowed",
+        "label": "Person-only (approve + merge)"
+      }
+    },
+    {
+      "capability": "Release, npm Provenance, and Docs Publishing",
+      "untrusted": {
+        "status": "blocked",
+        "label": "Blocked (no release secrets)"
+      },
+      "sandbox": {
+        "status": "blocked",
+        "label": "Blocked (dry-run validation only)"
+      },
+      "maintainer": {
+        "status": "allowed",
+        "label": "Automated on main push & v* tags"
+      }
+    },
+    {
+      "capability": "Cloud MCP Access (smithers.sh/evmts/guillotine/mcp)",
+      "untrusted": {
+        "status": "limited",
+        "label": "Public read + BYOA one-time attach"
+      },
+      "sandbox": {
+        "status": "limited",
+        "label": "Scoped one-time PKCE token (0600)"
+      },
+      "maintainer": {
+        "status": "allowed",
+        "label": "Full maintainer scopes"
+      }
+    }
+  ],
+  "categories": [
+    {
+      "name": "safety",
+      "title": "Safety & TigerStyle",
+      "description": "Mission-critical EVM safety invariants from CLAUDE.md and TigerStyle across Zig and Rust FFI code.",
+      "score": 82,
+      "band": "average",
+      "metrics": [
+        {
+          "name": "zig-no-panic",
+          "title": "Zig no panic",
+          "description": "Never use @panic or unreachable in production src/**/*.zig, validate inputs and return typed errors instead.",
+          "kind": "check",
+          "unit": null,
+          "value": 0.9673202614379085,
+          "displayValue": "148 / 153 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 97,
+          "band": "pass",
+          "itemCount": 153,
+          "failingCount": 5,
+          "passingCount": 148,
+          "failingItems": [
+            {
+              "name": "src/modules.build.zig",
+              "value": false,
+              "note": "line 74: @panic() in production code"
+            },
+            {
+              "name": "src/preprocessor/dispatch_pretty_print.zig",
+              "value": false,
+              "note": "line 770: unreachable in production code"
+            },
+            {
+              "name": "src/preprocessor/handler_abi.zig",
+              "value": false,
+              "note": "line 341: unreachable in production code"
+            },
+            {
+              "name": "src/stack/stack.zig",
+              "value": false,
+              "note": "line 119: @panic() in production code"
+            },
+            {
+              "name": "src/tracer/tracer.zig",
+              "value": false,
+              "note": "line 889: unreachable in production code"
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "src/block/block_info.zig",
+              "value": true
+            },
+            {
+              "name": "src/block/transaction_context.zig",
+              "value": true
+            },
+            {
+              "name": "src/build.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/verified_ops.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/wide_arith.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "zig-no-forbidden-debug",
+          "title": "Zig no forbidden debug",
+          "description": "Never use std.debug.assert or std.debug.print in production src/**/*.zig, use tracer.assert() and log.zig.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "153 / 153 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 153,
+          "failingCount": 0,
+          "passingCount": 153,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": "src/block/block_info.zig",
+              "value": true
+            },
+            {
+              "name": "src/block/transaction_context.zig",
+              "value": true
+            },
+            {
+              "name": "src/build.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/verified_ops.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/wide_arith.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "zig-no-swallowed-errors",
+          "title": "Zig no swallowed errors",
+          "description": "Never swallow errors with empty catch or return error.NotImplemented stubs in production src/**/*.zig.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "153 / 153 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 153,
+          "failingCount": 0,
+          "passingCount": 153,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": "src/block/block_info.zig",
+              "value": true
+            },
+            {
+              "name": "src/block/transaction_context.zig",
+              "value": true
+            },
+            {
+              "name": "src/build.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/verified_ops.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/wide_arith.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "zig-assertion-density",
+          "title": "Zig assertion density",
+          "description": "Add tracer.assert() invariant checks to production EVM functions to raise assertion density toward TigerStyle levels.",
+          "kind": "count",
+          "unit": null,
+          "value": 0.89,
+          "displayValue": "0.89",
+          "target": 25,
+          "displayTarget": ">= 25",
+          "better": "higher",
+          "weight": 1,
+          "score": 59,
+          "band": "average",
+          "itemCount": 0,
+          "failingCount": 0,
+          "passingCount": 0,
+          "failingItems": [],
+          "passingSample": []
+        },
+        {
+          "name": "rust-no-unwrap",
+          "title": "Rust no unwrap",
+          "description": "Replace .unwrap() and .expect() in Rust FFI crates (lib/ark, lib/foundry-compilers) with Result propagation.",
+          "kind": "check",
+          "unit": null,
+          "value": 0.5,
+          "displayValue": "1 / 2 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 1.5,
+          "score": 50,
+          "band": "average",
+          "itemCount": 2,
+          "failingCount": 1,
+          "passingCount": 1,
+          "failingItems": [
+            {
+              "name": "lib/foundry-compilers/src/lib.rs",
+              "value": false,
+              "note": "line 40: .unwrap()/.expect() in Rust FFI crate"
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "lib/ark/src/lib.rs",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "rust-unsafe-blocks",
+          "title": "Rust unsafe blocks",
+          "description": "Minimize and encapsulate unsafe FFI blocks in lib/ark and lib/foundry-compilers behind safe wrappers.",
+          "kind": "count",
+          "unit": null,
+          "value": 11,
+          "displayValue": "11",
+          "target": 1,
+          "displayTarget": "<= 1",
+          "better": "lower",
+          "weight": 1,
+          "score": 51,
+          "band": "average",
+          "itemCount": 2,
+          "failingCount": 1,
+          "passingCount": 1,
+          "failingItems": [
+            {
+              "name": "lib/foundry-compilers/src/lib.rs",
+              "value": 11,
+              "note": ""
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "lib/ark/src/lib.rs",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "style",
+      "title": "Style & Limits",
+      "description": "TigerStyle structural bounds (70-line functions, 120-char lines) and canonical Zig formatting.",
+      "score": 80,
+      "band": "average",
+      "metrics": [
+        {
+          "name": "zig-fmt",
+          "title": "Zig fmt",
+          "description": "Keep all Zig files in src/ formatted with `zig fmt`.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "176 / 176 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 176,
+          "failingCount": 0,
+          "passingCount": 176,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": "src/block/block_info.zig",
+              "value": true
+            },
+            {
+              "name": "src/block/transaction_context.zig",
+              "value": true
+            },
+            {
+              "name": "src/build.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_test.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_jump_validation_test.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_jump_validation_tests.zig",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "function-length",
+          "title": "Function length",
+          "description": "Keep every production Zig runtime function at or below 70 lines (TigerStyle limit), decompose large handlers.",
+          "kind": "count",
+          "unit": null,
+          "value": 152,
+          "displayValue": "152",
+          "target": 70,
+          "displayTarget": "<= 70",
+          "better": "lower",
+          "weight": 2,
+          "score": 66,
+          "band": "average",
+          "itemCount": 114,
+          "failingCount": 26,
+          "passingCount": 88,
+          "failingItems": [
+            {
+              "name": "src/tracer/minimal_frame.zig",
+              "value": 1659,
+              "note": "executeOpcode() is 1659 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/log.zig",
+              "value": 725,
+              "note": "before_instruction() is 725 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/preprocessor/dispatch_pretty_print.zig",
+              "value": 588,
+              "note": "getDebugInfo() is 588 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": 248,
+              "note": "analyze() is 248 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": 214,
+              "note": "bytecodeAnalyze() is 214 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/preprocessor/dispatch_opcode_data.zig",
+              "value": 192,
+              "note": "getOpData() is 192 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/jit/compiler.zig",
+              "value": 181,
+              "note": "emitBlock() is 181 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": 162,
+              "note": "main() is 162 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": 158,
+              "note": "evm_bytecode_opcode_name() is 158 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/opcodes/opcode.zig",
+              "value": 156,
+              "note": "name() is 156 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/frame/frame_handlers.zig",
+              "value": 155,
+              "note": "getOpcodeHandlers() is 155 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/tracer/pc_tracker.zig",
+              "value": 152,
+              "note": "getOpcodeName() is 152 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/layer2/evm_host.zig",
+              "value": 139,
+              "note": "runFrame() is 139 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/trie/hash_builder_complete.zig",
+              "value": 135,
+              "note": "next() is 135 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/modules.build.zig",
+              "value": 128,
+              "note": "createModules() is 128 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/storage/rpc_client.zig",
+              "value": 125,
+              "note": "getProof() is 125 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/evm_arena_allocator.zig",
+              "value": 114,
+              "note": "alloc() is 114 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/tracer/tracer.zig",
+              "value": 103,
+              "note": "recordSteps() is 103 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/tracer/minimal_evm.zig",
+              "value": 97,
+              "note": "execute() is 97 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/tracer/minimal_evm_sync.zig",
+              "value": 95,
+              "note": "executeMinimalEvmForOpcode() is 95 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/layer2/executor.zig",
+              "value": 90,
+              "note": "execute() is 90 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/provider/config.zig",
+              "value": 88,
+              "note": "initWithOptions() is 88 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/evm_c_api.zig",
+              "value": 77,
+              "note": "convertCallResult() is 77 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/provider/provider.zig",
+              "value": 73,
+              "note": "call() is 73 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/trie/proof.zig",
+              "value": 73,
+              "note": "verify_path() is 73 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/provider/transport/json_rpc.zig",
+              "value": 71,
+              "note": "from_json() is 71 lines (TigerStyle limit 70)"
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "src/layer2/optimism/fast_lz.zig",
+              "value": 62
+            },
+            {
+              "name": "src/storage/state_root.zig",
+              "value": 59
+            },
+            {
+              "name": "src/storage/forked_storage.zig",
+              "value": 55
+            },
+            {
+              "name": "src/tracer/ring_buffer.zig",
+              "value": 55
+            },
+            {
+              "name": "src/frame/fork_gas.zig",
+              "value": 51
+            },
+            {
+              "name": "src/provider/transport/http_simple.zig",
+              "value": 49
+            },
+            {
+              "name": "src/trie/optimized_branch.zig",
+              "value": 49
+            },
+            {
+              "name": "src/trie/merkle_trie.zig",
+              "value": 46
+            },
+            {
+              "name": "src/eips_and_hardforks/eips.zig",
+              "value": 45
+            },
+            {
+              "name": "src/storage/database.zig",
+              "value": 43
+            },
+            {
+              "name": "src/frame/frame_config.zig",
+              "value": 41
+            },
+            {
+              "name": "src/storage/memory_database.zig",
+              "value": 40
+            }
+          ]
+        },
+        {
+          "name": "line-length",
+          "title": "Line length",
+          "description": "Keep production Zig lines at or below 120 characters (TigerStyle limit).",
+          "kind": "check",
+          "unit": null,
+          "value": 0.477124183006536,
+          "displayValue": "73 / 153 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 1,
+          "score": 48,
+          "band": "fail",
+          "itemCount": 153,
+          "failingCount": 80,
+          "passingCount": 73,
+          "failingItems": [
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": false,
+              "note": "line 86: 130 chars (limit 120)"
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": false,
+              "note": "line 151: 127 chars (limit 120)"
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": false,
+              "note": "line 50: 123 chars (limit 120)"
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": false,
+              "note": "line 230: 138 chars (limit 120)"
+            },
+            {
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
+              "value": false,
+              "note": "line 188: 159 chars (limit 120)"
+            },
+            {
+              "name": "src/eips_and_hardforks/beacon_roots.zig",
+              "value": false,
+              "note": "line 54: 238 chars (limit 120)"
+            },
+            {
+              "name": "src/eips_and_hardforks/eips.zig",
+              "value": false,
+              "note": "line 210: 134 chars (limit 120)"
+            },
+            {
+              "name": "src/eips_and_hardforks/historical_block_hashes.zig",
+              "value": false,
+              "note": "line 52: 205 chars (limit 120)"
+            },
+            {
+              "name": "src/evm.zig",
+              "value": false,
+              "note": "line 30: 125 chars (limit 120)"
+            },
+            {
+              "name": "src/evm_arena_allocator.zig",
+              "value": false,
+              "note": "line 50: 139 chars (limit 120)"
+            },
+            {
+              "name": "src/evm_c_api.zig",
+              "value": false,
+              "note": "line 351: 144 chars (limit 120)"
+            },
+            {
+              "name": "src/frame/call_params.zig",
+              "value": false,
+              "note": "line 92: 143 chars (limit 120)"
+            },
+            {
+              "name": "src/frame/call_result.zig",
+              "value": false,
+              "note": "line 112: 124 chars (limit 120)"
+            },
+            {
+              "name": "src/frame/fork_gas.zig",
+              "value": false,
+              "note": "line 200: 123 chars (limit 120)"
+            },
+            {
+              "name": "src/frame/frame.zig",
+              "value": false,
+              "note": "line 62: 128 chars (limit 120)"
+            },
+            {
+              "name": "src/frame/frame_config.zig",
+              "value": false,
+              "note": "line 29: 144 chars (limit 120)"
+            },
+            {
+              "name": "src/frame/frame_handlers.zig",
+              "value": false,
+              "note": "line 53: 130 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_advanced_synthetic.zig",
+              "value": false,
+              "note": "line 22: 210 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_arithmetic.zig",
+              "value": false,
+              "note": "line 22: 201 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_arithmetic_synthetic.zig",
+              "value": false,
+              "note": "line 21: 213 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_bitwise.zig",
+              "value": false,
+              "note": "line 19: 201 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_bitwise_synthetic.zig",
+              "value": false,
+              "note": "line 18: 213 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_comparison.zig",
+              "value": false,
+              "note": "line 17: 200 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_context.zig",
+              "value": false,
+              "note": "line 74: 123 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_jump.zig",
+              "value": false,
+              "note": "line 29: 202 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_jump_synthetic.zig",
+              "value": false,
+              "note": "line 24: 221 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_keccak.zig",
+              "value": false,
+              "note": "line 27: 127 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_log.zig",
+              "value": false,
+              "note": "line 28: 124 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_memory.zig",
+              "value": false,
+              "note": "line 28: 203 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_memory_synthetic.zig",
+              "value": false,
+              "note": "line 28: 215 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_stack.zig",
+              "value": false,
+              "note": "line 20: 201 chars (limit 120)"
+            },
+            {
+              "name": "src/instructions/handlers_system.zig",
+              "value": false,
+              "note": "line 110: 123 chars (limit 120)"
+            },
+            {
+              "name": "src/internal/safety_counter.zig",
+              "value": false,
+              "note": "line 57: 171 chars (limit 120)"
+            },
+            {
+              "name": "src/jit/arm64_emitter.zig",
+              "value": false,
+              "note": "line 248: 127 chars (limit 120)"
+            },
+            {
+              "name": "src/jit/compiler.zig",
+              "value": false,
+              "note": "line 74: 138 chars (limit 120)"
+            },
+            {
+              "name": "src/layer2/base/config.zig",
+              "value": false,
+              "note": "line 76: 147 chars (limit 120)"
+            },
+            {
+              "name": "src/layer2/evm_host.zig",
+              "value": false,
+              "note": "line 91: 165 chars (limit 120)"
+            },
+            {
+              "name": "src/layer2/executor.zig",
+              "value": false,
+              "note": "line 51: 122 chars (limit 120)"
+            },
+            {
+              "name": "src/layer2/optimism/fast_lz.zig",
+              "value": false,
+              "note": "line 19: 127 chars (limit 120)"
+            },
+            {
+              "name": "src/layer2/optimism/l1_block_info.zig",
+              "value": false,
+              "note": "line 126: 122 chars (limit 120)"
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "src/block/block_info.zig",
+              "value": true
+            },
+            {
+              "name": "src/block/transaction_context.zig",
+              "value": true
+            },
+            {
+              "name": "src/build.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/verified_ops.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/wide_arith.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/hardfork.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/validator_deposits.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/validator_withdrawals.zig",
+              "value": true
+            },
+            {
+              "name": "src/evm_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/frame/block_info_config.zig",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "no-todo-markers",
+          "title": "No todo markers",
+          "description": "Resolve TODO, FIXME, XXX, and HACK markers in production src/**/*.zig instead of deferring work.",
+          "kind": "check",
+          "unit": null,
+          "value": 0.9869281045751634,
+          "displayValue": "151 / 153 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 1,
+          "score": 99,
+          "band": "pass",
+          "itemCount": 153,
+          "failingCount": 2,
+          "passingCount": 151,
+          "failingItems": [
+            {
+              "name": "src/frame/frame.zig",
+              "value": false,
+              "note": "line 162: unresolved work marker"
+            },
+            {
+              "name": "src/tracer/minimal_frame.zig",
+              "value": false,
+              "note": "line 1323: unresolved work marker"
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "src/block/block_info.zig",
+              "value": true
+            },
+            {
+              "name": "src/block/transaction_context.zig",
+              "value": true
+            },
+            {
+              "name": "src/build.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_bench_simple.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/verified_ops.zig",
+              "value": true
+            },
+            {
+              "name": "src/core/wide_arith.zig",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
+              "value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "footprint",
+      "title": "Footprint & Modularity",
+      "description": "Source file and subsystem modularity limits to keep the EVM auditable.",
+      "score": 39,
+      "band": "fail",
+      "metrics": [
+        {
+          "name": "file-lines",
+          "title": "File lines",
+          "description": "Keep production Zig files focused and under 500 lines, split monolithic modules like src/evm.zig.",
+          "kind": "count",
+          "unit": null,
+          "value": 1305,
+          "displayValue": "1305",
+          "target": 500,
+          "displayTarget": "<= 500",
+          "better": "lower",
+          "weight": 2,
+          "score": 45,
+          "band": "fail",
+          "itemCount": 153,
+          "failingCount": 62,
+          "passingCount": 91,
+          "failingItems": [
+            {
+              "name": "src/evm.zig",
+              "value": 8743,
+              "note": ""
+            },
+            {
+              "name": "src/storage/database.zig",
+              "value": 3238,
+              "note": ""
+            },
+            {
+              "name": "src/tracer/minimal_frame.zig",
+              "value": 2652,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_context.zig",
+              "value": 2470,
+              "note": ""
+            },
+            {
+              "name": "src/bytecode/bytecode.zig",
+              "value": 2270,
+              "note": ""
+            },
+            {
+              "name": "src/eips_and_hardforks/eips.zig",
+              "value": 2072,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_system.zig",
+              "value": 1744,
+              "note": ""
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
+              "value": 1618,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_storage.zig",
+              "value": 1459,
+              "note": ""
+            },
+            {
+              "name": "src/frame/call_params.zig",
+              "value": 1424,
+              "note": ""
+            },
+            {
+              "name": "src/layer2/evm_host.zig",
+              "value": 1409,
+              "note": ""
+            },
+            {
+              "name": "src/trie/trie.zig",
+              "value": 1387,
+              "note": ""
+            },
+            {
+              "name": "src/jit/root.zig",
+              "value": 1367,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_memory.zig",
+              "value": 1339,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_arithmetic.zig",
+              "value": 1338,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_stack.zig",
+              "value": 1305,
+              "note": ""
+            },
+            {
+              "name": "src/tracer/tracer.zig",
+              "value": 1217,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_jump.zig",
+              "value": 1198,
+              "note": ""
+            },
+            {
+              "name": "src/storage/journal.zig",
+              "value": 1136,
+              "note": ""
+            },
+            {
+              "name": "src/stack/stack.zig",
+              "value": 1121,
+              "note": ""
+            },
+            {
+              "name": "src/evm_c_api.zig",
+              "value": 1117,
+              "note": ""
+            },
+            {
+              "name": "src/storage/cache_storage.zig",
+              "value": 1094,
+              "note": ""
+            },
+            {
+              "name": "src/frame/call_result.zig",
+              "value": 1076,
+              "note": ""
+            },
+            {
+              "name": "src/preprocessor/dispatch_pretty_print.zig",
+              "value": 1015,
+              "note": ""
+            },
+            {
+              "name": "src/storage/access_list.zig",
+              "value": 1015,
+              "note": ""
+            },
+            {
+              "name": "src/preprocessor/dispatch.zig",
+              "value": 999,
+              "note": ""
+            },
+            {
+              "name": "src/opcodes/opcode.zig",
+              "value": 983,
+              "note": ""
+            },
+            {
+              "name": "src/trie/hash_builder_complete.zig",
+              "value": 953,
+              "note": ""
+            },
+            {
+              "name": "src/jit/compiler.zig",
+              "value": 947,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_log.zig",
+              "value": 941,
+              "note": ""
+            },
+            {
+              "name": "src/memory/memory.zig",
+              "value": 940,
+              "note": ""
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": 928,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_bitwise.zig",
+              "value": 926,
+              "note": ""
+            },
+            {
+              "name": "src/provider/config.zig",
+              "value": 911,
+              "note": ""
+            },
+            {
+              "name": "src/trie/proof.zig",
+              "value": 860,
+              "note": ""
+            },
+            {
+              "name": "src/provider/transport/http_simple.zig",
+              "value": 831,
+              "note": ""
+            },
+            {
+              "name": "src/tracer/minimal_evm.zig",
+              "value": 817,
+              "note": ""
+            },
+            {
+              "name": "src/log.zig",
+              "value": 785,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_comparison.zig",
+              "value": 727,
+              "note": ""
+            },
+            {
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
+              "value": 720,
+              "note": ""
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "src/instructions/handlers_arithmetic_synthetic.zig",
+              "value": 500
+            },
+            {
+              "name": "src/preprocessor/handler_abi.zig",
+              "value": 490
+            },
+            {
+              "name": "src/layer2/executor.zig",
+              "value": 483
+            },
+            {
+              "name": "src/storage/created_contracts.zig",
+              "value": 479
+            },
+            {
+              "name": "src/jit/x86_64_emitter.zig",
+              "value": 474
+            },
+            {
+              "name": "src/layer2/optimism/transaction.zig",
+              "value": 461
+            },
+            {
+              "name": "src/tracer/minimal_host.zig",
+              "value": 429
+            },
+            {
+              "name": "src/provider/provider.zig",
+              "value": 425
+            },
+            {
+              "name": "src/memory/frame_memory_pool.zig",
+              "value": 412
+            },
+            {
+              "name": "src/provider/rate_limiter.zig",
+              "value": 412
+            },
+            {
+              "name": "src/storage/database_interface_account.zig",
+              "value": 392
+            },
+            {
+              "name": "src/frame/fork_gas.zig",
+              "value": 383
+            }
+          ]
+        },
+        {
+          "name": "subsystem-size",
+          "title": "Subsystem size",
+          "description": "Keep each src/ subsystem compact and modular, split sprawling subsystems into cohesive packages.",
+          "kind": "size",
+          "unit": "B",
+          "value": 532011,
+          "displayValue": "532011 B",
+          "target": 80000,
+          "displayTarget": "<= 80000 B",
+          "better": "lower",
+          "weight": 1,
+          "score": 28,
+          "band": "fail",
+          "itemCount": 18,
+          "failingCount": 12,
+          "passingCount": 6,
+          "failingItems": [
+            {
+              "name": "src/instructions",
+              "value": 617459,
+              "note": ""
+            },
+            {
+              "name": "src/(root)",
+              "value": 532011,
+              "note": ""
+            },
+            {
+              "name": "src/storage",
+              "value": 478675,
+              "note": ""
+            },
+            {
+              "name": "src/tracer",
+              "value": 297007,
+              "note": ""
+            },
+            {
+              "name": "src/layer2",
+              "value": 265683,
+              "note": ""
+            },
+            {
+              "name": "src/bytecode",
+              "value": 243811,
+              "note": ""
+            },
+            {
+              "name": "src/eips_and_hardforks",
+              "value": 185791,
+              "note": ""
+            },
+            {
+              "name": "src/frame",
+              "value": 170362,
+              "note": ""
+            },
+            {
+              "name": "src/preprocessor",
+              "value": 154061,
+              "note": ""
+            },
+            {
+              "name": "src/trie",
+              "value": 152979,
+              "note": ""
+            },
+            {
+              "name": "src/jit",
+              "value": 149348,
+              "note": ""
+            },
+            {
+              "name": "src/provider",
+              "value": 134660,
+              "note": ""
+            }
+          ],
+          "passingSample": [
+            {
+              "name": "src/memory",
+              "value": 67876
+            },
+            {
+              "name": "src/opcodes",
+              "value": 52757
+            },
+            {
+              "name": "src/stack",
+              "value": 43373
+            },
+            {
+              "name": "src/core",
+              "value": 42256
+            },
+            {
+              "name": "src/block",
+              "value": 27482
+            },
+            {
+              "name": "src/internal",
+              "value": 6178
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "verification",
+      "title": "Verification & Tests",
+      "description": "Formal verification proofs (Lean 4 & SMT-LIB2) and inline Zig unit test coverage.",
+      "score": 81,
+      "band": "average",
+      "metrics": [
+        {
+          "name": "lean-no-sorry",
+          "title": "Lean no sorry",
+          "description": "Never commit `sorry` or unproved `axiom` declarations in verify/lean/**/*.lean, close every formal proof.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "29 / 29 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 29,
+          "failingCount": 0,
+          "passingCount": 29,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": "verify/lean/GuillotineSpec/Bytecode.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Evm.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Gas.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Hex.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Keccak.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Layer2.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Main.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Rlp.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineSpec/Word256.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineVerify/Arithmetic.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineVerify/BasicBlock.lean",
+              "value": true
+            },
+            {
+              "name": "verify/lean/GuillotineVerify/Fusions.lean",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "lean-theorems",
+          "title": "Lean theorems",
+          "description": "Expand Lean 4 theorem and lemma coverage in verify/lean/ for EVM opcodes, gas rules, and fusion passes.",
+          "kind": "count",
+          "unit": null,
+          "value": 183,
+          "displayValue": "183",
+          "target": 100,
+          "displayTarget": ">= 100",
+          "better": "higher",
+          "weight": 1,
+          "score": 98,
+          "band": "pass",
+          "itemCount": 0,
+          "failingCount": 0,
+          "passingCount": 0,
+          "failingItems": [],
+          "passingSample": []
+        },
+        {
+          "name": "smt-proofs",
+          "title": "Smt proofs",
+          "description": "Add SMT-LIB2 equivalence and overflow-safety proofs in verify/smt/proofs/ for arithmetic and fusion optimizations.",
+          "kind": "count",
+          "unit": null,
+          "value": 42,
+          "displayValue": "42",
+          "target": 80,
+          "displayTarget": ">= 80",
+          "better": "higher",
+          "weight": 1,
+          "score": 56,
+          "band": "average",
+          "itemCount": 0,
+          "failingCount": 0,
+          "passingCount": 0,
+          "failingItems": [],
+          "passingSample": []
+        },
+        {
+          "name": "inline-test-coverage",
+          "title": "Inline test coverage",
+          "description": "Add inline `test` blocks inside production src/**/*.zig files (CLAUDE.md requires tests in source files).",
+          "kind": "count",
+          "unit": null,
+          "value": 77.1,
+          "displayValue": "77.10",
+          "target": 95,
+          "displayTarget": ">= 95",
+          "better": "higher",
+          "weight": 1.5,
+          "score": 62,
+          "band": "average",
+          "itemCount": 0,
+          "failingCount": 0,
+          "passingCount": 0,
+          "failingItems": [],
+          "passingSample": []
+        }
+      ]
+    },
+    {
+      "name": "documentation",
+      "title": "Documentation",
+      "description": "Documentation link integrity and subsystem README coverage.",
+      "score": 100,
+      "band": "pass",
+      "metrics": [
+        {
+          "name": "broken-links",
+          "title": "Broken links",
+          "description": "Fix broken relative and root-relative links in root Markdown files and docs/**/*.md.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "30 / 30 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 30,
+          "failingCount": 0,
+          "passingCount": 30,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": ".smithers/wiki/Decisions.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Dispatch-Engine.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Formal-Verification.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Mythical-History.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Overview.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/SDKs-and-ZEVM.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/TigerStyle-and-Safety.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Trust-Model-and-Factory.md",
+              "value": true
+            },
+            {
+              "name": "CHANGELOG.md",
+              "value": true
+            },
+            {
+              "name": "CLAUDE.md",
+              "value": true
+            },
+            {
+              "name": "CONTRIBUTING.md",
+              "value": true
+            },
+            {
+              "name": "README.md",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "subdir-readme",
+          "title": "Subdir readme",
+          "description": "Maintain a concise README.md in every production subsystem directory under src/.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "18 / 18 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 1,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 18,
+          "failingCount": 0,
+          "passingCount": 18,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": "src/block",
+              "value": true
+            },
+            {
+              "name": "src/bytecode",
+              "value": true
+            },
+            {
+              "name": "src/core",
+              "value": true
+            },
+            {
+              "name": "src/eips_and_hardforks",
+              "value": true
+            },
+            {
+              "name": "src/frame",
+              "value": true
+            },
+            {
+              "name": "src/instructions",
+              "value": true
+            },
+            {
+              "name": "src/internal",
+              "value": true
+            },
+            {
+              "name": "src/jit",
+              "value": true
+            },
+            {
+              "name": "src/layer2",
+              "value": true
+            },
+            {
+              "name": "src/memory",
+              "value": true
+            },
+            {
+              "name": "src/opcodes",
+              "value": true
+            },
+            {
+              "name": "src/preprocessor",
+              "value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "factory",
+      "title": "Factory & Trust",
+      "description": "Smithers Cloud factory projection, shared object-store trust boundaries, wiki freshness, release parity, and playground CSP integrity.",
+      "score": 100,
+      "band": "pass",
+      "metrics": [
+        {
+          "name": "factory-projection",
+          "title": "Factory projection",
+          "description": "Keep .smithers/factory.json and .smithers/home.json schema-valid with docs URL, person-only merge policy, and maintainer, contributor, and viewer sections.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "2 / 2 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 2,
+          "failingCount": 0,
+          "passingCount": 2,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": ".smithers/factory.json",
+              "value": true
+            },
+            {
+              "name": ".smithers/home.json",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "remote-cache-trust",
+          "title": "Remote cache trust",
+          "description": "Wire build.smithers.sh with split read and write secrets and never expose SMITHERS_CACHE_WRITE_TOKEN to pull_request jobs.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "2 / 2 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 2,
+          "failingCount": 0,
+          "passingCount": 2,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": ".smithers/WORKSPACE.ts",
+              "value": true
+            },
+            {
+              "name": ".github/workflows/ci.yml",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "wiki-freshness",
+          "title": "Wiki freshness",
+          "description": "Keep every .smithers/wiki/*.md page frontmatter-valid with zero broken wikilinks, zero secret leaks, and a fresh docs/public/wiki.html build.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "10 / 10 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 1.5,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 10,
+          "failingCount": 0,
+          "passingCount": 10,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": ".smithers/wiki/coding-project.json",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Decisions.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Dispatch-Engine.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Formal-Verification.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Mythical-History.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Overview.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/SDKs-and-ZEVM.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/TigerStyle-and-Safety.md",
+              "value": true
+            },
+            {
+              "name": ".smithers/wiki/Trust-Model-and-Factory.md",
+              "value": true
+            },
+            {
+              "name": "docs/public/wiki.html",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "release-alignment",
+          "title": "Release alignment",
+          "description": "Keep build.zig.zon, sdks/typescript/package.json, CHANGELOG.md, and .github/workflows/release.yml aligned for automated main-branch releases and docs deploys.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "2 / 2 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 1.5,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 2,
+          "failingCount": 0,
+          "passingCount": 2,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": "version-parity",
+              "value": true
+            },
+            {
+              "name": ".github/workflows/release.yml",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "workflow-security",
+          "title": "Workflow security",
+          "description": "Keep .smithers/workflows QuickJS-safe, .smithers/flows frontmatter-valid, and .smithers/playground CSP SHA-256 hashes exact.",
+          "kind": "check",
+          "unit": null,
+          "value": 1,
+          "displayValue": "12 / 12 pass",
+          "target": null,
+          "displayTarget": "100% pass",
+          "better": "lower",
+          "weight": 2,
+          "score": 100,
+          "band": "pass",
+          "itemCount": 12,
+          "failingCount": 0,
+          "passingCount": 12,
+          "failingItems": [],
+          "passingSample": [
+            {
+              "name": ".smithers/workflows/ci.ts",
+              "value": true
+            },
+            {
+              "name": ".smithers/workflows/release.ts",
+              "value": true
+            },
+            {
+              "name": ".smithers/workflows/uphill.ts",
+              "value": true
+            },
+            {
+              "name": ".smithers/workflows/wiki.ts",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/checks/review/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/issue/poc/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/issue/repro/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/playground/exec/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/pr-triage/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/release-check/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/flows/wiki-refresh/flow.mdx",
+              "value": true
+            },
+            {
+              "name": ".smithers/playground/index.html",
+              "value": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "opportunities": [
+    {
+      "category": "style",
+      "metric": "line-length",
+      "item": null,
+      "items": 80,
+      "gain": 9,
+      "value": false,
+      "target": true
+    },
+    {
+      "category": "safety",
+      "metric": "rust-no-unwrap",
+      "item": "lib/foundry-compilers/src/lib.rs",
+      "items": 1,
+      "gain": 8,
+      "value": false,
+      "target": true
+    },
+    {
+      "category": "verification",
+      "metric": "inline-test-coverage",
+      "item": null,
+      "items": 1,
+      "gain": 8,
+      "value": 77.1,
+      "target": 95
+    },
+    {
+      "category": "verification",
+      "metric": "smt-proofs",
+      "item": null,
+      "items": 1,
+      "gain": 6,
+      "value": 42,
+      "target": 80
+    },
+    {
+      "category": "safety",
+      "metric": "rust-unsafe-blocks",
+      "item": "lib/foundry-compilers/src/lib.rs",
+      "items": 1,
+      "gain": 4,
+      "value": 11,
+      "target": 1
+    },
+    {
+      "category": "safety",
+      "metric": "zig-assertion-density",
+      "item": null,
+      "items": 1,
+      "gain": 3,
+      "value": 0.89,
+      "target": 25
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/evm.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 8743,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/storage/database.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 3238,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/tracer/minimal_frame.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 2652,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/instructions/handlers_context.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 2470,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/bytecode/bytecode.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 2270,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/eips_and_hardforks/eips.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 2072,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/instructions/handlers_system.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 1744,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/bytecode/bytecode_stats.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 1618,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/instructions/handlers_storage.zig",
+      "items": 1,
+      "gain": 3,
+      "value": 1459,
+      "target": 500
+    }
+  ],
+  "changes": [
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/core/verified_ops.zig",
+      "change": "worse",
+      "before": 386,
+      "after": 521
+    },
+    {
+      "category": "footprint",
+      "metric": "subsystem-size",
+      "item": "src/core",
+      "change": "worse",
+      "before": 37301,
+      "after": 42256
+    },
+    {
+      "category": "factory",
+      "metric": "factory-projection",
+      "item": null,
+      "change": "new",
+      "before": null,
+      "after": null
+    },
+    {
+      "category": "factory",
+      "metric": "remote-cache-trust",
+      "item": null,
+      "change": "new",
+      "before": null,
+      "after": null
+    },
+    {
+      "category": "factory",
+      "metric": "wiki-freshness",
+      "item": null,
+      "change": "new",
+      "before": null,
+      "after": null
+    },
+    {
+      "category": "factory",
+      "metric": "release-alignment",
+      "item": null,
+      "change": "new",
+      "before": null,
+      "after": null
+    },
+    {
+      "category": "factory",
+      "metric": "workflow-security",
+      "item": null,
+      "change": "new",
+      "before": null,
+      "after": null
+    },
+    {
+      "category": "verification",
+      "metric": "lean-theorems",
+      "item": null,
+      "change": "better",
+      "before": 43,
+      "after": 183
+    },
+    {
+      "category": "documentation",
+      "metric": "broken-links",
+      "item": "CLAUDE.md",
+      "change": "better",
+      "before": false,
+      "after": true
+    },
+    {
+      "category": "documentation",
+      "metric": "subdir-readme",
+      "item": "src/core",
+      "change": "better",
+      "before": false,
+      "after": true
+    },
+    {
+      "category": "documentation",
+      "metric": "subdir-readme",
+      "item": "src/jit",
+      "change": "better",
+      "before": false,
+      "after": true
+    },
+    {
+      "category": "documentation",
+      "metric": "subdir-readme",
+      "item": "src/layer2",
+      "change": "better",
+      "before": false,
+      "after": true
+    },
+    {
+      "category": "documentation",
+      "metric": "subdir-readme",
+      "item": "src/tracer",
+      "change": "better",
+      "before": false,
+      "after": true
+    }
+  ]
+}

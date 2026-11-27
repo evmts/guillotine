@@ -2,6 +2,9 @@ name: Uphill
 
 on:
   pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,9 +18,28 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.17.1
 
       - name: Run Uphill
         uses: wevm/uphill@main
+
+      - name: Render Lighthouse backpressure audit report
+        if: ${{ !cancelled() }}
+        run: node .smithers/reports/audit.mjs --write --check
+
+      - name: Upload Lighthouse audit artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-audit-report
+          path: |
+            .smithers/reports/lighthouse-audit.html
+            .smithers/reports/audit-summary.json
+            .uphill/report.json
+          if-no-files-found: ignore

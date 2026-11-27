@@ -1,0 +1,56 @@
+---
+title: Smithers Cloud Factory
+description: Public coding factory, shared object store, Lighthouse backpressure audit, Obsidian wiki, and authenticated MCP server for Guillotine.
+---
+
+# Smithers Cloud Factory
+
+Guillotine operates publicly as a [Smithers Cloud coding factory](https://smithers.sh/evmts/guillotine) that mirrors to [GitHub](https://github.com/evmts/guillotine), publishes documentation to [guillotine.tevm.sh](https://guillotine.tevm.sh), and exposes an authenticated Streamable HTTP MCP server at `https://smithers.sh/evmts/guillotine/mcp`.
+
+## Personalized Factory Surfaces
+
+The home page on `smithers.sh/evmts/guillotine` is declared in `.smithers/FACTORY.ts` and projected to `.smithers/home.json` for three audiences:
+
+- **Maintainers**: release checklists, consensus/formal-verification gates, cache write hygiene, and merge controls (`approve: "person"`, `merge: "person"`).
+- **Contributors**: fast reproduction flows, incremental `scripts/smthrs` targets, Uphill backpressure opportunities, and stacked changeset workflows.
+- **Viewers**: quickstart Zig and Bun SDK examples, interactive sandboxed EVM playground, live Lighthouse audit report, and Mythical History.
+
+## Live Audit & Engineering Wiki
+
+- [Lighthouse Backpressure Audit Report](https://guillotine.tevm.sh/audit.html): interactive SVG score gauges across Safety & TigerStyle, Style & Limits, Footprint & Modularity, Verification & Tests, Documentation, and Factory & Trust.
+- [Engineering Wiki & Mythical History](https://guillotine.tevm.sh/wiki.html): Obsidian-compatible architecture notes, decision log, backlink graph, and the narrative chronicle of Guillotine's evolution.
+
+## Shared Object Store & Execution Trust Boundary
+
+Every incremental build target in `.smithers/PACKAGE.ts` connects to the shared Smithers Cloud object store (`https://build.smithers.sh`) with strict credential separation:
+
+| Tier | Shared Cache Read | Shared Cache Write | Gate & Release Authority |
+| --- | --- | --- | --- |
+| **Community & Fork PRs (Untrusted)** | Allowed (`SMITHERS_CACHE_READ_TOKEN`) | Blocked | Blocked (feedback encouraged, no gate bypass) |
+| **Smithers Cloud Sandboxes** | Allowed | Allowed (attested runs) | Blocked (`act: "agent"`, person-only merge) |
+| **Maintainers & `main`** | Allowed | Allowed (`SMITHERS_CACHE_WRITE_TOKEN`) | Automated GitHub Releases, npm provenance & docs deploy |
+
+## Connecting Coding Agents via MCP & One-Time Auth
+
+Agents working across `evmts/guillotine`, `evmts/zevm`, and `evmts/voltaire` connect over Streamable HTTP MCP:
+
+```bash
+# Claude Code
+claude mcp add --transport http smithers-guillotine https://smithers.sh/evmts/guillotine/mcp
+
+# Codex CLI
+codex mcp add smithers-guillotine --url https://smithers.sh/evmts/guillotine/mcp
+
+# Verify live MCP, OAuth metadata, docs, and remote cache endpoints
+node scripts/smithers-auth.mjs verify
+```
+
+For ephemeral sandboxes, mint a single-use 10-minute Crockford base32 attach reference (`XXXX-XXXX`) in the Smithers Cloud UI and complete the PKCE S256 pairing handshake:
+
+```bash
+node scripts/smithers-auth.mjs claim --ref K7QF-2MXD --client guillotine-sandbox
+# Confirm the 6-digit pairing code in the Smithers Cloud browser UI
+node scripts/smithers-auth.mjs redeem --code <ONE_TIME_CODE>
+```
+
+Redeemed tokens are written exclusively to mode-`0600` files under `.smithers/.auth/` (gitignored), carry `act: "agent"`, and are automatically refused on person-only actions.

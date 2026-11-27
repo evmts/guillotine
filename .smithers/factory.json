@@ -1,10 +1,11 @@
 {
-  "summary": "Guillotine EVM: incremental Zig/Rust checks, consensus safety, state compliance and measured performance.",
+  "apiVersion": 1,
+  "summary": "Guillotine EVM: register-passing Zig 0.17.1 EVM, formal proofs, Lighthouse backpressure, and Smithers Cloud CI.",
   "flows": [
     {
       "id": "checks/review",
       "description": "Review a Guillotine change for EVM consensus, Zig memory safety, state compliance and benchmark regressions.",
-      "summary": "Review consensus, ownership, compliance and performance.",
+      "summary": "Review consensus, Zig ownership, state compliance, and benchmark regressions.",
       "featured": true,
       "kind": "mdx",
       "path": ".smithers/flows/checks/review/flow.mdx",
@@ -36,7 +37,7 @@
     {
       "id": "issue/repro",
       "description": "Reproduce a Guillotine EVM issue and preserve consensus and memory safety evidence before implementation.",
-      "summary": "Reproduce an EVM issue before planning a fix.",
+      "summary": "Reproduce an EVM issue with repository fixtures before planning a fix.",
       "featured": true,
       "kind": "mdx",
       "path": ".smithers/flows/issue/repro/flow.mdx",
@@ -74,7 +75,7 @@
     {
       "id": "issue/poc",
       "description": "Implement a bounded Guillotine issue proof of concept with regression, consensus and memory checks.",
-      "summary": "Prove a fix with focused regressions and consensus checks.",
+      "summary": "Prove a fix with a failing regression first and incremental smthrs checks.",
       "featured": true,
       "kind": "mdx",
       "path": ".smithers/flows/issue/poc/flow.mdx",
@@ -113,7 +114,7 @@
     {
       "id": "pr-triage",
       "description": "Triage a Guillotine pull request from supplied metadata and diff without executing its code.",
-      "summary": "Assess PR readiness from its diff and supplied CI evidence.",
+      "summary": "Assess pull request readiness from its diff without executing untrusted code.",
       "featured": true,
       "kind": "mdx",
       "path": ".smithers/flows/pr-triage/flow.mdx",
@@ -145,22 +146,510 @@
         "tokens": 64000,
         "milliseconds": 600000
       }
+    },
+    {
+      "id": "uphill",
+      "description": "Score Guillotine safety, TigerStyle, modularity, formal verification, documentation, and factory health into a Lighthouse audit report.",
+      "summary": "Score safety, TigerStyle, verification, docs, and factory health in a Lighthouse audit report.",
+      "featured": true,
+      "kind": "ts",
+      "path": ".smithers/workflows/uphill.ts",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "event": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run",
+            "repo",
+            "sha",
+            "ref",
+            "event"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": []
+    },
+    {
+      "id": "wiki-refresh",
+      "description": "Refresh Guillotine's Engineering Wiki and Mythical History from committed repository truth and verify zero broken wikilinks or secret leaks.",
+      "summary": "Refresh the Engineering Wiki and Mythical History from committed repository truth.",
+      "featured": true,
+      "kind": "mdx",
+      "path": ".smithers/flows/wiki-refresh/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:.smithers/wiki/**",
+        "fs:write:docs/public/wiki.html",
+        "proc:spawn:jj --no-pager *",
+        "proc:spawn:node .smithers/wiki/build-feed.mjs *"
+      ],
+      "model": "sol",
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [],
+      "budget": {
+        "tokens": 64000,
+        "milliseconds": 1200000
+      }
+    },
+    {
+      "id": "playground/exec",
+      "description": "Inspect Guillotine EVM bytecode execution, gas usage, and dispatch analysis in a bounded sandbox.",
+      "summary": "Inspect Guillotine bytecode dispatch fusions or run bounded native EVM calls.",
+      "featured": true,
+      "kind": "mdx",
+      "path": ".smithers/flows/playground/exec/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "proc:spawn:node .smithers/playground/run.mjs *"
+      ],
+      "model": null,
+      "modelInvocable": false,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [
+        "playground/native"
+      ],
+      "budget": {
+        "milliseconds": 10000
+      }
+    },
+    {
+      "id": "release-check",
+      "description": "Audit Guillotine release readiness, version lockstep, changelog notes, formal verification evidence, and SDK packaging without publishing.",
+      "summary": "Audit version lockstep, FFI artifacts, docs build, and npm dry-run packaging.",
+      "featured": false,
+      "kind": "mdx",
+      "path": ".smithers/flows/release-check/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "proc:spawn:jj --no-pager *",
+        "proc:spawn:zig build *",
+        "proc:spawn:node .smithers/reports/audit.mjs *",
+        "proc:spawn:node .smithers/wiki/build-feed.mjs *"
+      ],
+      "model": "sol",
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [],
+      "budget": {
+        "tokens": 64000,
+        "milliseconds": 1800000
+      }
+    },
+    {
+      "id": "ci",
+      "description": "Run Guillotine hygiene, Uphill Lighthouse backpressure audit, Zig EVM suites, and C/TypeScript SDK verification.",
+      "summary": null,
+      "featured": false,
+      "kind": "ts",
+      "path": ".smithers/workflows/ci.ts",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": false,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "event": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run",
+            "repo",
+            "sha",
+            "ref",
+            "event"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": []
+    },
+    {
+      "id": "release",
+      "description": "Verify Guillotine release lockstep, Vocs documentation build, FFI artifacts, and @tevm/guillotine npm dry-run packaging.",
+      "summary": null,
+      "featured": false,
+      "kind": "ts",
+      "path": ".smithers/workflows/release.ts",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": false,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "event": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run",
+            "repo",
+            "sha",
+            "ref",
+            "event"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": []
+    },
+    {
+      "id": "wiki",
+      "description": "Validate and build Guillotine's Obsidian-compatible Engineering Wiki and Mythical History feed payload.",
+      "summary": null,
+      "featured": false,
+      "kind": "ts",
+      "path": ".smithers/workflows/wiki.ts",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "event": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run",
+            "repo",
+            "sha",
+            "ref",
+            "event"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": []
     }
   ],
-  "on": [],
+  "on": [
+    {
+      "event": "issue.labeled:todo",
+      "flow": "issue/poc",
+      "description": "Build a failing regression and bounded PoC for every maintainer-accepted TODO"
+    },
+    {
+      "event": "change.opened",
+      "flow": "checks/review",
+      "description": "Review every Change across consensus, memory safety, compliance, and performance lenses"
+    },
+    {
+      "event": "change.updated",
+      "flow": "checks/review",
+      "description": "Re-review every updated Change before maintainer merge"
+    },
+    {
+      "event": "change.landed",
+      "flow": "wiki-refresh",
+      "description": "Refresh the Engineering Wiki and Mythical History after a Change lands"
+    },
+    {
+      "event": "github.push:main",
+      "flow": "wiki-refresh",
+      "description": "Refresh the Engineering Wiki and audit report after main advances"
+    },
+    {
+      "event": "schedule:0 4 * * *",
+      "flow": "uphill",
+      "description": "Run the nightly Uphill Lighthouse backpressure audit on main"
+    },
+    {
+      "event": "schedule:0 10 * * 1",
+      "flow": "release-check",
+      "description": "Weekly Monday release lockstep, SDK packaging, and docs audit"
+    }
+  ],
   "github": {
     "mirror": "pull",
-    "issues": "read",
+    "issues": "two-way",
     "changes": "send-upstream",
     "protectedPaths": [
       "src/evm.zig",
       "src/eips_and_hardforks",
       "src/frame",
-      "build.zig.zon"
+      "src/core/verified_ops.zig",
+      "build.zig",
+      "build.zig.zon",
+      ".github/workflows",
+      ".smithers/FACTORY.ts",
+      ".smithers/WORKSPACE.ts",
+      ".smithers/PACKAGE.ts",
+      ".agents/uphill"
     ],
     "maintainers": [
       "roninjin10",
       "fucory"
+    ],
+    "dailyTokens": 1000000000
+  },
+  "policy": {
+    "lifecycle": {
+      "docs": "evergreen",
+      "tests": "evergreen"
+    },
+    "notifications": {
+      "quietHours": []
+    },
+    "approvals": {
+      "approve": "person",
+      "merge": "person"
+    }
+  },
+  "machine": {
+    "vcpus": 4,
+    "memoryMiB": 8192,
+    "tools": [
+      "zig",
+      "cargo",
+      "rustc",
+      "cc",
+      "bun",
+      "node"
+    ]
+  },
+  "issueViews": [
+    {
+      "id": "todos",
+      "title": "Accepted TODOs",
+      "state": "open",
+      "labels": [
+        "todo"
+      ]
+    },
+    {
+      "id": "consensus",
+      "title": "Consensus and EVM",
+      "state": "open",
+      "labels": [
+        "consensus"
+      ]
+    },
+    {
+      "id": "verification",
+      "title": "Formal verification",
+      "state": "open",
+      "labels": [
+        "verification"
+      ]
+    },
+    {
+      "id": "performance",
+      "title": "Performance and JIT",
+      "state": "open",
+      "labels": [
+        "performance"
+      ]
+    },
+    {
+      "id": "sdks",
+      "title": "C and TypeScript SDKs",
+      "state": "open",
+      "labels": [
+        "sdk"
+      ]
+    },
+    {
+      "id": "needs-repro",
+      "title": "Needs reproduction",
+      "state": "open",
+      "labels": [
+        "needs-repro"
+      ]
+    }
+  ],
+  "issueTransitions": [
+    {
+      "id": "request-repro",
+      "title": "Request minimal reproduction",
+      "to": "needs-repro",
+      "actor": "anyone"
+    },
+    {
+      "id": "accept",
+      "title": "Accept issue for implementation",
+      "from": "needs-repro",
+      "to": "accepted",
+      "actor": "person"
+    },
+    {
+      "id": "promote-todo",
+      "title": "Promote to factory TODO",
+      "from": "accepted",
+      "to": "todo",
+      "actor": "person"
+    }
+  ],
+  "contributes": {
+    "triggers": [
+      {
+        "on": "github.push",
+        "flow": "ci",
+        "title": "CI on main and gate branches",
+        "branches": [
+          "main",
+          "gate/**"
+        ]
+      },
+      {
+        "on": "github.pull_request",
+        "flow": "ci",
+        "title": "CI on pull requests"
+      },
+      {
+        "on": "manual",
+        "flow": "ci",
+        "title": "Run Guillotine CI"
+      },
+      {
+        "on": "github.pull_request",
+        "flow": "uphill",
+        "title": "Uphill Lighthouse audit on pull requests"
+      },
+      {
+        "on": "cron",
+        "flow": "uphill",
+        "title": "Nightly Uphill Lighthouse audit",
+        "cron": "0 4 * * *",
+        "timezone": "UTC",
+        "overlap": "skip"
+      },
+      {
+        "on": "manual",
+        "flow": "uphill",
+        "title": "Run Lighthouse Backpressure Audit"
+      },
+      {
+        "on": "github.push",
+        "flow": "wiki",
+        "title": "Refresh Engineering Wiki on main",
+        "branches": [
+          "main"
+        ]
+      },
+      {
+        "on": "manual",
+        "flow": "wiki",
+        "title": "Rebuild Engineering Wiki and Mythical History"
+      },
+      {
+        "on": "manual",
+        "flow": "release",
+        "title": "Verify release readiness and docs build"
+      }
     ]
   }
 }

@@ -1,0 +1,26 @@
+{
+  "name": "guillotine-smithers",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "factory:write": "../scripts/smthrs target //.smithers:factory-write --write",
+    "factory:check": "../scripts/smthrs target //.smithers:factory-check",
+    "wiki:build": "node ./wiki/build-feed.mjs --write",
+    "wiki:check": "node ./wiki/build-feed.mjs --check",
+    "audit:build": "node ./reports/audit.mjs --write",
+    "audit:check": "node ./reports/audit.mjs --check",
+    "auth:verify": "node ../scripts/smithers-auth.mjs verify",
+    "test:factory": "node --test ./tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@smthrs/flow": "1.0.0-rc.18",
+    "@smthrs/plan": "1.0.0-rc.18",
+    "@smthrs/sandbox": "1.0.0-rc.18",
+    "@smthrs/triggers": "1.0.0-rc.18",
+    "effect": "4.1.1"
+  },
+  "devDependencies": {
+    "@smthrs/cli": "1.0.0-rc.18",
+    "@smthrs/targets": "1.0.0-rc.18"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "repository": "evmts/guillotine",
+  "title": "Guillotine Engineering Wiki",
+  "description": "Obsidian-compatible engineering knowledge base and Mythical History for evmts/guillotine.",
+  "pages": [
+    {
+      "path": "Overview.md",
+      "title": "Overview",
+      "tags": ["overview", "architecture"],
+      "inputs": ["README.md", "CLAUDE.md", "build.zig", "build.zig.zon"]
+    },
+    {
+      "path": "Mythical-History.md",
+      "title": "Mythical History",
+      "tags": ["history", "mythical", "epochs"],
+      "inputs": ["CHANGELOG.md", "README.md"]
+    },
+    {
+      "path": "Dispatch-Engine.md",
+      "title": "Dispatch Engine",
+      "tags": ["architecture", "dispatch", "performance"],
+      "inputs": [
+        "src/preprocessor/dispatch.zig",
+        "src/preprocessor/handler_abi.zig",
+        "src/frame/frame.zig",
+        "src/core/verified_ops.zig"
+      ]
+    },
+    {
+      "path": "Formal-Verification.md",
+      "title": "Formal Verification",
+      "tags": ["verification", "lean4", "zean", "smt"],
+      "inputs": [
+        "zean.json",
+        "zean.outputs.json",
+        "verify/lean/GuillotineZean.lean",
+        "verify/smt/model_pins.json",
+        "verify/llvm/llvm_ir_verify.py"
+      ]
+    },
+    {
+      "path": "TigerStyle-and-Safety.md",
+      "title": "TigerStyle and Safety",
+      "tags": ["safety", "tigerstyle", "uphill"],
+      "inputs": [
+        "docs/dev/TIGERSTYLE.md",
+        ".agents/uphill/uphill.yaml",
+        "src/internal/safety_counter.zig",
+        "src/tracer/tracer.zig"
+      ]
+    },
+    {
+      "path": "Trust-Model-and-Factory.md",
+      "title": "Trust Model and Factory",
+      "tags": ["smithers", "security", "ci", "mcp"],
+      "inputs": [
+        ".smithers/WORKSPACE.ts",
+        ".smithers/FACTORY.ts",
+        ".smithers/PACKAGE.ts",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml"
+      ]
+    },
+    {
+      "path": "Decisions.md",
+      "title": "Architectural Decisions",
+      "tags": ["decisions", "adr"],
+      "inputs": ["CHANGELOG.md", "docs/dev/ARCHITECTURE.md", "build.zig.zon"]
+    },
+    {
+      "path": "SDKs-and-ZEVM.md",
+      "title": "SDKs and ZEVM Integration",
+      "tags": ["sdks", "ffi", "zevm", "voltaire"],
+      "inputs": [
+        "src/evm_c_api.zig",
+        "sdks/c/include/guillotine.h",
+        "sdks/typescript/package.json",
+        "docs/building-custom-sdks.md"
+      ]
+    }
+  ]
+}

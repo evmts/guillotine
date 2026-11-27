@@ -1,0 +1,17 @@
+---
+description: Inspect Guillotine EVM bytecode execution, gas usage, and dispatch analysis in a bounded sandbox.
+flows: [playground/native]
+disable-model-invocation: true
+placement: sandbox
+capabilities:
+  - "fs:read:**"
+  - "proc:spawn:node .smithers/playground/run.mjs *"
+effects:
+  reads: [".smithers/playground/**", "zig-out/lib/**", "sdks/typescript/**"]
+  writes: []
+budget:
+  milliseconds: 10000
+---
+Run one bounded bytecode execution or bytecode analysis request against Guillotine
+and return a strict JSON result. All inputs are treated as untrusted data with
+hard gas, bytecode length, and timeout limits.

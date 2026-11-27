@@ -1,0 +1,19 @@
+---
+description: Audit Guillotine release readiness, version lockstep, changelog notes, formal verification evidence, and SDK packaging without publishing.
+capabilities: ["fs:read:**", "proc:spawn:jj --no-pager *", "proc:spawn:zig build *", "proc:spawn:node .smithers/reports/audit.mjs *", "proc:spawn:node .smithers/wiki/build-feed.mjs *"]
+model: sol
+budget:
+  tokens: 64000
+  milliseconds: 1800000
+---
+
+Audit release readiness for `evmts/guillotine` from repository root using `jj --no-pager`.
+Publishing, tagging, merging, and npm release remain strictly person-only maintainer actions.
+
+Check every release gate and report pass or concrete blocker:
+1. Version lockstep between `build.zig.zon`, `sdks/typescript/package.json`, and `CHANGELOG.md`.
+2. Factory projection freshness (`scripts/smthrs target //.smithers:factory-check`).
+3. Uphill Lighthouse backpressure audit (`uphill --compact` and `node .smithers/reports/audit.mjs --check`).
+4. Engineering Wiki and Mythical History validity (`node .smithers/wiki/build-feed.mjs --check`).
+5. Core build and opcode differential tests (`zig build && zig build test-opcodes`), C SDK, and TypeScript SDK packaging.
+6. Draft concise release notes grounded only in commits since the latest tag.

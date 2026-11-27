@@ -39,6 +39,14 @@ This change adds proper error handling for malformed bytecode that was causing p
 
 If your contribution is large please open a discussion to chat about the change before doing the work.
 
+## Smithers Cloud Factory & Execution Trust Model
+
+Guillotine is built publicly through the [Smithers Cloud Coding Factory](https://smithers.sh/evmts/guillotine) with a live [Lighthouse Backpressure Audit](https://guillotine.tevm.sh/audit.html), [Engineering Wiki & Mythical History](https://guillotine.tevm.sh/wiki.html), and public MCP server at `https://smithers.sh/evmts/guillotine/mcp`.
+
+- **Untrusted runs are encouraged**: Contributors and viewers can run the full incremental build graph (`scripts/smthrs`), opcode differential suites, and Uphill backpressure checks locally and on pull requests using **read-only** access to the shared `https://build.smithers.sh` cache.
+- **Cache poisoning and gate bypass are blocked**: Untrusted runs and fork PRs never receive `SMITHERS_CACHE_WRITE_TOKEN`, release credentials, or merge authority. Only Smithers-controlled sandboxes and maintainer pushes to `main` populate the shared cache and satisfy merge or release gates.
+- **One-time agent authentication**: See [.smithers/mcp/README.md](.smithers/mcp/README.md) and `node scripts/smithers-auth.mjs --help` for OAuth 2.1 DCR + PKCE and one-time BYOA sandbox attach instructions.
+
 ## Critical Safety Requirements
 
 **⚠️ WARNING: This is mission-critical financial infrastructure.** ANY bug can result in catastrophic loss of funds. Please follow these requirements:
