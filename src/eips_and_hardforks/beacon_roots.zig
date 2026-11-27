@@ -96,7 +96,7 @@ pub const BeaconRootsContract = struct {
     /// The contract's `get` path: the beacon root stored for `timestamp`, or null
     /// where the real contract reverts (timestamp 0, or the ring slot holds a
     /// different timestamp).
-    pub fn getBeaconRoot(database: *Database, timestamp: u256) Database.Error!?[32]u8 {
+    pub fn getBeaconRoot(database: anytype, timestamp: u256) !?[32]u8 {
         if (timestamp == 0) return null;
         const timestamp_slot: u256 = timestamp % HISTORY_BUFFER_LENGTH;
         const stored_timestamp = try database.get_storage(BEACON_ROOTS_ADDRESS.bytes, timestamp_slot);
@@ -119,9 +119,9 @@ pub const BeaconRootsContract = struct {
     /// - any other code: `error.NonCanonicalSystemContractCode`, nothing written.
     /// Database errors propagate unchanged.
     pub fn processBeaconRootUpdate(
-        database: *Database,
+        database: anytype,
         block_info: *const BlockInfo,
-    ) BeaconRootUpdateError!void {
+    ) !void {
         const beacon_root = block_info.beacon_root orelse return;
         const account = (try database.get_account(BEACON_ROOTS_ADDRESS.bytes)) orelse return;
         if (isNoCodeHash(account.code_hash)) return;

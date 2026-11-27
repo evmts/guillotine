@@ -1,0 +1,163 @@
+---
+title: Embedding Guillotine
+description: Embed Guillotine directly into Zig nodes (zevm, L2s), EVMC clients, C/Go/Rust/Python hosts, and Node.js or Bun applications.
+---
+
+# Embedding Guillotine
+
+Guillotine is designed as an embeddable execution engine rather than a monolithic node. You can embed it at four layers depending on your host runtime:
+
+| Integration layer | Target hosts | Build command / artifact |
+| --- | --- | --- |
+| **Native Zig package** | `zevm`, custom L2s, rollups, block builders | `b.dependency("guillotine", ...)` → `dep.module("evm")` |
+| **EVMC ABI v12** | Erigon, Nethermind, Silkworm, Besu, `evmc-vmtester` | `zig build evmc` → `zig-out/lib/libguillotine_evmc.{dylib,so}` |
+| **C ABI v2** | C, C++, Go, Rust, Python, Swift, Kotlin/JNI | `zig build shared` → `zig-out/lib/libguillotine_ffi.{dylib,so}` |
+| **Node-API / TypeScript** | Node.js ≥ 20, Bun ≥ 1.1, Deno (`@tevm/guillotine`) | `zig build napi` → `zig-out/lib/guillotine.node` |
+
+## 1. Embedding in Zig (`build.zig.zon`)
+
+Guillotine publishes five Zig modules from `src/modules.build.zig`: `evm`, `voltaire`, `crypto`, `precompiles`, and `layer2`. Downstream packages share a single Voltaire instance with no source patching.
+
+```zig
+// build.zig
+const guillotine = b.dependency("guillotine", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("evm", guillotine.module("evm"));
+exe.root_module.addImport("voltaire", guillotine.module("voltaire"));
+exe.root_module.link_libc = true;
+```
+
+### Custom `DatabaseType`
+
+Pass your own database type through `EvmConfig.DatabaseType` to connect Guillotine directly to MDBX, RocksDB, an RPC fork layer, or a custom in-memory trie with zero virtual dispatch overhead:
+
+```zig
+const evm = @import("evm");
+
+const CustomEvm = evm.Evm(.{
+    .eips = .{ .hardfork = .OSAKA },
+    .DatabaseType = MyNodeDatabase,
+    .InspectorType = evm.CallTracer,
+});
+```
+
+A custom `DatabaseType` must expose:
+
+- Account operations: `get_account`, `set_account`, `delete_account`, `account_exists`, `get_balance`, `set_balance`
+- Storage operations: `get_storage`, `set_storage`, `has_storage`, `clear_account_storage` (optional infallible `read_storage` fast path)
+- Transient storage: `get_transient_storage`, `set_transient_storage`, `clear_transient_storage`
+- Bytecode store: `get_code`, `set_code`
+- Snapshots: `create_snapshot`, `revert_to_snapshot`, `commit_snapshot`, `snapshot_depth`, `commit_to_depth`, `revert_to_depth`
+
+Optional fields and methods detected via `@hasField` / `@hasDecl`:
+
+- `failure: ?Error` — reset automatically on `resetForTx()` and checked for host I/O aborts
+- `find_account(self, address)` — direct borrowed account lookup without copying
+- `begin_ephemeral_view()` / `discard_ephemeral_view()` — fast simulation overlay (falls back to snapshot/revert when omitted)
+
+### Dynamic Precompile Overrides with Context
+
+Use `RuntimePrecompileOverride` and `vm.setPrecompileOverrides(...)` to inject stateful precompiles (such as L2 system precompiles, FFI cheatcodes, or custom cryptography) without `threadlocal` globals:
+
+```zig
+fn myPrecompile(
+    ctx: ?*anyopaque,
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    gas_limit: u64,
+) anyerror!evm.PrecompileOutput {
+    const state: *MyState = @ptrCast(@alignCast(ctx.?));
+    const out = try state.handle(allocator, input);
+    return .{ .success = true, .output = out, .gas_used = @min(gas_limit, 150) };
+}
+
+const overrides = [_]evm.RuntimePrecompileOverride{
+    .{ .address = target_addr, .context = &my_state, .execute = myPrecompile },
+};
+vm.setPrecompileOverrides(&overrides);
+```
+
+### Multi-Block Reuse and Full Transaction Execution
+
+Keep `DispatchCache`, frame stacks, and memory pools warm across blocks and transactions using `setBlockInfo`, `resetForTx`, and `evm.tx_runner`:
+
+```zig
+vm.setBlockInfo(next_block_info);
+try evm.tx_runner.runSystemCall(CustomEvm, &vm, beacon_roots_addr, parent_beacon_root);
+
+var tx_res = try evm.tx_runner.executeTx(CustomEvm, allocator, &vm, .{
+    .tx_type = 2,
+    .from = sender,
+    .to = recipient,
+    .nonce = 0,
+    .gas_limit = 200_000,
+    .max_fee_per_gas = 20_000_000_000,
+    .max_priority_fee_per_gas = 1_000_000_000,
+    .input = calldata,
+});
+defer tx_res.deinit(allocator);
+
+try evm.tx_runner.applyWithdrawals(CustomEvm, &vm, withdrawals);
+```
+
+`evm.tx_runner.executeTx` enforces EIP-1559 fee caps, EIP-7825 Osaka transaction gas limit caps, EIP-7623 calldata floor pricing, EIP-3529 refund caps, EIP-7702 authorization lists, sender nonce/balance accounting, coinbase priority fee tips, and self-destruct cleanup.
+
+## 2. EVMC ABI v12 Drop-In (`libguillotine_evmc`)
+
+Build the standard EVMC v12 shared library and run its integration test suite:
+
+```bash
+zig build evmc -Doptimize=ReleaseFast -Dstrip=true
+zig build test-evmc
+```
+
+The standalone C header is [`sdks/c/include/evmc_guillotine.h`](https://github.com/evmts/guillotine/blob/main/sdks/c/include/evmc_guillotine.h). Clients load `evmc_create_guillotine()` and execute any revision from Frontier through Osaka (`EVMC_OSAKA = 14`), with optional runtime toggle `set_option(vm, "fusion", "1" | "0")`.
+
+## 3. C ABI v2 with External State Callbacks
+
+Embed Guillotine in C, Go, Rust, Python, or Swift against external state (RPC forks, LevelDB, MDBX) using `GuillotineHostVTable` and `guillotine_evm_create_with_host`:
+
+```c
+#include "guillotine.h"
+
+GuillotineHostVTable vt = {
+    .get_account = my_get_account,
+    .get_storage = my_get_storage,
+    .get_code    = my_get_code,
+};
+
+EvmHandle *evm = guillotine_evm_create_with_host(&block_info, &vt, my_ctx);
+EvmResult *res = guillotine_execute_tx(evm, &tx_params);
+/* Inspect committed deltas with guillotine_dump_state(evm) or guillotine_get_storage(...) */
+guillotine_free_result(res);
+guillotine_evm_destroy(evm);
+```
+
+`CallbackHostDb` caches lazily fetched accounts, bytecode, and storage slots in an internal overlay so nested call reverts and `guillotine_simulate` never leak reverted writes back to the host.
+
+## 4. Node.js and Bun (`@tevm/guillotine`)
+
+Build the zero-`node-gyp` Node-API addon and run natively in Node.js ≥ 20 or Bun ≥ 1.1:
+
+```bash
+zig build shared napi -Doptimize=ReleaseFast -Dstrip=true
+```
+
+```ts
+import { Address, Bytes, GuillotineEvm, U256 } from '@tevm/guillotine'
+
+using evm = await GuillotineEvm.create({ number: 1n, baseFee: 10n }, { callTracer: true })
+await evm.setBlockInfo({ number: 2n, baseFee: 10n })
+const result = await evm.executeTx({
+  from: alice,
+  to: contract,
+  nonce: 0n,
+  gasLimit: 200_000n,
+  maxFeePerGas: U256.fromBigInt(20n),
+  maxPriorityFeePerGas: U256.fromBigInt(5n),
+})
+```
+
+See [Language bindings](/guides/bindings) and [Tracing and debugging](/guides/tracing) for the full API reference.

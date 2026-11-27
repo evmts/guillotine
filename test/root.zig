@@ -11,6 +11,7 @@ pub const std_options = std.Options{
 
 test {
     _ = @import("blob_gas_test.zig");
+    _ = @import("embedding_and_inspectors_test.zig");
     // Integration tests - testing EVM behavior with fixtures and differential testing
     
     // Test snailtracer first

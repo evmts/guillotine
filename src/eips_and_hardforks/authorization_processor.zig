@@ -129,178 +129,182 @@ fn recoverAuthority(auth: Authorization) (TupleError || error{OutOfMemory})!Addr
 /// The `gas_remaining` pointer must not be accessed concurrently from
 /// multiple threads. Callers must ensure exclusive access during the
 /// lifetime of any authorization processing operations.
-pub const AuthorizationProcessor = struct {
-    /// Database for state access
-    db: *Database,
-    /// Current chain ID
-    chain_id: u64,
-    /// Gas tracking (single-threaded access only)
-    gas_remaining: *i64,
-    /// EIP configuration for hardfork-specific behavior
-    eips: Eips,
+pub const AuthorizationProcessor = AuthorizationProcessorFor(Database);
 
-    /// Apply one tuple whose authority is already known (steps 1-2 and 5-9).
-    /// Returns a TupleError when the spec would skip the tuple; state is then unchanged.
-    pub fn processAuthorization(
-        self: *AuthorizationProcessor,
-        auth: Authorization,
-        authority: Address,
-    ) AuthorizationError!void {
-        try checkTupleFields(self.chain_id, auth);
-        _ = try self.applyAuthorization(auth, authority);
-    }
+pub fn AuthorizationProcessorFor(comptime DbType: type) type {
+    return struct {
+        const Self = @This();
+        /// Database for state access
+        db: *DbType,
+        /// Current chain ID
+        chain_id: u64,
+        /// Gas tracking (single-threaded access only)
+        gas_remaining: *i64,
+        /// EIP configuration for hardfork-specific behavior
+        eips: Eips,
 
-    /// Steps 5-9. Returns whether the authority account existed before.
-    fn applyAuthorization(
-        self: *AuthorizationProcessor,
-        auth: Authorization,
-        authority: Address,
-    ) (error{ NotEOA, NonceMismatch, NonceOverflow } || Database.Error)!bool {
-        const existing = try self.db.get_account(authority.bytes);
-        // A missing authority is an empty account (nonce 0, no code) and is created.
-        var account = existing orelse Account.zero();
+        /// Apply one tuple whose authority is already known (steps 1-2 and 5-9).
+        /// Returns a TupleError when the spec would skip the tuple; state is then unchanged.
+        pub fn processAuthorization(
+            self: *Self,
+            auth: Authorization,
+            authority: Address,
+        ) AuthorizationError!void {
+            try checkTupleFields(self.chain_id, auth);
+            _ = try self.applyAuthorization(auth, authority);
+        }
 
-        if (!isNoCodeHash(account.code_hash)) {
-            const code = try self.db.get_code(account.code_hash);
-            if (!isDelegationDesignator(code)) {
-                log.debug("Authority {x} has non-delegation code", .{authority.bytes});
-                return error.NotEOA;
+        /// Steps 5-9. Returns whether the authority account existed before.
+        fn applyAuthorization(
+            self: *Self,
+            auth: Authorization,
+            authority: Address,
+        ) (error{ NotEOA, NonceMismatch, NonceOverflow } || Database.Error)!bool {
+            const existing = try self.db.get_account(authority.bytes);
+            // A missing authority is an empty account (nonce 0, no code) and is created.
+            var account = existing orelse Account.zero();
+
+            if (!isNoCodeHash(account.code_hash)) {
+                const code = try self.db.get_code(account.code_hash);
+                if (!isDelegationDesignator(code)) {
+                    log.debug("Authority {x} has non-delegation code", .{authority.bytes});
+                    return error.NotEOA;
+                }
+                // Normalize a raw designator into the delegated_address representation.
+                account.code_hash = EMPTY_CODE_HASH;
             }
-            // Normalize a raw designator into the delegated_address representation.
-            account.code_hash = EMPTY_CODE_HASH;
+
+            if (account.nonce != auth.nonce) {
+                log.debug("Authorization nonce mismatch: expected {}, got {}", .{ account.nonce, auth.nonce });
+                return error.NonceMismatch;
+            }
+            const next_nonce = std.math.add(u64, account.nonce, 1) catch return error.NonceOverflow;
+
+            account.delegated_address = if (auth.address.isZero()) null else auth.address;
+            account.nonce = next_nonce;
+            try self.db.set_account(authority.bytes, account);
+
+            log.debug("Set delegation for {x} to {x}", .{ authority.bytes, auth.address.bytes });
+            return existing != null;
         }
-
-        if (account.nonce != auth.nonce) {
-            log.debug("Authorization nonce mismatch: expected {}, got {}", .{ account.nonce, auth.nonce });
-            return error.NonceMismatch;
-        }
-        const next_nonce = std.math.add(u64, account.nonce, 1) catch return error.NonceOverflow;
-
-        account.delegated_address = if (auth.address.isZero()) null else auth.address;
-        account.nonce = next_nonce;
-        try self.db.set_account(authority.bytes, account);
-
-        log.debug("Set delegation for {x} to {x}", .{ authority.bytes, auth.address.bytes });
-        return existing != null;
-    }
-
-    /// Steps 1-9 for one tuple, including signature recovery.
-    fn processTuple(
-        self: *AuthorizationProcessor,
-        auth: Authorization,
-        per_tuple_cost: i64,
-        refund_per_existing: i64,
-    ) AuthorizationError!AuthorizationResult {
-        var result = AuthorizationResult{ .success = false, .gas_used = per_tuple_cost };
-        checkTupleFields(self.chain_id, auth) catch |err| {
-            result.error_type = err;
+        /// Steps 1-9 for one tuple, including signature recovery.
+        fn processTuple(
+            self: *Self,
+            auth: Authorization,
+            per_tuple_cost: i64,
+            refund_per_existing: i64,
+        ) AuthorizationError!AuthorizationResult {
+            var result = AuthorizationResult{ .success = false, .gas_used = per_tuple_cost };
+            checkTupleFields(self.chain_id, auth) catch |err| {
+                result.error_type = err;
+                return result;
+            };
+            const authority = recoverAuthority(auth) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => |tuple_err| {
+                    result.error_type = tuple_err;
+                    return result;
+                },
+            };
+            result.authority = authority;
+            const existed = self.applyAuthorization(auth, authority) catch |err| switch (err) {
+                error.NotEOA, error.NonceMismatch, error.NonceOverflow => |tuple_err| {
+                    result.error_type = tuple_err;
+                    return result;
+                },
+                else => |db_err| return db_err,
+            };
+            result.success = true;
+            if (existed) result.refund = refund_per_existing;
             return result;
-        };
-        const authority = recoverAuthority(auth) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => |tuple_err| {
-                result.error_type = tuple_err;
-                return result;
-            },
-        };
-        result.authority = authority;
-        const existed = self.applyAuthorization(auth, authority) catch |err| switch (err) {
-            error.NotEOA, error.NonceMismatch, error.NonceOverflow => |tuple_err| {
-                result.error_type = tuple_err;
-                return result;
-            },
-            else => |db_err| return db_err,
-        };
-        result.success = true;
-        if (existed) result.refund = refund_per_existing;
-        return result;
-    }
+        }
 
-    /// Intrinsic cost of `n` tuples, or OutOfGas if it cannot be represented.
-    fn listCost(self: *AuthorizationProcessor, n: usize) AuthorizationError!i64 {
-        const count = std.math.cast(i64, n) orelse return error.OutOfGas;
-        return std.math.mul(i64, self.eips.eip_7702_per_empty_account_cost(), count) catch return error.OutOfGas;
-    }
+        /// Intrinsic cost of `n` tuples, or OutOfGas if it cannot be represented.
+        fn listCost(self: *Self, n: usize) AuthorizationError!i64 {
+            const count = std.math.cast(i64, n) orelse return error.OutOfGas;
+            return std.math.mul(i64, self.eips.eip_7702_per_empty_account_cost(), count) catch return error.OutOfGas;
+        }
 
-    /// Process an authorization list with per-tuple results.
-    /// Charges len * PER_EMPTY_ACCOUNT_COST from gas_remaining after all tuples were
-    /// processed. Returns OutOfGas, with no state or gas change, when gas_remaining
-    /// cannot cover that cost. The caller owns the returned results.
-    pub fn processAuthorizationListWithResults(
-        self: *AuthorizationProcessor,
-        allocator: std.mem.Allocator,
-        auth_list: []const Authorization,
-    ) AuthorizationError!AuthorizationListResult {
-        const total_cost = try self.listCost(auth_list.len);
-        if (self.gas_remaining.* < total_cost) return error.OutOfGas;
-        const per_tuple = self.eips.eip_7702_per_empty_account_cost();
-        const refund_per = per_tuple - self.eips.eip_7702_per_auth_base_cost();
+        /// Process an authorization list with per-tuple results.
+        /// Charges len * PER_EMPTY_ACCOUNT_COST from gas_remaining after all tuples were
+        /// processed. Returns OutOfGas, with no state or gas change, when gas_remaining
+        /// cannot cover that cost. The caller owns the returned results.
+        pub fn processAuthorizationListWithResults(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            auth_list: []const Authorization,
+        ) AuthorizationError!AuthorizationListResult {
+            const total_cost = try self.listCost(auth_list.len);
+            if (self.gas_remaining.* < total_cost) return error.OutOfGas;
+            const per_tuple = self.eips.eip_7702_per_empty_account_cost();
+            const refund_per = per_tuple - self.eips.eip_7702_per_auth_base_cost();
 
-        const results = try allocator.alloc(AuthorizationResult, auth_list.len);
-        errdefer allocator.free(results);
+            const results = try allocator.alloc(AuthorizationResult, auth_list.len);
+            errdefer allocator.free(results);
 
-        var successful_count: u32 = 0;
-        var failed_count: u32 = 0;
-        var refund: i64 = 0;
-        for (auth_list, results) |auth, *slot| {
-            slot.* = try self.processTuple(auth, per_tuple, refund_per);
-            if (slot.success) {
-                successful_count += 1;
-                refund += slot.refund;
-            } else {
-                failed_count += 1;
+            var successful_count: u32 = 0;
+            var failed_count: u32 = 0;
+            var refund: i64 = 0;
+            for (auth_list, results) |auth, *slot| {
+                slot.* = try self.processTuple(auth, per_tuple, refund_per);
+                if (slot.success) {
+                    successful_count += 1;
+                    refund += slot.refund;
+                } else {
+                    failed_count += 1;
+                }
             }
+
+            self.gas_remaining.* -= total_cost;
+            return AuthorizationListResult{
+                .results = results,
+                .total_gas_used = total_cost,
+                .successful_count = successful_count,
+                .failed_count = failed_count,
+                .refund = refund,
+            };
         }
 
-        self.gas_remaining.* -= total_cost;
-        return AuthorizationListResult{
-            .results = results,
-            .total_gas_used = total_cost,
-            .successful_count = successful_count,
-            .failed_count = failed_count,
-            .refund = refund,
-        };
-    }
+        /// Process an authorization list. Same semantics as
+        /// processAuthorizationListWithResults; returns the total refund.
+        pub fn processAuthorizationList(
+            self: *Self,
+            auth_list: []const Authorization,
+        ) AuthorizationError!i64 {
+            const total_cost = try self.listCost(auth_list.len);
+            if (self.gas_remaining.* < total_cost) return error.OutOfGas;
+            const per_tuple = self.eips.eip_7702_per_empty_account_cost();
+            const refund_per = per_tuple - self.eips.eip_7702_per_auth_base_cost();
 
-    /// Process an authorization list. Same semantics as
-    /// processAuthorizationListWithResults; returns the total refund.
-    pub fn processAuthorizationList(
-        self: *AuthorizationProcessor,
-        auth_list: []const Authorization,
-    ) AuthorizationError!i64 {
-        const total_cost = try self.listCost(auth_list.len);
-        if (self.gas_remaining.* < total_cost) return error.OutOfGas;
-        const per_tuple = self.eips.eip_7702_per_empty_account_cost();
-        const refund_per = per_tuple - self.eips.eip_7702_per_auth_base_cost();
-
-        var refund: i64 = 0;
-        for (auth_list) |auth| {
-            const result = try self.processTuple(auth, per_tuple, refund_per);
-            refund += result.refund;
+            var refund: i64 = 0;
+            for (auth_list) |auth| {
+                const result = try self.processTuple(auth, per_tuple, refund_per);
+                refund += result.refund;
+            }
+            self.gas_remaining.* -= total_cost;
+            return refund;
         }
-        self.gas_remaining.* -= total_cost;
-        return refund;
-    }
 
-    /// Create delegation designator (0xef0100 || address)
-    pub fn createDelegationDesignator(
-        allocator: std.mem.Allocator,
-        address: Address,
-    ) ![]u8 {
-        var designator = try allocator.alloc(u8, 23);
-        designator[0] = 0xef;
-        designator[1] = 0x01;
-        designator[2] = 0x00;
-        @memcpy(designator[3..23], &address.bytes);
-        return designator;
-    }
+        /// Create delegation designator (0xef0100 || address)
+        pub fn createDelegationDesignator(
+            allocator: std.mem.Allocator,
+            address: Address,
+        ) ![]u8 {
+            var designator = try allocator.alloc(u8, 23);
+            designator[0] = 0xef;
+            designator[1] = 0x01;
+            designator[2] = 0x00;
+            @memcpy(designator[3..23], &address.bytes);
+            return designator;
+        }
 
-    /// Parse delegation designator
-    pub fn parseDelegationDesignator(designator: []const u8) AuthorizationError!Address {
-        if (!isDelegationDesignator(designator)) return AuthorizationError.InvalidSignature;
-        return Address{ .bytes = designator[3..23].* };
-    }
-};
+        /// Parse delegation designator
+        pub fn parseDelegationDesignator(designator: []const u8) AuthorizationError!Address {
+            if (!isDelegationDesignator(designator)) return AuthorizationError.InvalidSignature;
+            return Address{ .bytes = designator[3..23].* };
+        }
+    };
+}
 
 test "Authorization processor - basic delegation" {
     const testing = std.testing;

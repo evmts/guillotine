@@ -113,8 +113,7 @@ describe("GuillotineEvm - Lifecycle Management", () => {
 			await evmNoTrace2.setBalance(addr, U256.fromBigInt(300n));
 
 			expect((await evmNoTrace1.getBalance(addr)).toBigInt()).toBe(100n);
-			// Tracing handles have no native state reads; the SDK refuses instead of casting the handle.
-			await expect(evmWithTrace.getBalance(addr)).rejects.toMatchObject({ type: "UnsupportedOperation" });
+			expect((await evmWithTrace.getBalance(addr)).toBigInt()).toBe(200n);
 			await evmWithTrace.setCode(testAddress(78), Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x50, 0x00]))); // PUSH1 1 POP STOP
 			const traced = await evmWithTrace.call(defaultExecutionParams({ caller: addr, to: testAddress(78) }));
 			expect(traced.traceJson).not.toBeNull();

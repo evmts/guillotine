@@ -1,85 +1,96 @@
 # @tevm/guillotine
 
-TypeScript bindings for the [Guillotine](https://github.com/evmts/guillotine) EVM. The package calls the native `libguillotine_ffi` library through [Bun FFI](https://bun.sh/docs/api/ffi); the ABI is `sdks/c/include/guillotine.h`.
+TypeScript bindings for the [Guillotine](https://github.com/evmts/guillotine) EVM. The package runs natively in **Node.js ≥ 20** (via the zero-`node-gyp` Node-API addon `guillotine.node`) and **Bun ≥ 1.1** (via either `guillotine.node` or [Bun FFI](https://bun.sh/docs/api/ffi) over `libguillotine_ffi`); the C ABI is [`sdks/c/include/guillotine.h`](../c/include/guillotine.h).
 
-| Runtime | Status |
-| --- | --- |
-| Bun ≥ 1.1 | Supported |
-| Node.js, browsers | Not supported. The WASM backend was removed because it ran a stale binary with a different ABI. |
+| Runtime | Status | Transport |
+| --- | --- | --- |
+| Node.js ≥ 20 | Supported | Zero-`node-gyp` Node-API (`guillotine.node`) |
+| Bun ≥ 1.1 | Supported | Node-API (`guillotine.node`) or Bun FFI (`libguillotine_ffi`) |
+| Browsers | Not supported | Use `evmts/guillotine-mini` for WASM browser execution |
 
 ## Install
 
 ```bash
+npm install @tevm/guillotine
+# or
 bun add @tevm/guillotine
 ```
 
-The package loads the native library from, in order:
+The package resolves the native binary in order:
 
 1. `GuillotineEvm.create(block, { libraryPath })`
-2. the `GUILLOTINE_LIB_PATH` environment variable
-3. `prebuilds/<platform>-<arch>/libguillotine_ffi.<dylib|so|dll>` inside the package
+2. `GUILLOTINE_NAPI_PATH` (for `guillotine.node`)
+3. `GUILLOTINE_LIB_PATH` (for `libguillotine_ffi.<dylib|so|dll>` on Bun)
+4. `prebuilds/<platform>-<arch>/guillotine.node` (or `libguillotine_ffi.<dylib|so|dll>`)
 
 ## Use
 
 ```ts
-import { Address, Bytes, GuillotineEvm, U256 } from '@tevm/guillotine';
+import { Address, Bytes, GuillotineEvm, U256 } from '@tevm/guillotine'
 
-using evm = await GuillotineEvm.create({ chainId: 1n });
+using evm = await GuillotineEvm.create({ number: 1n, baseFee: 10n, chainId: 1n })
 
-const caller = Address.fromHex('0x00000000000000000000000000000000000000a1');
-const contract = Address.fromHex('0x00000000000000000000000000000000000000c0');
+const caller = Address.fromHex('0x00000000000000000000000000000000000000a1')
+const contract = Address.fromHex('0x00000000000000000000000000000000000010c0')
 
 // PUSH1 2 PUSH1 3 ADD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
-await evm.setCode(contract, Bytes.fromHex('0x600260030160005260206000f3'));
+await evm.setCode(contract, Bytes.fromHex('0x600260030160005260206000f3'))
 
-const gas = 1_000_000n;
-const result = await evm.call({ caller, to: contract, value: U256.zero(), input: Bytes.empty(), gas });
+const gas = 1_000_000n
+const result = await evm.call({ caller, to: contract, value: U256.zero(), input: Bytes.empty(), gas })
 
-result.success; // true
-U256.fromBytes(result.output.toBytes()).toBigInt(); // 5n
-result.getGasUsed(gas); // includes the 21000 intrinsic gas
+result.success // true
+U256.fromBytes(result.output.toBytes()).toBigInt() // 5n
+result.getGasUsed(gas) // includes the 21000 intrinsic gas
+
+// Update block context in place without losing the warm dispatch cache
+await evm.setBlockInfo({ number: 2n, baseFee: 10n, chainId: 1n })
+
+// Execute a full EIP-1559 transaction (intrinsic gas, nonce, EIP-7623 floor, EIP-7825 cap)
+await evm.setBalance(caller, U256.fromBigInt(1_000_000_000n))
+const tx = await evm.executeTx({
+	from: caller,
+	to: contract,
+	gasLimit: 100_000n,
+	maxFeePerGas: U256.fromBigInt(20n),
+	maxPriorityFeePerGas: U256.fromBigInt(5n),
+})
 ```
 
-`using` releases the native handle at scope exit. Without it, call `evm.dispose()` (or `close()`); both are idempotent. Handles are not released by garbage collection.
+`using` releases the native handle at scope exit. Without it, call `evm.dispose()` (or `close()`); both are idempotent, and a `FinalizationRegistry` acts as a GC safety net.
 
 ## API
 
-| Method | Mainnet EVM | Tracing EVM |
-| --- | --- | --- |
-| `call(params)` | ✓ | ✓, returns `traceJson` |
-| `simulate(params)` (CALL only, no state commit) | ✓ | throws `UnsupportedOperation` |
-| `setBalance`, `setNonce`, `setCode` | ✓ | ✓ |
-| `setStorage`, `getStorage`, `getBalance`, `getCode` | ✓ | throws `UnsupportedOperation` |
+Every state, simulation, and transaction method works across mainnet, `tracing` (`structLogs`), `callTracer` (structured Geth call trees), and `hardfork` (`'shanghai' | 'cancun' | 'prague' | 'osaka'`) handles:
 
-Create a tracing EVM with `GuillotineEvm.create(block, { tracing: true })`. The native library has no state readers for tracing handles, so the SDK refuses those calls instead of passing an incompatible handle.
-
-`ExecutionResult` holds `success`, `gasLeft`, `output` (return or revert data), `logs`, `selfdestructs`, `accessedAddresses`, `accessedStorage`, `createdAddress`, and `traceJson`. A reverted call returns `success: false` with its revert data; it does not throw. `errorMessage` is `null` unless the native library reports a reason.
-
-Errors are `GuillotineError` instances with a `type`:
-
-| `type` | Cause |
+| Method / Option | Behavior |
 | --- | --- |
-| `InvalidValue` | Input outside its native range: u64 fields, `chainId` > 65535, `prevRandao` not 32 bytes, unknown call type |
-| `UnsupportedOperation` | Operation not available on this handle type |
-| `VMNotInitialized` | Handle already disposed |
-| `VMCreationFailed`, `ExecutionFailed`, `StateError` | Native failure; the message includes `guillotine_get_last_error()` |
-| `InitializationFailed` | Native library missing or not loadable |
+| `GuillotineEvm.create(block, { tracing: true })` | Full per-opcode `structLogs` trace JSON |
+| `GuillotineEvm.create(block, { callTracer: true })` | Compact nested call-tree JSON without per-opcode overhead |
+| `GuillotineEvm.create(block, { hardfork: 'cancun' })` | Select Shanghai, Cancun, Prague, or Osaka semantics |
+| `call(params)` | Execute message call or CREATE/CREATE2 and commit state |
+| `simulate(params)` | Execute CALL without committing state |
+| `executeTx(params)` | Full Ethereum transaction lifecycle (fees, nonce, refunds, floor, caps) |
+| `setBlockInfo(block)` | Update block context in place without recreating the EVM |
+| `setBalance`, `getBalance`, `setNonce`, `getNonce` | Account balance and nonce access |
+| `setCode`, `getCode`, `setStorage`, `getStorage` | Bytecode and storage slot access |
 
 ## Develop
 
-From the repository root, build the native library, then work in `sdks/typescript`:
+From the repository root, build both native libraries, then test in both Bun and Node.js:
 
 ```bash
-zig build shared
+zig build shared napi -Doptimize=ReleaseFast -Dstrip=true
 cd sdks/typescript
 bun install
-bun run build       # dist/ via tsup
+bun run build          # dist/ via tsup
 bun run typecheck
-bun test            # loads ../../zig-out/lib unless GUILLOTINE_LIB_PATH is set
-bun run lint:package  # publint + are-the-types-wrong on the packed tarball
+bun test               # Bun FFI test suite (341 tests)
+npm run test:node      # Node.js native Node-API E2E test suite
+bun run lint:package   # publint --strict + attw
 ```
 
-`bun run build:native` builds a ReleaseFast library and copies it into `prebuilds/<platform>-<arch>/`. `prepublishOnly` runs it, so a publish ships only the host platform's prebuild. Publishing for more platforms requires building each one into `prebuilds/` before `npm publish`.
+`bun run build:native` builds both `libguillotine_ffi` and `guillotine.node` in ReleaseFast and copies them into `prebuilds/<platform>-<arch>/`.
 
 ## License
 

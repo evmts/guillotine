@@ -69,9 +69,17 @@ pub fn createModules(
         evm_mod.addIncludePath(b.path("lib/ark"));
     }
 
-    // Voltaire's primitives module comes from the vendored dependency; publish
-    // that same module rather than a second module over the same files.
-    b.modules.put(b.graph.arena, "voltaire", primitives_mod) catch @panic("OOM registering the voltaire module");
+    // Voltaire's modules come from the vendored dependency; publish those exact
+    // modules so downstream Zig packages (`zevm`, L2 nodes) share one instance.
+    for ([_]struct { []const u8, *std.Build.Module }{
+        .{ "voltaire", primitives_mod },
+        .{ "crypto", crypto_mod },
+        .{ "precompiles", precompiles_mod },
+    }) |entry| {
+        b.modules.put(b.graph.arena, entry[0], entry[1]) catch |err| {
+            std.debug.panic("failed to register module '{s}': {}", .{ entry[0], err });
+        };
+    }
 
     // Layer 2 (Base and OP Stack). Its root re-exports `evm.layer2`, because the
     // `evm` module owns src/layer2/mod.zig.

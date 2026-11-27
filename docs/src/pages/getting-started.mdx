@@ -13,7 +13,7 @@ example below was compiled and run. See [Running it](#running-it).
 
 In your own project, add Guillotine as a Zig package and import
 `guillotine.module("evm")` (see [Use it from a Zig project](/installation#use-it-from-a-zig-project)).
-The package also exports `voltaire` and `layer2`.
+The package also exports `voltaire`, `crypto`, `precompiles`, and `layer2`. For custom databases, dynamic precompiles, transaction runners, EVMC v12, or Node.js/Bun embedding, see [Embedding Guillotine](/guides/embedding).
 
 Inside a checkout of the repository, `zig build test-integration` compiles `test/root.zig` with
 the `evm` and `voltaire` imports already wired (`build.zig`). Put the examples

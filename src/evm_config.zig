@@ -16,6 +16,20 @@ pub const PrecompileOverride = struct {
     execute: *const fn (allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!PrecompileOutput,
 };
 
+/// Runtime precompile override with an opaque host context pointer.
+/// Lets embedders (e.g. ZEVM Hardhat console.log, Foundry cheatcodes, L2 hosts)
+/// attach per-instance or per-call precompile overrides without thread-local globals.
+pub const RuntimePrecompileOverride = struct {
+    address: Address,
+    context: ?*anyopaque = null,
+    execute: *const fn (
+        context: ?*anyopaque,
+        allocator: std.mem.Allocator,
+        input: []const u8,
+        gas_limit: u64,
+    ) anyerror!PrecompileOutput,
+};
+
 /// Precompile output result (duplicated here to avoid circular dependency)
 pub const PrecompileOutput = struct {
     output: []const u8,
@@ -133,6 +147,10 @@ pub const EvmConfig = struct {
     /// Controls what tracing features are enabled
     /// Default: disabled (must be explicitly enabled when needed)
     tracer_config: @import("tracer/tracer.zig").TracerConfig = @import("tracer/tracer.zig").TracerConfig.disabled,
+
+    /// Optional zero-cost comptime execution inspector (e.g. CallTracer, PrestateTracer).
+    /// When `void` (default), zero bytes and zero instructions are added to `Evm`.
+    InspectorType: type = void,
 
     /// Get the effective SIMD vector length for the current target
     /// Automatically detects optimal vector length for CPU if not explicitly set

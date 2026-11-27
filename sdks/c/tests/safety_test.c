@@ -186,17 +186,17 @@ static void test_null_and_foreign_handles(void) {
 
 static void test_invalid_config(void) {
     BlockInfoFFI info = block(1);
-    const uint8_t bad[] = {3, 4, 0x7f, 0xff};
+    const uint8_t bad[] = {4, 5, 0x7f, 0xff};
     for (size_t i = 0; i < sizeof bad; i++) {
         CHECK(guillotine_evm_create_with_config(&info, bad[i]) == NULL);
         CHECK(error_contains("Invalid EVM configuration"));
     }
-    for (uint8_t config = 0; config <= 2; config++) {
+    for (uint8_t config = 0; config <= 3; config++) {
         EvmHandle *evm = guillotine_evm_create_with_config(&info, config);
         CHECK(evm != NULL);
         guillotine_evm_destroy(evm);
     }
-    puts("ok: configuration bytes outside 0..2 are rejected");
+    puts("ok: configuration bytes outside 0..3 are rejected");
 }
 
 static void test_fresh_state_per_handle(void) {

@@ -101,9 +101,9 @@ pub const HistoricalBlockHashesContract = struct {
     /// - any other code: `error.NonCanonicalSystemContractCode`, nothing written.
     /// Database errors propagate unchanged.
     pub fn processBlockHashUpdate(
-        database: *Database,
+        database: anytype,
         block_info: *const BlockInfo,
-    ) BlockHashUpdateError!void {
+    ) !void {
         if (block_info.number == 0) return;
         const account = (try database.get_account(HISTORY_CONTRACT_ADDRESS.bytes)) orelse return;
         if (isNoCodeHash(account.code_hash)) return;
@@ -128,10 +128,10 @@ pub const HistoricalBlockHashesContract = struct {
     /// or current - requested > 8191). An in-window slot that was never written reads
     /// as 32 zero bytes, as SLOAD does.
     pub fn getBlockHash(
-        database: *Database,
+        database: anytype,
         requested: u256,
         current_block: u64,
-    ) Database.Error!?[32]u8 {
+    ) !?[32]u8 {
         if (current_block == 0) return null;
         const current: u256 = current_block;
         if (requested > current - 1) return null;

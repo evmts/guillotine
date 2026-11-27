@@ -9,7 +9,7 @@ LDLIBS += -lguillotine_ffi
 TESTDIR = sdks/c/tests
 BUILDDIR = sdks/c/build
 
-.PHONY: all test basic simple safety clean build-core help
+.PHONY: all test basic simple safety v2 clean build-core help
 all: test
 
 build-core:
@@ -27,6 +27,9 @@ $(BUILDDIR)/simple_test: $(TESTDIR)/simple_test.c sdks/c/include/guillotine.h | 
 $(BUILDDIR)/safety_test: $(TESTDIR)/safety_test.c sdks/c/include/guillotine.h build-core | $(BUILDDIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@ $(LDFLAGS) $(LDLIBS)
 
+$(BUILDDIR)/v2_test: $(TESTDIR)/v2_test.c sdks/c/include/guillotine.h build-core | $(BUILDDIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@ $(LDFLAGS) $(LDLIBS)
+
 basic: $(BUILDDIR)/basic_test
 	./$(BUILDDIR)/basic_test
 
@@ -36,7 +39,10 @@ simple: $(BUILDDIR)/simple_test
 safety: $(BUILDDIR)/safety_test
 	./$(BUILDDIR)/safety_test
 
-test: simple basic safety
+v2: $(BUILDDIR)/v2_test
+	./$(BUILDDIR)/v2_test
+
+test: simple basic safety v2
 
 clean:
 	rm -rf $(BUILDDIR)

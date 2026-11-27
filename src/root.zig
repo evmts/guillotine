@@ -23,6 +23,16 @@ pub const MemoryError = @import("memory/memory.zig").MemoryError;
 // EVM main module and configuration
 pub const Evm = @import("evm.zig").Evm;
 pub const EvmConfig = @import("evm_config.zig").EvmConfig;
+pub const PrecompileOverride = @import("evm_config.zig").PrecompileOverride;
+pub const RuntimePrecompileOverride = @import("evm_config.zig").RuntimePrecompileOverride;
+pub const PrecompileOutput = @import("evm_config.zig").PrecompileOutput;
+pub const tx_runner = @import("tx_runner.zig");
+pub const inspectors = @import("tracer/inspectors.zig");
+pub const CallTracer = inspectors.CallTracer;
+pub const callback_host_db = @import("callback_host_db.zig");
+pub const CallbackHostDb = callback_host_db.CallbackHostDb;
+pub const GuillotineHostAccount = callback_host_db.GuillotineHostAccount;
+pub const GuillotineHostVTable = callback_host_db.GuillotineHostVTable;
 pub const layer2 = @import("layer2/mod.zig");
 
 // Build-configured EVM: `zig build -Devm-hardfork=... -Devm-enable-fusion=...`
@@ -253,4 +263,6 @@ test {
     _ = @import("trie/node_cache.zig");
     _ = @import("trie/node_type_test.zig");
     _ = @import("trie/optimized_branch.zig");
+    _ = @import("tracer/inspectors.zig");
+    _ = @import("callback_host_db.zig");
 }

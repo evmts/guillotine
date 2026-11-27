@@ -67,6 +67,7 @@ export default defineConfig({
     {
       text: 'Guides',
       items: [
+        { text: 'Embedding Guillotine', link: '/guides/embedding' },
         { text: 'Configuring the EVM', link: '/guides/configuration' },
         { text: 'State and journaling', link: '/guides/state' },
         { text: 'Tracing and debugging', link: '/guides/tracing' },

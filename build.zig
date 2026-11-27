@@ -136,6 +136,81 @@ pub fn build(b: *std.Build) void {
     const static_lib_step = b.step("static", "Build static library for FFI");
     static_lib_step.dependOn(&b.addInstallArtifact(static_lib, .{}).step);
 
+    // EVMC ABI v12 shared library (`libguillotine_evmc`) for drop-in client integration
+    // (Erigon, Nethermind, Silkworm, Besu, evmc-vmtester).
+    const evmc_mod = b.createModule(.{
+        .root_source_file = b.path("src/evmc_c_api.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip_ffi,
+    });
+    evmc_mod.addImport("evm", modules.evm_mod);
+    evmc_mod.addImport("voltaire", modules.primitives_mod);
+    evmc_mod.addImport("crypto", modules.crypto_mod);
+    evmc_mod.addImport("build_options", options_mod);
+
+    const evmc_lib = b.addLibrary(.{
+        .name = "guillotine_evmc",
+        .linkage = .dynamic,
+        .root_module = evmc_mod,
+        .use_llvm = true,
+    });
+    if (bn254_lib) |bn254| evmc_lib.root_module.linkLibrary(bn254);
+    evmc_lib.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) evmc_lib.root_module.linkSystemLibrary("unwind", .{});
+    evmc_lib.rdynamic = true;
+    const evmc_step = b.step("evmc", "Build EVMC ABI v12 shared library (libguillotine_evmc)");
+    evmc_step.dependOn(&b.addInstallArtifact(evmc_lib, .{}).step);
+
+    const evmc_test_mod = b.createModule(.{
+        .root_source_file = b.path("test/evmc_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evmc_test_mod.addImport("evmc_c_api", evmc_mod);
+    evmc_test_mod.link_libc = true;
+    if (bn254_lib) |bn254| evmc_test_mod.linkLibrary(bn254);
+    if (target.result.os.tag == .linux) evmc_test_mod.linkSystemLibrary("unwind", .{});
+    const evmc_tests = b.addTest(.{
+        .name = "evmc-tests",
+        .root_module = evmc_test_mod,
+        .use_llvm = true,
+    });
+    const evmc_test_step = b.step("test-evmc", "Run EVMC ABI v12 integration tests");
+    evmc_test_step.dependOn(&b.addRunArtifact(evmc_tests).step);
+
+    // Zero-node-gyp Node-API (N-API v8) native addon (`zig-out/lib/guillotine.node`)
+    // for Node.js >=20, Bun >=1.1, and Deno.
+    const napi_mod = b.createModule(.{
+        .root_source_file = b.path("src/evm_c_api.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip_ffi,
+    });
+    napi_mod.addImport("evm", modules.evm_mod);
+    napi_mod.addImport("voltaire", modules.primitives_mod);
+    napi_mod.addImport("crypto", modules.crypto_mod);
+    napi_mod.addImport("build_options", options_mod);
+    napi_mod.addIncludePath(b.path("sdks/c/include"));
+    napi_mod.addIncludePath(b.path("sdks/typescript/native"));
+    napi_mod.addCSourceFile(.{
+        .file = b.path("sdks/typescript/native/guillotine_napi.c"),
+        .flags = &.{ "-std=c99", "-Wall", "-Wextra" },
+    });
+    const napi_lib = b.addLibrary(.{
+        .name = "guillotine_napi",
+        .linkage = .dynamic,
+        .root_module = napi_mod,
+        .use_llvm = true,
+    });
+    napi_lib.linker_allow_shlib_undefined = true;
+    if (bn254_lib) |bn254| napi_lib.root_module.linkLibrary(bn254);
+    napi_lib.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) napi_lib.root_module.linkSystemLibrary("unwind", .{});
+    const install_napi = b.addInstallFileWithDir(napi_lib.getEmittedBin(), .lib, "guillotine.node");
+    const napi_step = b.step("napi", "Build Node-API native addon (zig-out/lib/guillotine.node)");
+    napi_step.dependOn(&install_napi.step);
+
     // Test configuration options
     const test_filter = b.option([]const u8, "test-filter", "Filter tests by pattern (applies to all test types)");
     const test_verbose = b.option(bool, "test-verbose", "Print every EEST state-test failure (state-tests)") orelse false;
@@ -248,7 +323,6 @@ pub fn build(b: *std.Build) void {
     if (test_filter) |filter| jit_tests.filters = b.dupeStrings(&.{filter});
     const jit_test_step = b.step("test-jit", "Run native JIT tests (src/jit)");
     jit_test_step.dependOn(&b.addRunArtifact(jit_tests).step);
-
 
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
@@ -675,7 +749,6 @@ pub fn build(b: *std.Build) void {
     }
 
     const run_specs_test = b.addRunArtifact(specs_test);
-
 
     // Set MAX_SPEC_FILES environment variable
     const spec_max_files = b.option([]const u8, "spec-max-files", "Maximum number of spec files to run (default: all)");

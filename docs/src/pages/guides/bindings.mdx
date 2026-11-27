@@ -11,9 +11,10 @@ opaque-handle C interface, declared in `sdks/c/include/guillotine.h`.
 
 | Surface | Directory | Status | Mechanism |
 | --- | --- | --- | --- |
-| Zig | `src/root.zig` | Beta | Zig package; import `dep.module("evm")` |
-| C | `sdks/c/` | Beta | The C ABI directly |
-| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Beta; Bun only; 340 / 340 tests pass | Bun FFI over `libguillotine_ffi` |
+| Zig | `src/root.zig` | Beta | Zig package; import `dep.module("evm")` (`voltaire`, `crypto`, `precompiles`, `layer2`) |
+| EVMC v12 | `src/evmc_c_api.zig`, `sdks/c/include/evmc_guillotine.h` | Beta | Standard EVMC ABI v12 (`evmc_create_guillotine`) |
+| C | `sdks/c/` | Beta | C ABI v2 directly (`guillotine.h`, `GuillotineHostVTable`, `execute_tx`) |
+| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Beta; Node.js ≥ 20 & Bun ≥ 1.1; 341 / 341 tests pass on both backends | Zero-`node-gyp` Node-API (`guillotine.node`) and Bun FFI (`libguillotine_ffi`) |
 
 Python, Go, Rust, Swift, Kotlin/JNI, and native Bun integrations are custom
 SDKs you build on the C ABI; the repository does not maintain them. Start with
@@ -26,7 +27,9 @@ and the Custom SDK Builder skill
 Build a linkable library first:
 
 ```bash
-zig build shared    # dynamic library for FFI (the supported artifact)
+zig build shared    # dynamic library for FFI (`libguillotine_ffi`)
+zig build napi      # zero-node-gyp Node-API addon (`guillotine.node`)
+zig build evmc      # EVMC ABI v12 shared library (`libguillotine_evmc`)
 zig build static    # static library; links only with extra archives, see below
 ```
 
@@ -55,19 +58,19 @@ EvmHandle* guillotine_evm_create_mainnet(const BlockInfoFFI* block_info);
 EvmHandle* guillotine_evm_create_with_config(const BlockInfoFFI* block_info,
                                              EvmConfiguration config);
 EvmHandle* guillotine_evm_create_tracing(const BlockInfoFFI* block_info);
+EvmHandle* guillotine_evm_create_call_tracer(const BlockInfoFFI* block_info);
 EvmHandle* guillotine_evm_create_test(const BlockInfoFFI* block_info);
+EvmHandle* guillotine_evm_create_with_fork(const BlockInfoFFI* block_info, uint8_t hardfork_id);
+EvmHandle* guillotine_evm_create_with_host(const BlockInfoFFI* block_info,
+                                           const GuillotineHostVTable* vtable,
+                                           void* user_ctx);
+bool       guillotine_set_block_info(EvmHandle* handle, const BlockInfoFFI* block_info);
 
 void guillotine_evm_destroy(EvmHandle* handle);
 void guillotine_evm_destroy_tracing(EvmHandle* handle);
 ```
 
-The `_tracing` variants exist because a traced EVM is a *different Zig type*
-(comptime config), so it cannot share one handle representation with the untraced
-one. Use only `_tracing` functions on a tracing handle:
-`guillotine_evm_destroy_tracing`, `guillotine_set_balance_tracing`,
-`guillotine_set_nonce_tracing`, `guillotine_set_code_tracing`, and
-`guillotine_call_tracing`. There are no state readers or `set_storage` for
-tracing handles.
+Every handle is an opaque monotonic registry token stored in a tagged `HandleBox`, so **all state, simulation, execution, and dump functions work on every handle configuration** (mainnet, `structLogs` tracer, `callTracer`, test mode, fork-selected, and external host callback). The `*_tracing` entry points remain as backwards-compatible aliases.
 
 ### State
 
@@ -78,6 +81,7 @@ bool guillotine_set_code   (EvmHandle*, const uint8_t address[20], const uint8_t
 bool guillotine_set_storage(EvmHandle*, const uint8_t address[20], const uint8_t key[32], const uint8_t value[32]);
 
 bool guillotine_get_balance(EvmHandle*, const uint8_t address[20], uint8_t balance_out[32]);
+bool guillotine_get_nonce  (EvmHandle*, const uint8_t address[20], uint64_t* nonce_out);
 bool guillotine_get_storage(EvmHandle*, const uint8_t address[20], const uint8_t key[32], uint8_t value_out[32]);
 bool guillotine_get_code   (EvmHandle*, const uint8_t address[20], uint8_t** code_out, size_t* len_out);
 ```
@@ -90,6 +94,8 @@ bytes. There are no bignum structs in the ABI.
 ```c
 EvmResult* guillotine_call        (EvmHandle*, const CallParams* params);
 EvmResult* guillotine_call_tracing(EvmHandle*, const CallParams* params);
+EvmResult* guillotine_simulate    (EvmHandle*, const CallParams* params);
+EvmResult* guillotine_execute_tx  (EvmHandle*, const TxParamsFFI* params);
 ```
 
 ### Freeing
@@ -134,19 +140,13 @@ repository builds its own WASM module with its own C exports.
 ## npm packaging
 
 The TypeScript SDK is `@tevm/guillotine` (`sdks/typescript/package.json`). It
-loads `libguillotine_ffi` through Bun FFI and does not run in Node.js or
-browsers. `bun run build:native` copies a ReleaseFast library into
-`prebuilds/<platform>-<arch>/`.
-
-`.github/workflows/release.yml` publishes the package when a `v*` tag is pushed.
-It builds `libguillotine_ffi` in ReleaseFast with `-Dstrip=true` on `macos-latest` (`darwin-arm64`)
-and `ubuntu-latest` (`linux-x64`, cross-targeted to `x86_64-linux-gnu.2.28`), runs
-the C and TypeScript SDK tests on each, combines both libraries into
-`prebuilds/`, and runs `npm publish --provenance` once the `NPM_TOKEN` secret
-exists. The same run creates a GitHub Release with `libguillotine_ffi.so`,
-`libguillotine_ffi.dylib`, `guillotine.h` and `SHA256SUMS.txt`. See
-[Publishing and releases](/guides/publishing). Other platforms have no prebuild; build the library yourself and set
-`GUILLOTINE_LIB_PATH`.
+runs natively in **Node.js ≥ 20** (via the zero-`node-gyp` Node-API addon
+`guillotine.node`) and **Bun ≥ 1.1** (via either `guillotine.node` or Bun FFI
+over `libguillotine_ffi`). `bun run build:native` builds both artifacts in
+ReleaseFast with `-Dstrip=true` and copies them into `prebuilds/<platform>-<arch>/`.
+For custom paths, set `GUILLOTINE_NAPI_PATH` (for `guillotine.node`) or
+`GUILLOTINE_LIB_PATH` (for `libguillotine_ffi`). See [Embedding Guillotine](/guides/embedding)
+and [Publishing and releases](/guides/publishing).
 
 ## Which should I use?
 

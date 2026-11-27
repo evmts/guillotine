@@ -417,8 +417,8 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         /// Get the database directly (for hot path storage operations)
         /// This avoids double pointer dereference: self -> evm -> database
         /// Instead we go directly: self -> database
-        pub inline fn getDatabase(self: *const Self) *Database {
-            return @as(*Database, @ptrCast(@alignCast(self.database)));
+        pub inline fn getDatabase(self: *const Self) *config.DatabaseType {
+            return @as(*config.DatabaseType, @ptrCast(@alignCast(self.database)));
         }
 
         /// Validate that the current dispatch cursor points to the expected handler and metadata.

@@ -1,13 +1,15 @@
 {
 	"name": "@tevm/guillotine",
 	"version": "0.1.0",
-	"description": "Guillotine EVM for TypeScript: Bun FFI bindings to the native libguillotine_ffi library",
+	"description": "Guillotine EVM for TypeScript: Node-API and Bun FFI native bindings to the Guillotine Zig EVM",
 	"keywords": [
 		"evm",
 		"ethereum",
 		"guillotine",
 		"zig",
 		"ffi",
+		"napi",
+		"node",
 		"bun",
 		"typescript"
 	],
@@ -30,6 +32,7 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
+			"node": "./dist/index.js",
 			"bun": "./dist/index.js",
 			"default": "./dist/index.js"
 		},
@@ -42,17 +45,19 @@
 		"README.md"
 	],
 	"engines": {
+		"node": ">=20.0.0",
 		"bun": ">=1.1.0"
 	},
 	"scripts": {
 		"build": "tsup",
-		"build:native": "cd ../.. && zig build shared -Doptimize=ReleaseFast && cd sdks/typescript && bun scripts/copy-native.ts",
+		"build:native": "cd ../.. && zig build shared napi -Doptimize=ReleaseFast -Dstrip=true && cd sdks/typescript && bun scripts/copy-native.ts",
 		"clean": "rm -rf dist prebuilds",
 		"format": "biome format . --write",
 		"lint": "biome check .",
 		"lint:package": "publint --strict && attw --pack --profile esm-only",
-		"prepublishOnly": "bun run build:native && bun run build && bun run typecheck && bun test && bun run lint:package",
+		"prepublishOnly": "bun run build:native && bun run build && bun run typecheck && bun test && npm run test:node && bun run lint:package",
 		"test": "bun test",
+		"test:node": "node --test test/node.e2e.mjs",
 		"test:coverage": "bun test --coverage",
 		"test:fuzz": "bun test test/fuzz/",
 		"fuzz": "bun --preload ./test/setup.ts test/fuzz/campaign.ts",

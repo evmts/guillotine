@@ -358,22 +358,65 @@ describe('resource lifecycle', () => {
 		expect(captured.isOpen).toBe(false)
 	})
 
-	it('tracing handles return trace JSON and refuse unsupported operations', async () => {
+	it('tracing handles return trace JSON and support state reads and simulate', async () => {
 		using evm = await GuillotineEvm.create({}, { tracing: true })
 		expect(evm.tracing).toBe(true)
 		const contract = Address.fromHex('0x00000000000000000000000000000000000000c1')
 		await evm.setCode(contract, Bytes.fromBytes(assemble([p1(2), p1(3), ADD, STOP])))
+		await evm.setStorage(contract, U256.zero(), U256.one())
+		expect((await evm.getStorage(contract, U256.zero())).toBigInt()).toBe(1n)
 		const result = await evm.call({ caller: alice, to: contract, value: U256.zero(), input: Bytes.empty(), gas: GAS })
 		expect(result.success).toBe(true)
 		const trace: { structLogs: { op: string }[] } = JSON.parse(result.traceJson ?? 'null')
 		expect(trace.structLogs.map((s) => s.op)).toEqual(['PUSH1', 'PUSH1', 'ADD', 'STOP'])
-		await expect(evm.getStorage(contract, U256.zero())).rejects.toMatchObject({ type: 'UnsupportedOperation' })
-		await expect(evm.setStorage(contract, U256.zero(), U256.one())).rejects.toMatchObject({
-			type: 'UnsupportedOperation',
+		const sim = await evm.simulate({ caller: alice, to: contract, value: U256.zero(), input: Bytes.empty(), gas: GAS })
+		expect(sim.success).toBe(true)
+		expect(sim.traceJson).not.toBeNull()
+	})
+
+	it('supports setBlockInfo, getNonce, callTracer, hardfork, and executeTx', async () => {
+		using evm = await GuillotineEvm.create({ number: 10n, baseFee: 10n, coinbase: deployer })
+		const target = Address.fromHex('0x0000000000000000000000000000000000001020')
+		// NUMBER PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+		await evm.setCode(target, Bytes.fromBytes(new Uint8Array([0x43, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3])))
+		const r1 = await evm.call({ caller: alice, to: target, value: U256.zero(), input: Bytes.empty(), gas: GAS })
+		expect(U256.fromBytes(r1.output.toBytes()).toBigInt()).toBe(10n)
+
+		await evm.setBlockInfo({ number: 777n, baseFee: 10n, coinbase: deployer })
+		const r2 = await evm.call({ caller: alice, to: target, value: U256.zero(), input: Bytes.empty(), gas: GAS })
+		expect(U256.fromBytes(r2.output.toBytes()).toBigInt()).toBe(777n)
+
+		await evm.setBalance(alice, U256.fromBigInt(1_000_000_000n))
+		expect(await evm.getNonce(alice)).toBe(2n)
+		const txRes = await evm.executeTx({
+			from: alice,
+			to: target,
+			nonce: 2n,
+			gasLimit: 100_000n,
+			maxFeePerGas: U256.fromBigInt(20n),
+			maxPriorityFeePerGas: U256.fromBigInt(5n),
 		})
-		await expect(
-			evm.simulate({ caller: alice, to: contract, value: U256.zero(), input: Bytes.empty(), gas: GAS }),
-		).rejects.toMatchObject({ type: 'UnsupportedOperation' })
+		expect(txRes.success).toBe(true)
+		expect(U256.fromBytes(txRes.output.toBytes()).toBigInt()).toBe(777n)
+		expect(await evm.getNonce(alice)).toBe(3n)
+
+		using ctEvm = await GuillotineEvm.create({}, { callTracer: true })
+		expect(ctEvm.callTracer).toBe(true)
+		await ctEvm.setCode(target, Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x00])))
+		const ctRes = await ctEvm.call({ caller: alice, to: target, value: U256.zero(), input: Bytes.empty(), gas: GAS })
+		expect(ctRes.success).toBe(true)
+		expect(ctRes.traceJson).toContain('"type":"CALL"')
+
+		using shanghai = await GuillotineEvm.create({}, { hardfork: 'shanghai' })
+		await shanghai.setCode(target, Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x60, 0x00, 0x5d, 0x00]))) // TSTORE
+		const shanghaiRes = await shanghai.call({
+			caller: alice,
+			to: target,
+			value: U256.zero(),
+			input: Bytes.empty(),
+			gas: GAS,
+		})
+		expect(shanghaiRes.success).toBe(false)
 	})
 
 	it('mainnet calls carry no trace', async () => {

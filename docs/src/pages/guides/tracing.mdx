@@ -93,6 +93,39 @@ trace as `{"structLogs":[...]}` JSON with `pc`, `op`, `gas`, `gasCost`, `depth`,
 `stack`, and `memSize` per step (`writeTraceJson` in `src/evm_c_api.zig`), the
 shape `debug_traceTransaction` consumers read.
 
+## Zero-cost Inspectors and `CallTracer`
+
+For production `debug_traceTransaction` call trees (`callTracer`) or analytics
+where recording per-opcode `structLogs` is too expensive, attach a comptime
+`InspectorType` via `EvmConfig`:
+
+```zig
+const evm = @import("evm");
+
+const InspectedEvm = evm.Evm(.{
+    .InspectorType = evm.CallTracer,
+});
+
+var tracer = evm.CallTracer.init(allocator);
+defer tracer.deinit();
+vm.setInspector(&tracer);
+
+var result = vm.call(params);
+defer result.deinit(allocator);
+
+const json = try tracer.toJson(allocator);
+defer allocator.free(json);
+```
+
+When `InspectorType == void` (the default), Guillotine adds zero bytes to `Evm`
+and compiles out every inspector hook. Custom inspectors implement any subset of
+`onCallEnter(self, depth, params)`, `onCallExit(self, depth, params, result)`,
+and `onLog(self, depth, address, topics, data)`.
+
+Across C and TypeScript, use `GUILLOTINE_CALL_TRACER` /
+`guillotine_evm_create_call_tracer()` or `GuillotineEvm.create(block, { callTracer: true })`
+to receive compact call-tree JSON in `trace_json` / `result.traceJson`.
+
 ## How lockstep validation works
 
 Every handler begins with one mandatory line:

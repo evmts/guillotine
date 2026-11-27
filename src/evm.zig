@@ -24,6 +24,9 @@ const call_params_module = @import("frame/call_params.zig");
 pub fn Evm(config: EvmConfig) type {
     return struct {
         const Self = @This();
+        pub const Db = config.DatabaseType;
+        pub const Inspector = config.InspectorType;
+        pub const RuntimePrecompileOverride = @import("evm_config.zig").RuntimePrecompileOverride;
 
         comptime {
             if (config.max_call_depth >= std.math.maxInt(u11)) {
@@ -115,7 +118,7 @@ pub fn Evm(config: EvmConfig) type {
 
         // Cache line 2 - STORAGE OPERATIONS: All accessed together for SLOAD/SSTORE
         /// Database interface for state storage
-        database: *Database, // 8 bytes
+        database: *Db, // 8 bytes
         /// Access list for tracking warm/cold access (EIP-2929)
         access_list: AccessList, // ~40 bytes (2 hashmaps)
         /// Current snapshot ID for the active call frame
@@ -186,6 +189,11 @@ pub fn Evm(config: EvmConfig) type {
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
         /// Tracer for debugging and logging - can be accessed via evm.tracer or frame.evm_ptr.tracer
         tracer: @import("tracer/tracer.zig").Tracer,
+        /// Optional per-instance runtime precompile overrides (zero overhead when empty).
+        runtime_precompile_overrides: []const RuntimePrecompileOverride = &.{},
+        /// Optional zero-cost comptime execution inspector (0 bytes when `InspectorType == void`).
+        inspector: if (config.InspectorType == void) void else ?*config.InspectorType =
+            if (config.InspectorType == void) {} else null,
 
         /// Initialize a new EVM instance.
         ///
@@ -199,7 +207,7 @@ pub fn Evm(config: EvmConfig) type {
         /// From Cancun on, with precompiles enabled, `init` loads the process-wide KZG
         /// trusted setup that the point evaluation precompile (0x0A) needs. The load
         /// runs once per process and is thread-safe; a failure is returned.
-        pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: ?u256, origin: primitives.Address) !Self {
+        pub fn init(allocator: std.mem.Allocator, database: ?*Db, block_info: BlockInfo, context: TransactionContext, gas_price: ?u256, origin: primitives.Address) !Self {
             const db = database orelse return error.DatabaseRequired;
             if (comptime kzg_required) try kzg_setup.init();
             const effective_gas_price = gas_price orelse config.eips.effective_gas_price(
@@ -526,15 +534,71 @@ pub fn Evm(config: EvmConfig) type {
             try self.database.set_account(to.bytes, to_account);
         }
 
+        /// Replace block context in place so callers can reuse `DispatchCache`,
+        /// frame pools, and arenas across blocks without re-initializing the EVM.
+        pub fn setBlockInfo(self: *Self, block_info: BlockInfo) void {
+            self.block_info = block_info;
+            self.context.gas_limit = block_info.gas_limit;
+            self.context.coinbase = block_info.coinbase;
+            self.context.chain_id = block_info.chain_id;
+            self.context.blob_base_fee = block_info.blob_base_fee;
+        }
+
+        /// Install runtime precompile overrides for subsequent calls on this EVM.
+        /// Pass an empty slice to clear overrides.
+        pub fn setPrecompileOverrides(self: *Self, overrides: []const RuntimePrecompileOverride) void {
+            self.runtime_precompile_overrides = overrides;
+        }
+
+        /// Attach or detach the comptime-configured execution inspector.
+        pub fn setInspector(self: *Self, inspector: if (config.InspectorType == void) void else ?*config.InspectorType) void {
+            self.inspector = inspector;
+        }
+
+        /// Reset per-transaction state while retaining `DispatchCache`, pooled frame
+        /// stacks/memory, and map capacities for fast multi-transaction replay.
+        pub fn resetForTx(self: *Self) void {
+            self.depth = 0;
+            self.clear_return_data();
+            self.access_list.clear();
+            self.journal.clear();
+            self.gas_refund_counter = 0;
+            self.logs.clearRetainingCapacity();
+            self.created_contracts.clear();
+            self.self_destruct.clear();
+            self.database.clear_transient_storage();
+            self.current_snapshot_id = 0;
+            self.tx_sender_nonce_incremented = false;
+            self.host_failure = null;
+            if (comptime @hasField(Db, "failure")) {
+                self.database.failure = null;
+            }
+            self.frame_memory.trim();
+            self.frame_stacks.trim();
+            self.resetTouched();
+            self.call_arena.resetRetainCapacity() catch |err| {
+                self.failHost(err);
+            };
+        }
+
         /// Simulate an EVM operation without committing state changes.
         ///
         /// Executes exactly like `call()` but reverts all state changes at the end,
         /// returning the result as if the call had been executed. Useful for
         /// gas estimation, testing outcomes, or previewing transaction effects.
         pub fn simulate(self: *Self, params: CallParams) CallResult {
-            // Use database ephemeral overlay to avoid mutating base state
-            self.database.begin_ephemeral_view();
-            defer self.database.discard_ephemeral_view();
+            if (comptime @hasDecl(Db, "begin_ephemeral_view") and @hasDecl(Db, "discard_ephemeral_view")) {
+                // Use database ephemeral overlay to avoid mutating base state
+                self.database.begin_ephemeral_view();
+                defer self.database.discard_ephemeral_view();
+                return self.call(params);
+            }
+            const snap_depth = self.database.snapshot_depth();
+            _ = self.database.create_snapshot() catch |err| {
+                self.failHost(err);
+                return CallResult.failed(0);
+            };
+            defer self.database.revert_to_depth(snap_depth);
             return self.call(params);
         }
 
@@ -661,7 +725,9 @@ pub fn Evm(config: EvmConfig) type {
         /// unchanged in both cases.
         pub fn call(self: *Self, params: CallParams) CallResult {
             self.host_failure = null;
-            self.database.failure = null;
+            if (comptime @hasField(Db, "failure")) {
+                self.database.failure = null;
+            }
             if (comptime native_stack.supported) {
                 if (native_stack.lowAddress()) |low| {
                     const here = @frameAddress();
@@ -1338,8 +1404,26 @@ pub fn Evm(config: EvmConfig) type {
             const journal_mark = self.journal.next_snapshot_id;
             const database_depth = self.database.snapshot_depth();
 
+            if (comptime config.InspectorType != void) {
+                if (self.inspector) |insp| {
+                    if (comptime @hasDecl(config.InspectorType, "onCallEnter")) {
+                        insp.onCallEnter(self.depth, params);
+                    }
+                }
+            }
+
             var result = self.dispatchInnerCall(params, execution_gas);
-            if (self.database.failure) |err| self.failHost(err);
+            if (comptime @hasField(Db, "failure")) {
+                if (self.database.failure) |err| self.failHost(err);
+            }
+
+            if (comptime config.InspectorType != void) {
+                if (self.inspector) |insp| {
+                    if (comptime @hasDecl(config.InspectorType, "onCallExit")) {
+                        insp.onCallExit(self.depth, params, result);
+                    }
+                }
+            }
 
             const return_data: []const u8 = if (params.isCreate() and result.success) &.{} else result.output;
             self.set_return_data(return_data) catch |err| {
@@ -1388,11 +1472,30 @@ pub fn Evm(config: EvmConfig) type {
             hash: ?[32]u8,
         };
 
-        /// Run a precompile configured in `EvmConfig.precompile_overrides` when `address`
-        /// names one. These take precedence over the fork's standard precompiles, so a
-        /// chain can replace one or add its own (e.g. an L2's P256VERIFY at 0x100).
+        /// Run a precompile configured in `runtime_precompile_overrides` or
+        /// `EvmConfig.precompile_overrides` when `address` names one. Runtime overrides
+        /// take precedence over comptime overrides, which take precedence over the fork's
+        /// standard precompiles (e.g. Hardhat console.log, Foundry cheatcodes, L2 P256VERIFY).
         fn executePrecompileOverride(self: *Self, address: primitives.Address, input: []const u8, gas: u64) ?CallResult {
             if (comptime !config.enable_precompiles) return null;
+            if (self.runtime_precompile_overrides.len > 0) {
+                @branchHint(.cold);
+                for (self.runtime_precompile_overrides) |override| {
+                    if (address.equals(override.address)) {
+                        const output = override.execute(override.context, self.getCallArenaAllocator(), input, gas) catch |err| {
+                            log.debug("Runtime precompile override at {x} failed: {s}", .{ address.bytes, @errorName(err) });
+                            self.noteHostFailure(err);
+                            return CallResult.failed(0);
+                        };
+                        if (!output.success or output.gas_used > gas) return CallResult.failed(0);
+                        return CallResult{
+                            .success = true,
+                            .gas_left = gas - output.gas_used,
+                            .output = output.output,
+                        };
+                    }
+                }
+            }
             inline for (config.precompile_overrides) |override| {
                 if (address.equals(override.address)) {
                     const output = override.execute(self.getCallArenaAllocator(), input, gas) catch |err| {
@@ -2595,7 +2698,13 @@ pub fn Evm(config: EvmConfig) type {
         /// Get account balance
         pub fn get_balance(self: *Self, address: primitives.Address) u256 {
             if (config.disable_balance_checks) return 0;
-            const account = self.database.find_account(address.bytes) orelse return 0;
+            const account = if (comptime @hasDecl(Db, "find_account"))
+                self.database.find_account(address.bytes) orelse return 0
+            else
+                (self.database.get_account(address.bytes) catch |err| {
+                    self.failHost(err);
+                    return 0;
+                }) orelse return 0;
             return account.balance;
         }
 
@@ -2650,6 +2759,13 @@ pub fn Evm(config: EvmConfig) type {
                 .topics = topics_copy,
                 .data = data_copy,
             });
+            if (comptime config.InspectorType != void) {
+                if (self.inspector) |insp| {
+                    if (comptime @hasDecl(config.InspectorType, "onLog")) {
+                        insp.onLog(self.depth, contract_address, topics_copy, data_copy);
+                    }
+                }
+            }
         }
 
         /// Take ownership of the accumulated logs and clear internal storage
@@ -2869,7 +2985,13 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Get storage value
         pub fn get_storage(self: *Self, address: primitives.Address, slot: u256) u256 {
-            return self.database.read_storage(address.bytes, slot);
+            if (comptime @hasDecl(Db, "read_storage")) {
+                return self.database.read_storage(address.bytes, slot);
+            }
+            return self.database.get_storage(address.bytes, slot) catch |err| {
+                self.failHost(err);
+                return 0;
+            };
         }
 
         /// Set storage value

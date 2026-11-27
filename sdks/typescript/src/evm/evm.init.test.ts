@@ -271,9 +271,9 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 			evm = await GuillotineEvm.create(blockInfo, { tracing: true });
 			expect(evm).toBeDefined();
 
-			// Tracing handles support setters and calls, not state reads
+			// Tracing handles support both state writes and state reads natively.
 			await evm.setBalance(testAddress(1), U256.fromBigInt(5n));
-			await expect(evm.getBalance(testAddress(1))).rejects.toMatchObject({ type: "UnsupportedOperation" });
+			expect((await evm.getBalance(testAddress(1))).toBigInt()).toBe(5n);
 		});
 	});
 });

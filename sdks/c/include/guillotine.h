@@ -56,6 +56,11 @@ typedef uint8_t EvmConfiguration;
 #define GUILLOTINE_MAINNET 0
 #define GUILLOTINE_MAINNET_WITH_TRACER 1
 #define GUILLOTINE_TEST_MODE 2
+#define GUILLOTINE_CALL_TRACER 3
+#define GUILLOTINE_FORK_SHANGHAI 15
+#define GUILLOTINE_FORK_CANCUN 16
+#define GUILLOTINE_FORK_PRAGUE 17
+#define GUILLOTINE_FORK_OSAKA 18
 #define GUILLOTINE_CALL 0
 #define GUILLOTINE_CALLCODE 1
 #define GUILLOTINE_DELEGATECALL 2
@@ -131,6 +136,37 @@ typedef struct StateDumpFFI {
     const AccountStateFFI *accounts;
     size_t accounts_count;
 } StateDumpFFI;
+
+/* C ABI v2 structures (external host state + full transaction execution). */
+typedef struct GuillotineHostAccount {
+    uint8_t balance[32];
+    uint64_t nonce;
+    bool exists;
+} GuillotineHostAccount;
+
+typedef struct GuillotineHostVTable {
+    bool (*get_account)(void *ctx, const uint8_t address[20], GuillotineHostAccount *out);
+    bool (*get_storage)(void *ctx, const uint8_t address[20], const uint8_t key[32], uint8_t value_out[32]);
+    size_t (*get_code)(void *ctx, const uint8_t address[20], uint8_t *buf, size_t buf_len);
+} GuillotineHostVTable;
+
+typedef struct TxParamsFFI {
+    uint8_t tx_type;
+    uint8_t from[20];
+    uint8_t to[20];
+    bool has_to;
+    uint64_t nonce;
+    bool has_nonce;
+    uint64_t gas_limit;
+    uint8_t value[32];
+    uint8_t gas_price[32];
+    uint8_t max_fee_per_gas[32];
+    bool has_max_fee;
+    uint8_t max_priority_fee_per_gas[32];
+    const uint8_t *input;
+    size_t input_len;
+    bool disable_balance_check;
+} TxParamsFFI;
 
 typedef struct CBasicBlock { uint32_t start; uint32_t end; } CBasicBlock;
 typedef uint8_t CFusionType;
@@ -226,6 +262,14 @@ EvmResult * guillotine_simulate(EvmHandle * handle, const CallParams * params);
 StateDumpFFI * guillotine_dump_state(EvmHandle * handle);
 void guillotine_free_state_dump(StateDumpFFI * dump);
 StateDumpFFI * guillotine_dump_state_test(EvmHandle * handle);
+
+/* C ABI v2 additions (backwards-compatible). */
+EvmHandle * guillotine_evm_create_call_tracer(const BlockInfoFFI * block_info_ptr);
+EvmHandle * guillotine_evm_create_with_fork(const BlockInfoFFI * block_info_ptr, uint8_t hardfork_id);
+EvmHandle * guillotine_evm_create_with_host(const BlockInfoFFI * block_info_ptr, const GuillotineHostVTable * vtable, void * user_ctx);
+bool guillotine_set_block_info(EvmHandle * handle, const BlockInfoFFI * block_info_ptr);
+bool guillotine_get_nonce(EvmHandle * handle, const uint8_t address[20], uint64_t * nonce_out);
+EvmResult * guillotine_execute_tx(EvmHandle * handle, const TxParamsFFI * params);
 
 #ifdef __cplusplus
 }

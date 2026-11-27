@@ -45,7 +45,14 @@ const log = std.log.scoped(.c_api);
 const MainnetEvm = evm.MainnetEvm;
 const TracerEvm = evm.MainnetEvmWithTracer;
 const TestEvm = evm.TestEvm;
+const CallTracerEvm = evm.Evm(.{ .InspectorType = evm.CallTracer });
+const HostCallbackEvm = evm.Evm(.{ .DatabaseType = evm.CallbackHostDb });
+const ShanghaiEvm = evm.Evm(.{ .eips = .{ .hardfork = .SHANGHAI } });
+const CancunEvm = evm.Evm(.{ .eips = .{ .hardfork = .CANCUN } });
+const PragueEvm = evm.Evm(.{ .eips = .{ .hardfork = .PRAGUE } });
 const Database = evm.Database;
+const CallbackHostDb = evm.CallbackHostDb;
+const GuillotineHostVTable = evm.GuillotineHostVTable;
 const BlockInfo = evm.BlockInfo;
 const TransactionContext = evm.TransactionContext;
 const Account = evm.Account;
@@ -136,6 +143,26 @@ pub const EvmConfiguration = enum(u8) {
     mainnet = 0,
     mainnet_with_tracer = 1,
     test_mode = 2,
+    call_tracer = 3,
+};
+
+/// Full Ethereum transaction parameters for `guillotine_execute_tx`.
+pub const TxParamsFFI = extern struct {
+    tx_type: u8,
+    from: [20]u8,
+    to: [20]u8,
+    has_to: bool,
+    nonce: u64,
+    has_nonce: bool,
+    gas_limit: u64,
+    value: [32]u8,
+    gas_price: [32]u8,
+    max_fee_per_gas: [32]u8,
+    has_max_fee: bool,
+    max_priority_fee_per_gas: [32]u8,
+    input: ?[*]const u8,
+    input_len: usize,
+    disable_balance_check: bool,
 };
 
 /// State dump structures for FFI. Free with `guillotine_free_state_dump`.
@@ -204,13 +231,23 @@ fn inputSlice(ptr: ?[*]const u8, len: usize, comptime what: []const u8) ?[]const
 // HANDLE REGISTRY
 // ============================================================================
 
-/// Tagged owner of one EVM instance. The active tag is the handle's configuration, and
-/// every entry point dispatches on it, so a handle is never reinterpreted as another
-/// EVM type.
-const HandleBox = union(EvmConfiguration) {
-    mainnet: *MainnetEvm,
-    mainnet_with_tracer: *TracerEvm,
-    test_mode: *TestEvm,
+/// Tagged owner of one EVM instance. The active tag is the handle's concrete EVM type,
+/// and every entry point dispatches on it so a handle is never reinterpreted as another type.
+const HandleBox = struct {
+    variant: Variant,
+    call_tracer: ?*evm.CallTracer = null,
+
+    const Variant = union(enum) {
+        mainnet: *MainnetEvm,
+        mainnet_with_tracer: *TracerEvm,
+        test_mode: *TestEvm,
+        call_tracer: *CallTracerEvm,
+        host_callback: *HostCallbackEvm,
+        shanghai: *ShanghaiEvm,
+        cancun: *CancunEvm,
+        prague: *PragueEvm,
+    };
+    const VariantTag = std.meta.Tag(Variant);
 };
 
 var registry_mutex: std.Io.Mutex = .init;
@@ -262,12 +299,12 @@ fn toBlockInfo(info: *const BlockInfoFFI) BlockInfo {
 /// that do not fit are rejected rather than truncated.
 const ChainId = @FieldType(TransactionContext, "chain_id");
 
-fn EvmOf(comptime tag: EvmConfiguration) type {
-    return std.meta.Child(@FieldType(HandleBox, @tagName(tag)));
+fn EvmOf(comptime tag: HandleBox.VariantTag) type {
+    return std.meta.Child(@FieldType(HandleBox.Variant, @tagName(tag)));
 }
 
 /// Allocate a fresh database and EVM for `tag`. On error nothing leaks.
-fn createBox(comptime tag: EvmConfiguration, info: *const BlockInfoFFI) !*HandleBox {
+fn createBox(comptime tag: HandleBox.VariantTag, info: *const BlockInfoFFI) !*HandleBox {
     const E = EvmOf(tag);
     const chain_id = std.math.cast(ChainId, info.chain_id) orelse return error.ChainIdOutOfRange;
 
@@ -296,8 +333,50 @@ fn createBox(comptime tag: EvmConfiguration, info: *const BlockInfoFFI) !*Handle
     // Also set at run time, for builds whose root file is not this one (tests).
     instance.tracer.embedded = true;
 
+    var ct_ptr: ?*evm.CallTracer = null;
+    if (comptime tag == .call_tracer) {
+        const ct = try ffi_allocator.create(evm.CallTracer);
+        ct.* = evm.CallTracer.init(ffi_allocator);
+        instance.setInspector(ct);
+        ct_ptr = ct;
+    }
+    errdefer if (ct_ptr) |ct| {
+        ct.deinit();
+        ffi_allocator.destroy(ct);
+    };
+
     const box = try ffi_allocator.create(HandleBox);
-    box.* = @unionInit(HandleBox, @tagName(tag), instance);
+    box.* = .{
+        .variant = @unionInit(HandleBox.Variant, @tagName(tag), instance),
+        .call_tracer = ct_ptr,
+    };
+    return box;
+}
+
+fn createHostBox(info: *const BlockInfoFFI, vtable: GuillotineHostVTable, user_ctx: ?*anyopaque) !*HandleBox {
+    const chain_id = std.math.cast(ChainId, info.chain_id) orelse return error.ChainIdOutOfRange;
+    try evm.kzg_setup.init();
+
+    const db = try ffi_allocator.create(CallbackHostDb);
+    errdefer ffi_allocator.destroy(db);
+    db.* = CallbackHostDb.init(ffi_allocator, vtable, user_ctx);
+    errdefer db.deinit();
+
+    const instance = try ffi_allocator.create(HostCallbackEvm);
+    errdefer ffi_allocator.destroy(instance);
+    instance.* = try HostCallbackEvm.init(ffi_allocator, db, toBlockInfo(info), .{
+        .gas_limit = info.gas_limit,
+        .coinbase = Address{ .bytes = info.coinbase },
+        .chain_id = chain_id,
+        .blob_versioned_hashes = &.{},
+        .blob_base_fee = 0,
+    }, 0, Address.ZERO_ADDRESS);
+    errdefer instance.deinit();
+    instance.call_arena.tracer = @ptrCast(&instance.tracer);
+    instance.tracer.embedded = true;
+
+    const box = try ffi_allocator.create(HandleBox);
+    box.* = .{ .variant = .{ .host_callback = instance } };
     return box;
 }
 
@@ -309,7 +388,7 @@ const create_stack_size = 16 * 1024 * 1024;
 /// Run `createBox` on a thread with `create_stack_size` of stack and wait for it, so
 /// handle creation works from any caller stack. The EVM is built directly in heap
 /// memory by that thread; only a pointer comes back.
-fn createBoxOnLargeStack(comptime tag: EvmConfiguration, info: *const BlockInfoFFI) !*HandleBox {
+fn createBoxOnLargeStack(comptime tag: HandleBox.VariantTag, info: *const BlockInfoFFI) !*HandleBox {
     // A target without threads has no other stack to move to.
     if (comptime builtin.single_threaded or builtin.target.cpu.arch.isWasm()) return createBox(tag, info);
 
@@ -326,8 +405,35 @@ fn createBoxOnLargeStack(comptime tag: EvmConfiguration, info: *const BlockInfoF
     return job.result;
 }
 
+fn createHostBoxOnLargeStack(
+    info: *const BlockInfoFFI,
+    vtable: GuillotineHostVTable,
+    user_ctx: ?*anyopaque,
+) !*HandleBox {
+    if (comptime builtin.single_threaded or builtin.target.cpu.arch.isWasm()) {
+        return createHostBox(info, vtable, user_ctx);
+    }
+    const Job = struct {
+        info: *const BlockInfoFFI,
+        vtable: GuillotineHostVTable,
+        user_ctx: ?*anyopaque,
+        result: anyerror!*HandleBox = error.CreateDidNotRun,
+        fn run(job: *@This()) void {
+            job.result = createHostBox(job.info, job.vtable, job.user_ctx);
+        }
+    };
+    var job = Job{ .info = info, .vtable = vtable, .user_ctx = user_ctx };
+    const thread = try std.Thread.spawn(.{ .stack_size = create_stack_size }, Job.run, .{&job});
+    thread.join();
+    return job.result;
+}
+
 fn destroyBox(box: *HandleBox) void {
-    switch (box.*) {
+    if (box.call_tracer) |ct| {
+        ct.deinit();
+        ffi_allocator.destroy(ct);
+    }
+    switch (box.variant) {
         inline else => |instance| {
             const db = instance.database;
             instance.deinit();
@@ -339,24 +445,7 @@ fn destroyBox(box: *HandleBox) void {
     ffi_allocator.destroy(box);
 }
 
-fn createHandle(block_info: ?*const BlockInfoFFI, config: EvmConfiguration) ?*EvmHandle {
-    const info = block_info orelse {
-        setError("block_info is NULL", .{});
-        return null;
-    };
-    const box = switch (config) {
-        inline else => |tag| createBoxOnLargeStack(tag, info),
-    } catch |err| {
-        switch (err) {
-            error.ChainIdOutOfRange => setError(
-                "chain_id {d} exceeds the supported maximum {d}",
-                .{ info.chain_id, std.math.maxInt(ChainId) },
-            ),
-            else => setError("Failed to create EVM: {s}", .{@errorName(err)}),
-        }
-        return null;
-    };
-
+fn registerBox(box: *HandleBox) ?*EvmHandle {
     lockRegistry();
     defer unlockRegistry();
     if (!initialized) {
@@ -377,6 +466,31 @@ fn createHandle(block_info: ?*const BlockInfoFFI, config: EvmConfiguration) ?*Ev
     };
     next_handle_id = id + 1;
     return @ptrFromInt(id);
+}
+
+fn reportCreateError(info: *const BlockInfoFFI, err: anyerror) ?*EvmHandle {
+    switch (err) {
+        error.ChainIdOutOfRange => setError(
+            "chain_id {d} exceeds the supported maximum {d}",
+            .{ info.chain_id, std.math.maxInt(ChainId) },
+        ),
+        else => setError("Failed to create EVM: {s}", .{@errorName(err)}),
+    }
+    return null;
+}
+
+fn createHandle(block_info: ?*const BlockInfoFFI, config: EvmConfiguration) ?*EvmHandle {
+    const info = block_info orelse {
+        setError("block_info is NULL", .{});
+        return null;
+    };
+    const box = switch (config) {
+        .mainnet => createBoxOnLargeStack(.mainnet, info),
+        .mainnet_with_tracer => createBoxOnLargeStack(.mainnet_with_tracer, info),
+        .test_mode => createBoxOnLargeStack(.test_mode, info),
+        .call_tracer => createBoxOnLargeStack(.call_tracer, info),
+    } catch |err| return reportCreateError(info, err);
+    return registerBox(box);
 }
 
 // ============================================================================
@@ -402,10 +516,10 @@ export fn guillotine_cleanup() void {
     initialized = false;
 }
 
-/// Create an EVM with configuration 0 (mainnet), 1 (mainnet with tracer), or 2 (test mode).
+/// Create an EVM with configuration 0 (mainnet), 1 (structLogs tracer), 2 (test mode), or 3 (call tracer).
 export fn guillotine_evm_create_with_config(block_info: ?*const BlockInfoFFI, config: u8) ?*EvmHandle {
     const tag = std.enums.fromInt(EvmConfiguration, config) orelse {
-        setError("Invalid EVM configuration {d} (expected 0, 1, or 2)", .{config});
+        setError("Invalid EVM configuration {d} (expected 0, 1, 2, or 3)", .{config});
         return null;
     };
     return createHandle(block_info, tag);
@@ -425,6 +539,69 @@ export fn guillotine_evm_create_tracing(block_info: ?*const BlockInfoFFI) ?*EvmH
 
 export fn guillotine_evm_create_test(block_info: ?*const BlockInfoFFI) ?*EvmHandle {
     return createHandle(block_info, .test_mode);
+}
+
+/// Create a mainnet EVM with the structured `CallTracer` inspector attached.
+export fn guillotine_evm_create_call_tracer(block_info: ?*const BlockInfoFFI) ?*EvmHandle {
+    return createHandle(block_info, .call_tracer);
+}
+
+/// Create an EVM targeting a specific Ethereum hardfork (`15=SHANGHAI, 16=CANCUN, 17=PRAGUE, 18=OSAKA`).
+export fn guillotine_evm_create_with_fork(block_info: ?*const BlockInfoFFI, hardfork_id: u8) ?*EvmHandle {
+    const info = block_info orelse {
+        setError("block_info is NULL", .{});
+        return null;
+    };
+    const box = switch (hardfork_id) {
+        15 => createBoxOnLargeStack(.shanghai, info),
+        16 => createBoxOnLargeStack(.cancun, info),
+        17 => createBoxOnLargeStack(.prague, info),
+        18 => createBoxOnLargeStack(.mainnet, info),
+        else => {
+            setError(
+                "Unsupported hardfork_id {d} (expected 15=SHANGHAI, 16=CANCUN, 17=PRAGUE, 18=OSAKA)",
+                .{hardfork_id},
+            );
+            return null;
+        },
+    } catch |err| return reportCreateError(info, err);
+    return registerBox(box);
+}
+
+/// Create an Osaka mainnet EVM backed by caller-provided C state callbacks (`GuillotineHostVTable`).
+export fn guillotine_evm_create_with_host(
+    block_info: ?*const BlockInfoFFI,
+    vtable: ?*const GuillotineHostVTable,
+    user_ctx: ?*anyopaque,
+) ?*EvmHandle {
+    const info = block_info orelse {
+        setError("block_info is NULL", .{});
+        return null;
+    };
+    const vt = vtable orelse {
+        setError("vtable is NULL", .{});
+        return null;
+    };
+    const box = createHostBoxOnLargeStack(info, vt.*, user_ctx) catch |err| return reportCreateError(info, err);
+    return registerBox(box);
+}
+
+/// Update block context on an existing handle without recreating it or dropping `DispatchCache`.
+export fn guillotine_set_block_info(handle: ?*EvmHandle, block_info: ?*const BlockInfoFFI) bool {
+    const box = resolve(handle) orelse return false;
+    const info = block_info orelse {
+        setError("block_info is NULL", .{});
+        return false;
+    };
+    _ = std.math.cast(ChainId, info.chain_id) orelse {
+        setError("chain_id {d} exceeds the supported maximum {d}", .{ info.chain_id, std.math.maxInt(ChainId) });
+        return false;
+    };
+    const blk = toBlockInfo(info);
+    switch (box.variant) {
+        inline else => |instance| instance.setBlockInfo(blk),
+    }
+    return true;
 }
 
 /// Free a handle and all of its state. NULL is a no-op; an unknown or already destroyed
@@ -481,7 +658,7 @@ fn applyEdit(handle: ?*EvmHandle, address: ?*const [20]u8, edit: AccountEdit) bo
         setError("address is NULL", .{});
         return false;
     };
-    switch (box.*) {
+    switch (box.variant) {
         inline else => |instance| editAccount(instance, addr.*, edit) catch |err| {
             setError("Failed to update account {s}: {s}", .{ @tagName(edit), @errorName(err) });
             return false;
@@ -510,6 +687,26 @@ export fn guillotine_set_nonce_tracing(handle: ?*EvmHandle, address: ?*const [20
     return guillotine_set_nonce(handle, address, nonce);
 }
 
+export fn guillotine_get_nonce(handle: ?*EvmHandle, address: ?*const [20]u8, nonce_out: ?*u64) bool {
+    const box = resolve(handle) orelse return false;
+    const addr = address orelse {
+        setError("address is NULL", .{});
+        return false;
+    };
+    const out = nonce_out orelse {
+        setError("nonce_out is NULL", .{});
+        return false;
+    };
+    const acc = switch (box.variant) {
+        inline else => |instance| instance.database.get_account(addr.*),
+    } catch |err| {
+        setError("Failed to get nonce: {s}", .{@errorName(err)});
+        return false;
+    };
+    out.* = if (acc) |a| a.nonce else 0;
+    return true;
+}
+
 export fn guillotine_set_code(handle: ?*EvmHandle, address: ?*const [20]u8, code: ?[*]const u8, code_len: usize) bool {
     const slice = inputSlice(code, code_len, "code") orelse return false;
     return applyEdit(handle, address, .{ .code = slice });
@@ -534,7 +731,7 @@ export fn guillotine_get_balance(handle: ?*EvmHandle, address: ?*const [20]u8, b
         setError("balance_out is NULL", .{});
         return false;
     };
-    const balance = switch (box.*) {
+    const balance = switch (box.variant) {
         inline else => |instance| instance.database.get_balance(addr.*),
     } catch |err| {
         setError("Failed to get balance: {s}", .{@errorName(err)});
@@ -580,7 +777,7 @@ export fn guillotine_get_code(handle: ?*EvmHandle, address: ?*const [20]u8, code
         return false;
     };
     var designator: [evm.eips.DELEGATION_DESIGNATOR_LENGTH]u8 = undefined;
-    const code: []const u8 = switch (box.*) {
+    const code: []const u8 = switch (box.variant) {
         inline else => |instance| storedCode(instance, addr.*, &designator),
     } catch |err| {
         setError("Failed to get code: {s}", .{@errorName(err)});
@@ -624,7 +821,7 @@ export fn guillotine_set_storage(
     }
     const k = std.mem.readInt(u256, key.?, .big);
     const v = std.mem.readInt(u256, value.?, .big);
-    switch (box.*) {
+    switch (box.variant) {
         inline else => |instance| putStorage(instance, address.?.*, k, v) catch |err| {
             setError("Failed to set storage: {s}", .{@errorName(err)});
             return false;
@@ -645,7 +842,7 @@ export fn guillotine_get_storage(
         return false;
     }
     const k = std.mem.readInt(u256, key.?, .big);
-    const value = switch (box.*) {
+    const value = switch (box.variant) {
         inline else => |instance| instance.database.get_storage(address.?.*, k),
     } catch |err| {
         setError("Failed to get storage: {s}", .{@errorName(err)});
@@ -685,12 +882,26 @@ fn buildCallParams(comptime E: type, p: *const CallParams, input: []const u8) ?E
 
 const ExecMode = enum { call, simulate };
 
+fn attachCallTraceJson(out: *EvmResult, call_tracer: ?*evm.CallTracer) !void {
+    const ct = call_tracer orelse return;
+    if (ct.oom) return error.OutOfMemory;
+    const json = try ct.toJson(ffi_allocator);
+    if (json.len == 0) {
+        ffi_allocator.free(json);
+        return;
+    }
+    if (out.trace_json_len > 0) ffi_allocator.free(out.trace_json[0..out.trace_json_len]);
+    out.trace_json = json.ptr;
+    out.trace_json_len = json.len;
+}
+
 fn execute(
     instance: anytype,
     p: *const CallParams,
     input: []const u8,
     mode: ExecMode,
     include_trace: bool,
+    call_tracer: ?*evm.CallTracer,
 ) ?*EvmResult {
     const E = @TypeOf(instance.*);
     const call_params = buildCallParams(E, p, input) orelse return null;
@@ -709,6 +920,7 @@ fn execute(
             return null;
         };
     }
+    if (call_tracer) |ct| ct.clear();
     // The caller is the transaction origin for top-level calls and simulations alike
     // (ORIGIN opcode, nonce increment, fee accounting).
     instance.origin = Address{ .bytes = p.caller };
@@ -717,10 +929,16 @@ fn execute(
         .simulate => instance.simulate(call_params),
     };
     defer result.deinit(instance.allocator);
-    return convertCallResult(&result, include_trace) catch |err| {
+    const out = convertCallResult(&result, include_trace) catch |err| {
         setError("Failed to copy call result: {s}", .{@errorName(err)});
         return null;
     };
+    attachCallTraceJson(out, call_tracer) catch |err| {
+        freeResult(out);
+        setError("Failed to serialize call trace: {s}", .{@errorName(err)});
+        return null;
+    };
+    return out;
 }
 
 fn run(handle: ?*EvmHandle, params: ?*const CallParams, mode: ExecMode) ?*EvmResult {
@@ -734,10 +952,10 @@ fn run(handle: ?*EvmHandle, params: ?*const CallParams, mode: ExecMode) ?*EvmRes
         setError("Simulate only supports CALL type", .{});
         return null;
     }
-    return switch (box.*) {
-        .mainnet => |instance| execute(instance, p, input, mode, false),
-        .mainnet_with_tracer => |instance| execute(instance, p, input, mode, true),
-        .test_mode => |instance| execute(instance, p, input, mode, false),
+    return switch (box.variant) {
+        .mainnet_with_tracer => |instance| execute(instance, p, input, mode, true, null),
+        .call_tracer => |instance| execute(instance, p, input, mode, false, box.call_tracer),
+        inline else => |instance| execute(instance, p, input, mode, false, null),
     };
 }
 
@@ -754,6 +972,95 @@ export fn guillotine_call_tracing(handle: ?*EvmHandle, params: ?*const CallParam
 /// Execute a CALL without committing database changes.
 export fn guillotine_simulate(handle: ?*EvmHandle, params: ?*const CallParams) ?*EvmResult {
     return run(handle, params, .simulate);
+}
+
+fn convertTxResult(tx_res: *const evm.tx_runner.TxResult, call_tracer: ?*evm.CallTracer) !*EvmResult {
+    const out = try ffi_allocator.create(EvmResult);
+    out.* = emptyResult();
+    errdefer freeResult(out);
+
+    out.success = tx_res.success;
+    out.gas_left = tx_res.gas_left;
+    out.output = try dupeOrEmpty(u8, tx_res.output);
+    out.output_len = tx_res.output.len;
+
+    if (tx_res.logs.len > 0) {
+        const logs = try ffi_allocator.alloc(LogEntry, tx_res.logs.len);
+        for (logs) |*entry| entry.* = .{
+            .address = @splat(0),
+            .topics = emptyPtr([32]u8),
+            .topics_len = 0,
+            .data = emptyPtr(u8),
+            .data_len = 0,
+        };
+        out.logs = logs.ptr;
+        out.logs_len = logs.len;
+        for (logs, tx_res.logs) |*entry, item| {
+            entry.address = item.address.bytes;
+            if (item.topics.len > 0) {
+                const topics = try ffi_allocator.alloc([32]u8, item.topics.len);
+                for (topics, item.topics) |*dst, topic| std.mem.writeInt(u256, dst, topic, .big);
+                entry.topics = topics.ptr;
+                entry.topics_len = topics.len;
+            }
+            entry.data = try dupeOrEmpty(u8, item.data);
+            entry.data_len = item.data.len;
+        }
+    }
+    if (tx_res.created_address) |addr| {
+        out.created_address = addr.bytes;
+        out.has_created_address = true;
+    }
+    try attachCallTraceJson(out, call_tracer);
+    return out;
+}
+
+fn executeTxOnInstance(
+    instance: anytype,
+    p: *const TxParamsFFI,
+    input: []const u8,
+    call_tracer: ?*evm.CallTracer,
+) ?*EvmResult {
+    const E = @TypeOf(instance.*);
+    if (call_tracer) |ct| ct.clear();
+    const tx = evm.tx_runner.Transaction{
+        .tx_type = p.tx_type,
+        .from = Address{ .bytes = p.from },
+        .to = if (p.has_to) Address{ .bytes = p.to } else null,
+        .nonce = if (p.has_nonce) p.nonce else null,
+        .gas_limit = p.gas_limit,
+        .value = std.mem.readInt(u256, &p.value, .big),
+        .gas_price = std.mem.readInt(u256, &p.gas_price, .big),
+        .max_fee_per_gas = if (p.has_max_fee) std.mem.readInt(u256, &p.max_fee_per_gas, .big) else null,
+        .max_priority_fee_per_gas = std.mem.readInt(u256, &p.max_priority_fee_per_gas, .big),
+        .input = input,
+        .disable_balance_check = p.disable_balance_check,
+    };
+    var tx_res = evm.tx_runner.executeTx(E, ffi_allocator, instance, tx) catch |err| {
+        setError("Transaction failed: {s}", .{@errorName(err)});
+        return null;
+    };
+    defer tx_res.deinit(ffi_allocator);
+    return convertTxResult(&tx_res, call_tracer) catch |err| {
+        setError("Failed to copy transaction result: {s}", .{@errorName(err)});
+        return null;
+    };
+}
+
+/// Execute a full Ethereum transaction (intrinsic gas, EIP-1559 fee validation,
+/// EIP-7623 calldata floor, EIP-3529 refund cap, EIP-7825 gas cap, coinbase tip).
+/// Free the result with `guillotine_free_result`.
+export fn guillotine_execute_tx(handle: ?*EvmHandle, params: ?*const TxParamsFFI) ?*EvmResult {
+    const box = resolve(handle) orelse return null;
+    const p = params orelse {
+        setError("params is NULL", .{});
+        return null;
+    };
+    const input = inputSlice(p.input, p.input_len, "params.input") orelse return null;
+    return switch (box.variant) {
+        .call_tracer => |instance| executeTxOnInstance(instance, p, input, box.call_tracer),
+        inline else => |instance| executeTxOnInstance(instance, p, input, null),
+    };
 }
 
 fn emptyResult() EvmResult {
@@ -1016,7 +1323,7 @@ fn dumpState(instance: anytype) !*StateDumpFFI {
 /// Dump every touched, non-empty account. Free with `guillotine_free_state_dump`.
 export fn guillotine_dump_state(handle: ?*EvmHandle) ?*StateDumpFFI {
     const box = resolve(handle) orelse return null;
-    return switch (box.*) {
+    return switch (box.variant) {
         inline else => |instance| dumpState(instance),
     } catch |err| {
         setError("Failed to dump state: {s}", .{@errorName(err)});
