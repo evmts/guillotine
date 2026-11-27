@@ -41,6 +41,7 @@ test "ERC20 deployment gas consumption issue" {
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     // Create caller account with balance

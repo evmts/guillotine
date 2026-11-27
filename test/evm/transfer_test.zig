@@ -36,6 +36,7 @@ test "self-transfer should not change balance" {
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     // Create caller account with balance  
@@ -113,6 +114,7 @@ test "normal transfer between different accounts works correctly" {
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     // Create caller and target accounts

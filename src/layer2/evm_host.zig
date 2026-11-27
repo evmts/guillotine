@@ -234,10 +234,44 @@ pub const Host = struct {
         try self.database.set_account(address.bytes, account);
     }
 
+    /// Account destructions and EIP-161 empty-account pruning must observe
+    /// post-fee balances after the executor credits fee vaults and coinbase.
+    pub const Finalization = struct {
+        touches: std.ArrayList(Address) = .empty,
+        destructions: std.ArrayList(Address) = .empty,
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.touches.deinit(allocator);
+            self.destructions.deinit(allocator);
+        }
+    };
+
+    pub fn finalize(self: *Host, effects: *const Finalization) !void {
+        for (effects.destructions.items) |addr| {
+            try self.database.delete_account(addr.bytes);
+        }
+        // Every OP Stack spec (Bedrock onward) is past Spurious Dragon (EIP-161).
+        for (effects.touches.items) |addr| {
+            if (try self.database.get_account(addr.bytes)) |account| {
+                if (account.is_empty()) {
+                    try self.database.delete_account(addr.bytes);
+                }
+            }
+        }
+    }
+
     pub fn executeFrame(self: *Host, tx: executor.Transaction) !executor.Result {
+        var effects = Finalization{};
+        defer effects.deinit(self.allocator);
+        const result = try self.executeFrameBeforeFees(tx, &effects);
+        try self.finalize(&effects);
+        return result;
+    }
+
+    pub fn executeFrameBeforeFees(self: *Host, tx: executor.Transaction, effects: *Finalization) !executor.Result {
         const spec = self.spec orelse return error.NotConfigured;
         switch (spec) {
-            inline else => |comptime_spec| return self.runFrame(comptime_spec, tx),
+            inline else => |comptime_spec| return self.runFrame(comptime_spec, tx, effects),
         }
     }
 
@@ -270,7 +304,7 @@ pub const Host = struct {
     /// `process_transaction`: intrinsic checks, sender nonce, warm set, authorization
     /// list, message call, refunds and the EIP-7623 floor. The authorization list is
     /// applied outside the message call's snapshot, so a reverting call keeps it.
-    fn runFrame(self: *Host, comptime spec: OpSpecId, tx: executor.Transaction) !executor.Result {
+    fn runFrame(self: *Host, comptime spec: OpSpecId, tx: executor.Transaction, effects: *Finalization) !executor.Result {
         const hardfork = comptime spec.toEthHardfork();
         // `Evm.call` applies Osaka's transaction rules (EIP-7825 gas cap); this path
         // does not. Add them here before an OP spec maps to Osaka.
@@ -344,6 +378,7 @@ pub const Host = struct {
             // when the field is wide enough for every chain ID.
             .chain_id = if (comptime std.math.maxInt(@FieldType(evm.TransactionContext, "chain_id")) >=
                 std.math.maxInt(u64)) self.block.chain_id else 0,
+            .allow_gas_price_below_base_fee = true,
         };
         var instance = try Evm.init(self.allocator, self.database, block_info, context, price, tx.sender);
         defer instance.deinit();
@@ -403,11 +438,17 @@ pub const Host = struct {
         if (result.gas_left > execution_gas) return error.GasAccountingMismatch;
 
         if (result.success) {
-            // SELFDESTRUCT records the account; the transaction deletes it. From Cancun
-            // (Ecotone, EIP-6780) only contracts created in this transaction are recorded.
+            // SELFDESTRUCT records the account; deferred to `finalize` after fee settlement.
             var destructions = instance.self_destruct.iterator();
-            while (destructions.next()) |entry| try self.database.delete_account(entry.key_ptr.bytes);
+            while (destructions.next()) |entry| {
+                try effects.destructions.append(self.allocator, entry.key_ptr.*);
+            }
         }
+        // EIP-161 (every OP Stack spec is past Spurious Dragon): defer empty-account
+        // pruning until after fee settlement so touched fee recipients / coinbase observe
+        // their credited balances (preserving storage when credited, pruning when 0).
+        try instance.touchForPruning(self.block.coinbase);
+        std.mem.swap(std.ArrayList(Address), &effects.touches, &instance.consensus_touched);
 
         // EIP-3529 refund cap on the whole transaction's gas. The authorization refund
         // counts whatever the outcome; execution refunds only on success.
@@ -416,7 +457,10 @@ pub const Host = struct {
         const refund_cap = eips.eip_3529_gas_refund_cap(used_before_refund, refund_counter);
         const gas_used = @max(used_before_refund - refund_cap, floor);
 
-        const outcome: deposits.Outcome = if (result.success) .success else if (result.gas_left > 0) .revert else .halt;
+        // REVERT and an exceptional halt are told apart by what the frame did, never by
+        // the gas it left: `REVERT(0, 0)` can end with no gas at all, and that is
+        // still a revert.
+        const outcome: deposits.Outcome = if (result.success) .success else if (result.reverted) .revert else .halt;
         return .{ .outcome = outcome, .gas_used = gas_used };
     }
 };
@@ -433,6 +477,90 @@ const DepositTransactionParts = layer2.optimism.DepositTransactionParts;
 
 const ETHER: u256 = 1_000_000_000_000_000_000;
 const GWEI: u256 = 1_000_000_000;
+
+test "REVERT(0, 0) with exactly zero gas left is a revert; out-of-gas and INVALID are halts" {
+    // PUSH1 0, PUSH1 0, REVERT costs 6 gas. A gas limit of 21,006 leaves the frame
+    // with nothing when REVERT runs, which a gas-based guess reads as a halt.
+    const revert_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xfd };
+    // PUSH1 1, PUSH1 0, SSTORE, then the same REVERT with data left to spare.
+    const store_then_revert = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xfd };
+    const cases = [_]struct { code: []const u8, gas_limit: u64, outcome: deposits.Outcome }{
+        .{ .code = &revert_code, .gas_limit = 21_006, .outcome = .revert },
+        .{ .code = &revert_code, .gas_limit = 60_000, .outcome = .revert },
+        .{ .code = &store_then_revert, .gas_limit = 100_000, .outcome = .revert },
+        // One gas short of the block: out of gas before REVERT runs.
+        .{ .code = &revert_code, .gas_limit = 21_005, .outcome = .halt },
+        .{ .code = &revert_code, .gas_limit = 21_000, .outcome = .halt },
+        // INVALID and a stack underflow consume everything: halts.
+        .{ .code = &.{0xfe}, .gas_limit = 60_000, .outcome = .halt },
+        .{ .code = &.{0x01}, .gas_limit = 60_000, .outcome = .halt },
+        // SSTORE without its 20,000 gas: out of gas, a halt with gas spent.
+        .{ .code = &store_then_revert, .gas_limit = 30_000, .outcome = .halt },
+        .{ .code = &.{0x00}, .gas_limit = 21_000, .outcome = .success },
+    };
+    for (cases) |case| {
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        const target = Address.fromU256(0xC0DE);
+        try db.set_account(target.bytes, .{ .balance = 0, .code_hash = try db.set_code(case.code), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = hardforks.MAINNET.ecotone, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 1_000_000 });
+        defer host.deinit();
+
+        const sender = Address.fromU256(0xA11CE);
+        const tx = executor.Transaction{
+            .sender = sender,
+            .envelope = &.{ 0x7e, 0x01 },
+            .gas_limit = case.gas_limit,
+            .base_fee = 1_000_000,
+            .value = 0,
+            .to = target,
+            .deposit = DepositTransactionParts.deposit(@as([32]u8, @splat(7)), @intCast(ETHER), false),
+        };
+        const result = try executor.executeBase(&host, L1BlockInfo.empty(), 8453, hardforks.MAINNET.ecotone, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try testing.expectEqual(case.outcome, result.outcome);
+        // A revert and a halt both undo the frame's storage writes.
+        try testing.expectEqual(@as(u256, 0), try db.get_storage(target.bytes, 0));
+        // The deposit is included either way: its mint stays and the nonce moves.
+        try testing.expectEqual(ETHER, try db.get_balance(sender.bytes));
+        try testing.expectEqual(@as(u64, 1), try db.get_nonce(sender.bytes));
+        try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    }
+}
+
+test "EIP-161 on the OP Stack: an empty account touched by a deposit's call is deleted" {
+    // PUSH1 0 (x5), PUSH20 empty, PUSH2 0xffff, CALL, POP, STOP: a zero-value call.
+    const empty = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xE0} };
+    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73 } ++ empty.bytes ++ [_]u8{ 0x61, 0xff, 0xff, 0xf1, 0x50, 0x00 };
+    const untouched = Address.fromU256(0xE1E1);
+    for ([_]bool{ true, false }) |call_succeeds| {
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        const target = Address.fromU256(0xC0DE);
+        // The failing variant ends in INVALID instead of STOP.
+        var variant = code;
+        if (!call_succeeds) variant[variant.len - 1] = 0xfe;
+        try db.set_account(target.bytes, .{ .balance = 0, .code_hash = try db.set_code(&variant), .storage_root = @as([32]u8, @splat(0)), .nonce = 1 });
+        try db.set_account(empty.bytes, Account.zero());
+        try db.set_account(untouched.bytes, Account.zero());
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = hardforks.MAINNET.ecotone, .gas_limit = 30_000_000, .coinbase = constants.SEQUENCER_FEE_VAULT_ADDRESS, .base_fee = 1_000_000 });
+        defer host.deinit();
+
+        const tx = executor.Transaction{
+            .sender = Address.fromU256(0xA11CE),
+            .envelope = &.{ 0x7e, 0x01 },
+            .gas_limit = 200_000,
+            .base_fee = 1_000_000,
+            .value = 0,
+            .to = target,
+            .deposit = DepositTransactionParts.deposit(@as([32]u8, @splat(7)), @intCast(ETHER), false),
+        };
+        const result = try executor.executeBase(&host, L1BlockInfo.empty(), 8453, hardforks.MAINNET.ecotone, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+        try testing.expectEqual(if (call_succeeds) deposits.Outcome.success else deposits.Outcome.halt, result.outcome);
+        // Touched and empty: deleted, unless the touching frame failed.
+        try testing.expectEqual(!call_succeeds, db.account_exists(empty.bytes));
+        try testing.expect(db.account_exists(untouched.bytes));
+    }
+}
 
 test "Base Mainnet and Sepolia deposit: mint, value transfer, CALL, CHAINID as u64" {
     const cases = [_]struct { chain_id: u64, timestamp: u64 }{
@@ -1433,4 +1561,25 @@ test "a recursive call chain runs on the frame stack and keeps every frame's wri
     // 32 frames, each of which incremented the counter.
     try testing.expectEqual(@as(u256, 32), try db.get_storage(target.bytes, 0));
     try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+}
+
+test "touched empty fee recipient is pruned only after OP fee settlement" {
+    const timestamp = hardforks.MAINNET.ecotone;
+    const miner = constants.SEQUENCER_FEE_VAULT_ADDRESS;
+    const sender = Address.fromU256(256);
+    for ([_]u64{ 0, 1 }) |tip| {
+        var db = Database.init(testing.allocator);
+        defer db.deinit();
+        try db.set_balance(sender.bytes, ETHER);
+        try db.set_account(miner.bytes, Account.zero());
+        try db.set_storage(miner.bytes, 1, 17);
+        var host = Host.init(testing.allocator, &db, .{ .chain_id = 8453, .number = 1, .timestamp = timestamp, .gas_limit = 1_000_000, .coinbase = miner, .base_fee = 0 });
+        defer host.deinit();
+        const tx = executor.Transaction{ .sender = sender, .envelope = &.{1}, .gas_limit = 21_000, .fee = .{ .legacy = tip }, .base_fee = 0, .to = miner };
+        const result = try executor.executeBase(&host, L1BlockInfo.empty(), 8453, timestamp, tx, miner);
+        try testing.expectEqual(deposits.Outcome.success, result.outcome);
+        try testing.expectEqual(tip != 0, db.account_exists(miner.bytes));
+        try testing.expectEqual(@as(u256, 21_000) * tip, try db.get_balance(miner.bytes));
+        try testing.expectEqual(@as(u256, if (tip == 0) 0 else 17), try db.get_storage(miner.bytes, 1));
+    }
 }

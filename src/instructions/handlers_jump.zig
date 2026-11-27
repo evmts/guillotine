@@ -81,12 +81,19 @@ pub fn Handlers(FrameType: type) type {
             N.before(self, opcode, cursor, s, gas_before);
             const meta = cursor[1].jump_dest;
 
-            // Negative gas pattern: a single branch detects out of gas.
-            const gas = gas_before - @as(FrameType.GasType, @intCast(meta.gas));
-            if (gas < 0) {
+            // A u32 block charge fits directly in i64. On narrower targets the
+            // comparison must precede the signed conversion.
+            const gas = if (@bitSizeOf(FrameType.GasType) > @bitSizeOf(@TypeOf(meta.gas))) blk: {
+                const remaining = gas_before - @as(FrameType.GasType, meta.gas);
+                if (remaining < 0) {
+                    @branchHint(.unlikely);
+                    return N.exit(self, opcode, s, remaining, .out_of_gas);
+                }
+                break :blk remaining;
+            } else verified_ops.chargeGasChecked(FrameType.GasType, gas_before, meta.gas) orelse {
                 @branchHint(.unlikely);
-                return N.exit(self, opcode, s, gas, .out_of_gas);
-            }
+                return N.exit(self, opcode, s, 0, .out_of_gas);
+            };
 
             const size: u32 = @intCast(s.size(self));
             const min_stack: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;

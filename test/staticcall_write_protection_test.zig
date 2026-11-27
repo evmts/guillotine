@@ -39,6 +39,7 @@ test "STATICCALL should fail when attempting state modifications" {
         .gas_limit = 1000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var vm = try evm.Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);
@@ -124,6 +125,7 @@ test "STATICCALL should succeed for read-only operations" {
         .gas_limit = 1000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var vm = try evm.Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);

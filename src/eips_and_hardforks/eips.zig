@@ -2,6 +2,12 @@ const primitives = @import("voltaire");
 const AccessList = @import("../storage/access_list.zig").AccessList;
 const GasConstants = primitives.GasConstants;
 pub const Hardfork = primitives.Hardfork;
+const verified_ops = @import("../core/verified_ops.zig");
+
+/// EIP-2930: intrinsic gas of one access list address.
+pub const access_list_address_gas: u64 = 2400;
+/// EIP-2930: intrinsic gas of one access list storage key.
+pub const access_list_storage_key_gas: u64 = 1900;
 
 /// EIP Override entry - allows enabling/disabling specific EIPs
 pub const EipOverride = struct {
@@ -725,18 +731,28 @@ pub const Eips = struct {
         }
     }
 
-    /// Actual burned blob fee for a transaction.
-    pub fn blob_gas_cost(self: Self, base_fee: u256, blob_count: usize) u256 {
-        if (!self.is_eip_active(4844)) return 0;
-        const blob_gas = @as(u256, blob_count) * primitives.Blob.BLOB_GAS_PER_BLOB;
-        return blob_gas *| base_fee;
+    /// Blob gas of `blob_count` blobs, or null when it does not fit in 64 bits.
+    fn total_blob_gas(blob_count: usize) ?u64 {
+        const product = @mulWithOverflow(@as(u64, blob_count), @as(u64, primitives.Blob.BLOB_GAS_PER_BLOB));
+        if (product[1] != 0) return null;
+        return product[0];
     }
 
-    /// Maximum blob cost used only for the upfront affordability check.
-    pub fn max_blob_gas_cost(self: Self, max_fee_per_blob_gas: u256, blob_count: usize) u256 {
+    /// Actual burned blob fee for a transaction: `blob_gas * base_fee`. Null when
+    /// the product does not fit in 256 bits. Such a fee cannot be paid, so the
+    /// transaction is invalid; the product is never clamped.
+    pub fn blob_gas_cost(self: Self, base_fee: u256, blob_count: usize) ?u256 {
         if (!self.is_eip_active(4844)) return 0;
-        const blob_gas = @as(u256, blob_count) * primitives.Blob.BLOB_GAS_PER_BLOB;
-        return blob_gas *| max_fee_per_blob_gas;
+        const blob_gas = total_blob_gas(blob_count) orelse return null;
+        return verified_ops.checkedBlobGasCost(blob_gas, base_fee);
+    }
+
+    /// Maximum blob cost used only for the upfront affordability check:
+    /// `blob_gas * max_fee_per_blob_gas`, or null when it overflows 256 bits.
+    pub fn max_blob_gas_cost(self: Self, max_fee_per_blob_gas: u256, blob_count: usize) ?u256 {
+        if (!self.is_eip_active(4844)) return 0;
+        const blob_gas = total_blob_gas(blob_count) orelse return null;
+        return verified_ops.checkedBlobGasCost(blob_gas, max_fee_per_blob_gas);
     }
 
     /// `calc_excess_blob_gas`: excess blob gas of the next block from its parent header.
@@ -798,9 +814,37 @@ pub const Eips = struct {
         return GasConstants.wordCount(input_len) * GasConstants.InitcodeWordGas;
     }
 
-    /// Get intrinsic gas cost for a transaction depending on whether it creates a contract.
-    pub fn intrinsic_gas_cost(_: Self, is_create: bool) u64 {
-        return if (is_create) GasConstants.TxGasContractCreation else GasConstants.TxGas;
+    /// Base intrinsic gas of a transaction: 21,000, plus 32,000 for a contract
+    /// creation from Homestead on. The creation surcharge is EIP-2; a Frontier
+    /// creation transaction pays 21,000 like any other.
+    pub fn intrinsic_gas_cost(self: Self, is_create: bool) u64 {
+        if (is_create and self.is_eip_active(2)) return GasConstants.TxGasContractCreation;
+        return GasConstants.TxGas;
+    }
+
+    /// EIP-2930 intrinsic gas of an access list with `address_count` addresses and
+    /// `storage_key_count` storage keys in total. Saturates instead of wrapping: a
+    /// saturated cost exceeds every gas limit.
+    pub fn access_list_gas_cost(self: Self, address_count: usize, storage_key_count: usize) u64 {
+        if (!self.is_eip_active(2930)) return 0;
+        const addresses = @as(u64, address_count) *| access_list_address_gas;
+        const keys = @as(u64, storage_key_count) *| access_list_storage_key_gas;
+        return addresses +| keys;
+    }
+
+    /// EIP-7702 intrinsic gas of `authorization_count` authorization tuples
+    /// (PER_EMPTY_ACCOUNT_COST each, valid or not). Saturates instead of wrapping.
+    pub fn authorization_list_gas_cost(self: Self, authorization_count: usize) u64 {
+        if (!self.is_eip_active(7702)) return 0;
+        const per_tuple: u64 = @intCast(self.eip_7702_per_empty_account_cost());
+        return @as(u64, authorization_count) *| per_tuple;
+    }
+
+    /// EIP-1559 admission of a transaction priced with a single gas price (legacy
+    /// and EIP-2930 transactions): from London the price must cover the base fee.
+    pub fn validate_gas_price(self: Self, base_fee_per_gas: u256, gas_price: u256) error{GasPriceBelowBaseFee}!void {
+        if (!self.is_eip_active(1559)) return;
+        if (gas_price < base_fee_per_gas) return error.GasPriceBelowBaseFee;
     }
 
     /// Get calldata gas cost, including EIP-3860 initcode word metering for creation transactions.

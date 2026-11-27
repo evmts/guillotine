@@ -15,6 +15,7 @@ const precompiles = @import("precompiles");
 const kzg_setup = @import("crypto").kzg_setup;
 const EvmConfig = @import("evm_config.zig").EvmConfig;
 const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
+const AuthorizationProcessorFor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessorFor;
 const GrowingArenaAllocator = @import("evm_arena_allocator.zig").GrowingArenaAllocator;
 const native_stack = @import("native_stack.zig");
 const call_result_module = @import("frame/call_result.zig");
@@ -185,6 +186,16 @@ pub fn Evm(config: EvmConfig) type {
         /// Addresses that calls, not the host, added to `touched_addresses`.
         /// `resetTouched` removes exactly these.
         transaction_touched: std.ArrayList(primitives.Address) = .empty,
+        /// EIP-161 (Spurious Dragon+): the accounts the current transaction touched
+        /// in the consensus sense: targets of CALL and STATICCALL (zero-value calls
+        /// included), SELFDESTRUCT beneficiaries and the block's coinbase. Every one
+        /// of them that is empty when the transaction ends is deleted from state.
+        ///
+        /// The list is an append-only log with one checkpoint per call: a call that
+        /// fails truncates it back, so a reverted touch deletes nothing. It is kept
+        /// apart from `touched_addresses`, which is diagnostic, never rolls back and
+        /// spans transactions. Empty before Spurious Dragon.
+        consensus_touched: std.ArrayList(primitives.Address) = .empty,
 
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
         /// Tracer for debugging and logging - can be accessed via evm.tracer or frame.evm_ptr.tracer
@@ -503,6 +514,7 @@ pub fn Evm(config: EvmConfig) type {
             self.logs.deinit(self.allocator);
             self.touched_addresses.deinit();
             self.transaction_touched.deinit(self.allocator);
+            self.consensus_touched.deinit(self.allocator);
             self.clearTouchedStorage();
             self.touched_storage.deinit();
             self.frame_memory.deinit();
@@ -524,9 +536,10 @@ pub fn Evm(config: EvmConfig) type {
             try self.journal.record_balance_change(snapshot_id, from, from_account.balance);
             try self.journal.record_balance_change(snapshot_id, to, to_account.balance);
 
-            // Track addresses for state dump
+            // Track addresses for state dump and EIP-161 consensus pruning
             try self.touchAddress(from);
             try self.touchAddress(to);
+            try self.touchForPruning(from);
 
             from_account.balance -= value;
             to_account.balance = credited;
@@ -909,24 +922,95 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Copy the transaction's logs out of the call arena into `self.allocator`.
         fn copyLogs(self: *Self) ![]const call_result_module.Log {
-            const Log = call_result_module.Log;
-            const copies = try self.allocator.alloc(Log, self.logs.items.len);
-            var copied: usize = 0;
-            errdefer {
-                for (copies[0..copied]) |entry| {
-                    self.allocator.free(entry.topics);
-                    self.allocator.free(entry.data);
+            return call_result_module.cloneLogs(self.allocator, self.logs.items);
+        }
+
+        /// True from Spurious Dragon on: EIP-161 deletes touched empty accounts.
+        const eip161_active = config.eips.hardfork.isAtLeast(.SPURIOUS_DRAGON);
+        /// RIPEMD-160 precompile. Its touch survives a failed nested call (see `revertTouches`).
+        const ripemd160_address = primitives.Address.fromU256(3);
+
+        /// Record `address` as touched by the current transaction for EIP-161. The
+        /// record belongs to the innermost running call and is dropped again if that
+        /// call fails. Recording an account that is not empty, or does not exist, is
+        /// harmless: emptiness is decided when the transaction ends.
+        pub fn touchForPruning(self: *Self, address: primitives.Address) !void {
+            if (comptime !eip161_active) return;
+            const touched = self.consensus_touched.items;
+            if (touched.len > 0 and touched[touched.len - 1].equals(address)) return;
+            try self.consensus_touched.append(self.allocator, address);
+        }
+
+        /// Undo the touches recorded since `mark`: the call that made them failed.
+        ///
+        /// One touch is exempt. In mainnet block 2,675,119 the empty account at 0x03
+        /// (RIPEMD-160) was deleted although the call that touched it ran out of gas,
+        /// and every client keeps that behavior: a failed nested call still passes a
+        /// touch of 0x03 on to its caller (execution-specs `incorporate_child_on_error`).
+        /// A failed transaction keeps no touches at all (`process_message_call`).
+        fn revertTouches(self: *Self, mark: usize, nested: bool) void {
+            if (comptime !eip161_active) return;
+            const reverted = self.consensus_touched.items[mark..];
+            if (reverted.len == 0) return;
+            var keep_ripemd160 = false;
+            if (nested) {
+                for (reverted) |address| {
+                    if (address.equals(ripemd160_address)) {
+                        keep_ripemd160 = true;
+                        break;
+                    }
                 }
-                self.allocator.free(copies);
             }
-            for (self.logs.items) |entry| {
-                const topics = try self.allocator.dupe(u256, entry.topics);
-                errdefer self.allocator.free(topics);
-                const data = try self.allocator.dupe(u8, entry.data);
-                copies[copied] = .{ .address = entry.address, .topics = topics, .data = data };
-                copied += 1;
+            self.consensus_touched.shrinkRetainingCapacity(mark);
+            // The slot was in use a moment ago, so the capacity is there.
+            if (keep_ripemd160) self.consensus_touched.appendAssumeCapacity(ripemd160_address);
+        }
+
+        /// EIP-161 state clearing at the end of a transaction: delete every touched
+        /// account that is empty (nonce 0, balance 0, no code). An account that was
+        /// never touched, or whose touch was reverted, is kept even when empty.
+        /// `call` does this itself; a host that drives `inner_call` directly calls
+        /// it once the transaction's fee payments are made.
+        pub fn pruneTouchedEmptyAccounts(self: *Self) !void {
+            if (comptime !eip161_active) return;
+            for (self.consensus_touched.items) |address| {
+                const account = (try self.database.get_account(address.bytes)) orelse continue;
+                if (account.is_empty()) try self.database.delete_account(address.bytes);
             }
-            return copies;
+            self.consensus_touched.clearRetainingCapacity();
+        }
+
+        /// EIP-3607: true when `account` cannot originate a transaction because it
+        /// has code. A delegated EOA (EIP-7702) can from Prague on; before Prague the
+        /// 23-byte designator is ordinary code.
+        fn senderHasCode(account: Account) bool {
+            if (Account.is_code_hash_present(account.code_hash)) return true;
+            if (account.delegated_address == null) return false;
+            return comptime !config.eips.hardfork.isAtLeast(.PRAGUE);
+        }
+
+        /// Apply the transaction's EIP-7702 authorization list (execution-specs
+        /// Prague `set_delegation`) and warm every recovered authority. Invalid tuples
+        /// are skipped. Returns the refund for authorities that already existed.
+        /// The list's intrinsic gas is already part of the transaction's intrinsic cost.
+        fn applyAuthorizationList(self: *Self) !u64 {
+            const list = self.context.authorization_list;
+            if (list.len == 0) return 0;
+            var unmetered: i64 = std.math.maxInt(i64);
+            var processor = AuthorizationProcessorFor(Db){
+                .db = self.database,
+                .chain_id = self.block_info.chain_id,
+                .gas_remaining = &unmetered,
+                .eips = config.eips,
+            };
+            var applied = try processor.processAuthorizationListWithResults(self.allocator, list);
+            defer applied.deinit(self.allocator);
+            for (applied.results) |tuple| {
+                const authority = tuple.authority orelse continue;
+                try self.access_list.pre_warm_addresses(&[_]primitives.Address{authority});
+                try self.touchAddress(authority);
+            }
+            return std.math.cast(u64, applied.refund) orelse error.AuthorizationRefundOutOfRange;
         }
 
         fn resetTransactionState(self: *Self) void {
@@ -937,6 +1021,7 @@ pub fn Evm(config: EvmConfig) type {
             self.logs.clearRetainingCapacity();
             self.created_contracts.clear();
             self.self_destruct.clear();
+            self.consensus_touched.clearRetainingCapacity();
             self.database.clear_transient_storage();
             self.call_stack = @as([config.max_call_depth + 1]CallStackEntry, @splat(CallStackEntry{
                 .caller = primitives.Address.ZERO_ADDRESS,
@@ -970,11 +1055,21 @@ pub fn Evm(config: EvmConfig) type {
                 log.warn("Failed to pre-warm addresses: {s}", .{@errorName(err)});
                 return self.hostFailureResult(err);
             };
-            self.warmDelegatedTarget(params.get_to()) catch |err| {
-                @branchHint(.cold);
-                log.warn("Failed to pre-warm the delegate of the target: {s}", .{@errorName(err)});
-                return self.hostFailureResult(err);
-            };
+            // EIP-2930: every address and storage key of the access list starts warm.
+            for (self.context.access_list) |entry| {
+                self.access_list.pre_warm_addresses(&[_]primitives.Address{entry.address}) catch |err| {
+                    @branchHint(.cold);
+                    log.warn("Failed to pre-warm an access list address: {s}", .{@errorName(err)});
+                    return self.hostFailureResult(err);
+                };
+                for (entry.storage_keys) |key| {
+                    _ = self.access_list.access_storage_slot(entry.address, key) catch |err| {
+                        @branchHint(.cold);
+                        log.warn("Failed to pre-warm an access list storage key: {s}", .{@errorName(err)});
+                        return self.hostFailureResult(err);
+                    };
+                }
+            }
 
             if (comptime config.eips.hardfork.isAtLeast(.BERLIN)) {
                 const last = comptime precompiles.lastContiguousPrecompile(config.eips.hardfork);
@@ -1025,7 +1120,16 @@ pub fn Evm(config: EvmConfig) type {
             const intrinsic_gas_cost = config.eips.intrinsic_gas_cost(params.isCreate());
             const calldata_gas_cost = config.eips.calldata_gas_cost(calldata_tokens, params.isCreate(), input.len);
             const floor_gas_cost = config.eips.floor_gas_cost(calldata_tokens);
-            const initial_gas_cost = intrinsic_gas_cost + calldata_gas_cost;
+            const access_list = self.context.access_list;
+            const authorization_list = self.context.authorization_list;
+            var access_list_keys: usize = 0;
+            for (access_list) |entry| access_list_keys +|= entry.storage_keys.len;
+            // 2,400 per access list address, 1,900 per storage key (EIP-2930) and
+            // 25,000 per authorization tuple (EIP-7702). The sums saturate: a
+            // saturated cost is above every gas limit.
+            const list_gas_cost = config.eips.access_list_gas_cost(access_list.len, access_list_keys) +|
+                config.eips.authorization_list_gas_cost(authorization_list.len);
+            const initial_gas_cost = intrinsic_gas_cost +| calldata_gas_cost +| list_gas_cost;
 
             if (gas_limit < initial_gas_cost) {
                 @branchHint(.cold);
@@ -1041,10 +1145,23 @@ pub fn Evm(config: EvmConfig) type {
                     log.debug("Transaction gas limit refused: {s}", .{@errorName(err)});
                     return .{ .early_exit = self.rejectTransaction("gas limit exceeds the EIP-7825 transaction gas cap") };
                 };
+            }
+            const execution_gas_limit = gas_limit - initial_gas_cost;
+
+            // EIP-1559: a transaction that states its fee caps must be able to pay the
+            // base fee, and cannot tip more than its cap. A transaction without caps
+            // (legacy, EIP-2930) is priced by its gas price, which from London must
+            // cover the base fee as well: the base fee is burned, so a lower price
+            // cannot be paid. Only a simulation may opt out, and only explicitly.
+            if (comptime !config.disable_gas_checks) {
                 if (self.context.max_fee_per_gas) |max_fee_per_gas| {
                     config.eips.validate_fee_caps(self.block_info.base_fee, max_fee_per_gas, self.context.max_priority_fee_per_gas) catch |err| switch (err) {
                         error.MaxFeeBelowBaseFee => return .{ .early_exit = self.rejectTransaction("max fee per gas is below the block base fee (EIP-1559)") },
                         error.PriorityFeeAboveMaxFee => return .{ .early_exit = self.rejectTransaction("max priority fee per gas exceeds max fee per gas (EIP-1559)") },
+                    };
+                } else if (!self.context.allow_gas_price_below_base_fee) {
+                    config.eips.validate_gas_price(self.block_info.base_fee, self.gas_price) catch |err| switch (err) {
+                        error.GasPriceBelowBaseFee => return .{ .early_exit = self.rejectTransaction("gas price is below the block base fee (EIP-1559)") },
                     };
                 }
             }
@@ -1063,7 +1180,7 @@ pub fn Evm(config: EvmConfig) type {
                 return .{ .early_exit = self.rejectTransaction("blob transaction fields are invalid (EIP-4844)") };
             };
 
-            return self.chargeOriginUpfront(params, gas_limit, gas_limit - initial_gas_cost, floor_gas_cost, blob_count);
+            return self.chargeOriginUpfront(params, gas_limit, execution_gas_limit, floor_gas_cost, blob_count);
         }
 
         fn chargeOriginUpfront(
@@ -1074,8 +1191,17 @@ pub fn Evm(config: EvmConfig) type {
             floor_gas_cost: u64,
             blob_count: usize,
         ) PreflightOutcome {
-            const max_blob_gas_cost = config.eips.max_blob_gas_cost(self.context.max_fee_per_blob_gas, blob_count);
-            const blob_gas_cost: u256 = config.eips.blob_gas_cost(self.block_info.blob_base_fee, blob_count);
+            // EIP-4844: `blob_gas * max_fee_per_blob_gas` is what the sender must be
+            // able to afford. A product that overflows 256 bits is unpayable, so the
+            // transaction is invalid.
+            const max_blob_gas_cost = config.eips.max_blob_gas_cost(
+                self.context.max_fee_per_blob_gas,
+                blob_count,
+            ) orelse return .{ .early_exit = self.rejectTransaction("blob gas times max fee per blob gas overflows (EIP-4844)") };
+            const blob_gas_cost: u256 = config.eips.blob_gas_cost(
+                self.block_info.blob_base_fee,
+                blob_count,
+            ) orelse return .{ .early_exit = self.rejectTransaction("blob gas times blob base fee overflows (EIP-4844)") };
             const gas_cost = @mulWithOverflow(@as(u256, gas_limit), self.gas_price);
             const upfront_cost = @addWithOverflow(gas_cost[0], blob_gas_cost);
             if (gas_cost[1] != 0 or upfront_cost[1] != 0) {
@@ -1107,6 +1233,16 @@ pub fn Evm(config: EvmConfig) type {
                 @branchHint(.cold);
                 return .{ .early_exit = self.rejectTransaction("sender nonce is at the EIP-2681 limit") };
             }
+            // A transaction is valid only at the sender's current nonce. A context
+            // without a nonce is a caller that does not track nonces.
+            if (self.context.tx_nonce) |tx_nonce| {
+                if (tx_nonce < origin_before.nonce) return .{ .early_exit = self.rejectTransaction("transaction nonce is below the sender nonce") };
+                if (tx_nonce > origin_before.nonce) return .{ .early_exit = self.rejectTransaction("transaction nonce is above the sender nonce") };
+            }
+            // EIP-3607: an account with code cannot originate a transaction.
+            if (senderHasCode(origin_before)) {
+                return .{ .early_exit = self.rejectTransaction("sender has code (EIP-3607)") };
+            }
 
             const tx_snapshot_depth = self.database.snapshot_depth();
             const tx_snapshot = self.database.create_snapshot() catch |err| {
@@ -1136,6 +1272,24 @@ pub fn Evm(config: EvmConfig) type {
             };
             self.tx_sender_nonce_incremented = true;
 
+            // EIP-7702: apply the authorization list after the sender nonce increment
+            // (a self-sponsored tuple sees the new nonce) and before execution. Its
+            // changes are part of the transaction even when the call reverts, and its
+            // refund counts whatever the outcome: it is in the counter before the
+            // call starts, where a failing call's rollback leaves it.
+            self.gas_refund_counter = self.applyAuthorizationList() catch |err| {
+                @branchHint(.cold);
+                log.warn("Failed to apply the authorization list: {s}", .{@errorName(err)});
+                return .{ .early_exit = self.abortTransaction(tx_snapshot_depth, err) };
+            };
+            // EIP-7702: the delegate of a delegated transaction target starts warm.
+            // The authorization list can change the delegation, so this follows it.
+            self.warmDelegatedTarget(params.get_to()) catch |err| {
+                @branchHint(.cold);
+                log.warn("Failed to pre-warm the delegate of the target: {s}", .{@errorName(err)});
+                return .{ .early_exit = self.abortTransaction(tx_snapshot_depth, err) };
+            };
+
             return .{ .ready = .{
                 .execution_gas_limit = execution_gas_limit,
                 .floor_gas_cost = floor_gas_cost,
@@ -1146,10 +1300,11 @@ pub fn Evm(config: EvmConfig) type {
         }
 
         fn settleTransactionFees(self: *Self, result: *CallResult, gas_limit: u64, preflight: TxPreflight) ?CallResult {
-            if (result.success) {
-                result.gas_left = config.eips.eip_3529_apply_gas_refund(gas_limit, result.gas_left, self.gas_refund_counter);
-                self.gas_refund_counter = 0;
-            }
+            // Apply the refund counter under the EIP-3529 cap. A call that failed left
+            // only what the counter held before it started: the EIP-7702 authorization
+            // refund, or nothing.
+            result.gas_left = config.eips.eip_3529_apply_gas_refund(gas_limit, result.gas_left, self.gas_refund_counter);
+            self.gas_refund_counter = 0;
             var gas_consumed = gas_limit - result.gas_left;
             if (gas_consumed < preflight.floor_gas_cost) {
                 gas_consumed = preflight.floor_gas_cost;
@@ -1185,7 +1340,11 @@ pub fn Evm(config: EvmConfig) type {
             else
                 self.gas_price;
             const coinbase_reward = reward_per_gas * @as(u256, gas_consumed);
-            if (coinbase_reward > 0) {
+            // Before EIP-161 the fee payment creates the coinbase account even when it
+            // pays nothing (execution-specs frontier `process_transaction`). From
+            // Spurious Dragon a zero payment writes nothing, and the coinbase is
+            // touched instead: it is deleted below if it is empty.
+            if (coinbase_reward > 0 or comptime !eip161_active) {
                 var coinbase = self.database.get_account(self.block_info.coinbase.bytes) catch |err| {
                     @branchHint(.cold);
                     result.deinit(self.allocator);
@@ -1218,6 +1377,21 @@ pub fn Evm(config: EvmConfig) type {
                     return self.abortTransaction(preflight.tx_snapshot_depth, err);
                 };
             }
+            // EIP-161: the coinbase is touched by every transaction, and every touched
+            // account that is empty now is deleted (`destroy_touched_empty_accounts`).
+            // Touches of calls that failed were already dropped.
+            self.touchForPruning(self.block_info.coinbase) catch |err| {
+                @branchHint(.cold);
+                log.warn("Failed to record the coinbase touch: {s}", .{@errorName(err)});
+                result.deinit(self.allocator);
+                return self.abortTransaction(preflight.tx_snapshot_depth, err);
+            };
+            self.pruneTouchedEmptyAccounts() catch |err| {
+                @branchHint(.cold);
+                log.warn("Failed to delete touched empty accounts: {s}", .{@errorName(err)});
+                result.deinit(self.allocator);
+                return self.abortTransaction(preflight.tx_snapshot_depth, err);
+            };
             return null;
         }
 
@@ -1311,6 +1485,23 @@ pub fn Evm(config: EvmConfig) type {
                 };
             };
 
+            // EIP-2930 and EIP-7702 transaction fields exist only from their forks on.
+            // Using one earlier makes the transaction invalid, whatever it would do.
+            if (self.context.access_list.len != 0 and comptime !config.eips.is_eip_active(2930)) {
+                return self.rejectTransaction("access lists are not available before Berlin (EIP-2930)");
+            }
+            if (self.context.is_set_code_transaction or self.context.authorization_list.len != 0) {
+                if (comptime !config.eips.is_eip_active(7702)) {
+                    return self.rejectTransaction("authorization lists are not available before Prague (EIP-7702)");
+                }
+                if (params.isCreate() or params.get_to() == null) {
+                    return self.rejectTransaction("a set-code transaction cannot create a contract (EIP-7702)");
+                }
+                if (self.context.authorization_list.len == 0) {
+                    return self.rejectTransaction("a set-code transaction needs at least one authorization (EIP-7702)");
+                }
+            }
+
             defer self.resetTransactionState();
 
             if (self.prewarmTransactionAccessList(params)) |early| return early;
@@ -1401,6 +1592,11 @@ pub fn Evm(config: EvmConfig) type {
             const logs_before = self.logs.items.len;
             const access_mark = self.access_list.checkpoint();
             const destructions_mark = self.self_destruct.checkpoint();
+            // EIP-161: message calls record their target inside executeCall (after
+            // balance checks) and executeStaticcall, sitting above touched_mark so
+            // failed frames drop their touches (subject to the RIPEMD160 nested-call
+            // exception in revertTouches).
+            const touched_mark = self.consensus_touched.items.len;
             const journal_mark = self.journal.next_snapshot_id;
             const database_depth = self.database.snapshot_depth();
 
@@ -1447,6 +1643,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.gas_refund_counter = refund_before;
                 self.logs.shrinkRetainingCapacity(logs_before);
                 self.self_destruct.revert(destructions_mark);
+                self.revertTouches(touched_mark, self.depth > 0);
                 if (!params.isCreate()) self.access_list.revert(access_mark);
             }
 
@@ -1581,6 +1778,10 @@ pub fn Evm(config: EvmConfig) type {
                     return CallResult.failed(if (err == error.InsufficientBalance) params.gas else 0);
                 };
             }
+
+            // EIP-161: record target touch only after balance transfer succeeds so an
+            // unfunded CALL never records a premature touch (including to RIPEMD160 0x03).
+            try self.touchForPruning(params.to);
 
             // Before EIP-161 (Spurious Dragon) every message call creates its target
             // account if missing (execution-specs frontier `process_message` ->
@@ -1789,6 +1990,7 @@ pub fn Evm(config: EvmConfig) type {
         }) !CallResult {
             const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
+            try self.touchForPruning(params.to);
 
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, true, snapshot_id) catch |err| {
                 @branchHint(.cold);
@@ -2528,7 +2730,11 @@ pub fn Evm(config: EvmConfig) type {
                 error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable, error.WriteProtection => log.debug("Frame execution halted: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code_len, gas, self.depth }),
                 else => {
                     log.warn("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code_len, gas, self.depth });
-                    self.noteHostFailure(err);
+                    if (isHostFailure(err)) {
+                        self.failHost(if (err == error.AllocationError) error.OutOfMemory else err);
+                    } else {
+                        self.noteHostFailure(err);
+                    }
                 },
             }
             var failure = CallResult.failed(0);
@@ -2908,6 +3114,9 @@ pub fn Evm(config: EvmConfig) type {
             // EIP-214: Prevent self-destruction in static context
             if (self.is_static_context()) return error.StaticCallViolation;
 
+            // EIP-161: SELFDESTRUCT touches its beneficiary, even when it sends nothing.
+            try self.touchForPruning(recipient);
+
             // EIP-6780: Handle SELFDESTRUCT based on creation in same transaction
             const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
             // Before EIP-161 (Spurious Dragon) crediting the beneficiary creates its account,
@@ -3153,6 +3362,7 @@ test "EVM call() entry point method" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     const BerlinEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .BERLIN } });
@@ -3207,6 +3417,7 @@ test "EVM call() method routes to different handlers" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     const BerlinEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .BERLIN } });
@@ -3298,6 +3509,7 @@ test "Evm creation with custom config" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try CustomEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3365,6 +3577,7 @@ test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
         .gas_limit = gas_limit,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     {
@@ -3428,6 +3641,7 @@ test "EIP-7825 rejects Osaka transaction above the gas limit cap before nonce in
         .gas_limit = eips.TX_GAS_LIMIT_CAP + 1,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var db = Database.init(std.testing.allocator);
@@ -3471,6 +3685,7 @@ test "EIP-7825 accepts Osaka transaction at exactly the gas limit cap" {
         .gas_limit = eips.TX_GAS_LIMIT_CAP,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var db = Database.init(std.testing.allocator);
@@ -3512,6 +3727,7 @@ test "EIP-7825 does not cap Prague transaction gas" {
         .gas_limit = eips.TX_GAS_LIMIT_CAP + 1,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var db = Database.init(std.testing.allocator);
@@ -3557,6 +3773,7 @@ test "Evm call depth limit" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3618,6 +3835,7 @@ test "call method basic functionality - simple STOP" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3662,6 +3880,7 @@ test "call method loads contract code from state" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3717,6 +3936,7 @@ test "call method handles CREATE operation" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3760,6 +3980,7 @@ test "call method handles gas limit properly" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3968,6 +4189,7 @@ test "EvmConfig - custom configurations" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try CustomEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -3981,6 +4203,7 @@ test "TransactionContext creation and fields" {
         .gas_limit = 5000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 137, // Polygon
+        .allow_gas_price_below_base_fee = true,
     };
 
     try std.testing.expectEqual(@as(u64, 5000000), context.gas_limit);
@@ -4007,6 +4230,7 @@ test "Evm initialization with all parameters" {
         .gas_limit = 300000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1, // Mainnet
+        .allow_gas_price_below_base_fee = true,
     };
 
     const gas_price: u256 = 30000000000; // 30 gwei
@@ -4049,6 +4273,7 @@ test "Host interface - get_balance functionality" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4093,6 +4318,7 @@ test "Host interface - storage operations" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4137,6 +4363,7 @@ test "Host interface - account_exists functionality" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4178,6 +4405,7 @@ test "Host interface - call type differentiation" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4242,6 +4470,7 @@ test "EVM CREATE operation - basic contract creation" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4321,6 +4550,7 @@ test "EVM CREATE operation - with value transfer" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4385,6 +4615,7 @@ test "EVM CREATE operation - insufficient balance fails" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4434,6 +4665,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4512,6 +4744,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4575,6 +4808,7 @@ test "EVM CREATE operation - collision detection" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4640,6 +4874,7 @@ test "EVM CREATE operation - init code execution and storage" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4721,6 +4956,7 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
         .gas_limit = 3000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4806,6 +5042,7 @@ test "EVM logs - emit_log functionality" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4854,6 +5091,7 @@ test "EVM logs - included in CallResult" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4920,6 +5158,7 @@ test "Host interface - hardfork compatibility checks" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Test with different hardfork configurations
@@ -4960,6 +5199,7 @@ test "Host interface - access cost operations" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -4996,6 +5236,7 @@ test "Host interface - input size validation" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5042,6 +5283,7 @@ test "Call types - CREATE2 with salt" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5087,6 +5329,7 @@ test "Error handling - nested call depth tracking" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try TestEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5140,6 +5383,7 @@ test "Error handling - precompile execution" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5186,6 +5430,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         .gas_limit = 1000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Test non-tracing mode first (this is where the critical bug is)
@@ -5352,6 +5597,7 @@ test "Error handling - REVERT with empty data should still have error message" {
         .gas_limit = 1000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);
@@ -5428,6 +5674,7 @@ test "Precompiles - IDENTITY precompile (0x04)" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5478,6 +5725,7 @@ test "Precompiles - SHA256 precompile (0x02)" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5527,6 +5775,7 @@ test "Precompiles - disabled configuration" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try NoPrecompileEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5572,6 +5821,7 @@ test "Precompiles - invalid precompile addresses" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5622,6 +5872,7 @@ test "Debug - Gas limit affects execution" {
         .gas_limit = 21000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5709,6 +5960,7 @@ test "Debug - Contract deployment and execution" {
         .gas_limit = 21000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5811,6 +6063,7 @@ test "Debug - Bytecode size affects execution time" {
         .gas_limit = 21000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5884,6 +6137,7 @@ test "Security - bounds checking and edge cases" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5944,6 +6198,7 @@ test "EVM with minimal planner strategy" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try MinimalEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -5995,6 +6250,7 @@ test "EVM with advanced planner strategy" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try AdvancedEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6042,6 +6298,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
         .gas_limit = 21000000, // Higher gas for contract execution
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6109,6 +6366,7 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
         .gas_limit = 21000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6157,6 +6415,7 @@ test "Precompile - SHA256 (0x02) basic functionality" {
         .gas_limit = 21000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6211,6 +6470,7 @@ test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
         .gas_limit = 21_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6260,6 +6520,7 @@ test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
         .gas_limit = 21_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6309,6 +6570,7 @@ test "Precompile diagnosis - MODEXP (0x05) basic case works" {
         .gas_limit = 21_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6361,6 +6623,7 @@ test "Precompile diagnosis - BN254 operations disabled" {
         .gas_limit = 21_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6416,6 +6679,7 @@ test "Precompile diagnosis - BLAKE2F (0x09) placeholder" {
         .gas_limit = 21_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6479,6 +6743,7 @@ test "EVM benchmark scenario - reproduces segfault" {
         .gas_limit = 21000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm_instance = try Evm(.{}).init(allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -6538,6 +6803,7 @@ test "CREATE interaction - deployed contract can be called" {
             .gas_limit = 10_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .chain_id = 1,
+            .allow_gas_price_below_base_fee = true,
         },
         20_000_000_000,
         .{ .bytes = @as([20]u8, @splat(0x01)) },
@@ -6637,6 +6903,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
             .gas_limit = 10_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .chain_id = 1,
+            .allow_gas_price_below_base_fee = true,
         },
         20_000_000_000,
         .{ .bytes = @as([20]u8, @splat(0x01)) },
@@ -6792,6 +7059,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
             .gas_limit = 20_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .chain_id = 1,
+            .allow_gas_price_below_base_fee = true,
         },
         20_000_000_000,
         .{ .bytes = @as([20]u8, @splat(0x01)) },
@@ -6984,6 +7252,7 @@ test "CREATE interaction - created contract modifies parent storage" {
             .gas_limit = 10_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .chain_id = 1,
+            .allow_gas_price_below_base_fee = true,
         },
         20_000_000_000,
         primitives.Address{ .bytes = @as([20]u8, @splat(0x01)) },
@@ -7138,6 +7407,7 @@ test "Arena allocator - resets between calls" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -7216,6 +7486,7 @@ test "Arena allocator - handles multiple logs efficiently" {
         .gas_limit = 10000000, // Higher gas limit for many logs
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -7284,6 +7555,7 @@ test "Arena allocator - precompile outputs use arena" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -7341,6 +7613,7 @@ test "Arena allocator - memory efficiency with nested calls" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -7481,6 +7754,7 @@ test "Call context tracking - get_caller and get_call_value" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     var evm = try Evm(.{}).init(
         std.testing.allocator,
@@ -7543,6 +7817,7 @@ test "CREATE stores deployed code bytes" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20_000_000_000, primitives.ZERO_ADDRESS);
@@ -7703,6 +7978,7 @@ test "CREATE2 stores deployed code bytes" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20_000_000_000, primitives.ZERO_ADDRESS);
@@ -7863,6 +8139,7 @@ test "EVM bytecode iterator execution - simple STOP" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -7917,6 +8194,7 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -7985,6 +8263,7 @@ test "EVM bytecode iterator execution - handles jumps" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -8048,6 +8327,7 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -8136,6 +8416,7 @@ test "SSTORE gas - cold 0->1 via PUSH1 PUSH0 SSTORE costs exactly 22105" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
@@ -8186,6 +8467,7 @@ const regression_context = TransactionContext{
     .gas_limit = 1000000,
     .coinbase = primitives.ZERO_ADDRESS,
     .chain_id = 1,
+    .allow_gas_price_below_base_fee = true,
 };
 const regression_contract: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x43} };
 const regression_callee: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x44} };

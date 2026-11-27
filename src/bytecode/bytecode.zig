@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const ArrayList = std.ArrayListAligned;
 const Opcode = @import("../opcodes/opcode.zig").Opcode;
 const bytecode_config = @import("bytecode_config.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 const BytecodeConfig = bytecode_config.BytecodeConfig;
 const fork_gas = @import("../frame/fork_gas.zig");
 
@@ -211,7 +212,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             /// `initial_gas` seeds the total, e.g. 1 for a JUMPDEST that heads the block.
             pub fn calculateBlockInfo(bytecode: *const Self, start_pc: PcType, initial_gas: u32) BlockInfo {
                 const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
-                const verified_ops = @import("../core/verified_ops.zig");
                 var acc = verified_ops.BlockAccumulator{ .gas = initial_gas };
                 var pc: usize = start_pc;
 
@@ -314,7 +314,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
             // PcType indexes the code, and analysis looks up to one PUSH32 ahead. Code
             // that cannot be indexed is rejected here instead of overflowing a cast.
-            if (code.len + MAX_PUSH_BYTES + 1 > std.math.maxInt(PcType)) return error.InitcodeTooLarge;
+            // The comparison subtracts on the limit side (`verified_ops.codeFitsPc`), so
+            // no code length can wrap it.
+            if (!verified_ops.codeFitsPc(code.len, std.math.maxInt(PcType))) return error.InitcodeTooLarge;
 
             // Every byte of the code is executable. Trailing compiler metadata is not
             // special to the EVM: it can hold JUMPDESTs and be jumped into, so it is
@@ -947,11 +949,11 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             const push_size = prev_op - 0x5f;
                             if (check_pc + 1 + push_size == scan_pc) {
                                 // This PUSH provides the value for our JUMP
-                                var value: PcType = 0;
+                                var value: u256 = 0;
                                 for (check_pc + 1..check_pc + 1 + push_size) |i| {
                                     value = (value << 8) | self.runtime_code[i];
                                 }
-                                target = value;
+                                target = std.math.cast(PcType, value);
                                 break;
                             }
                         }
@@ -997,7 +999,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     var stack_effect: i32 = 0;
                     var min_stack: i32 = 0;
                     var max_stack: i32 = 0;
-                    var current_pc = start_pc;
+                    // Widened: a PUSH at the end of the code steps past `maxInt(PcType)`.
+                    var current_pc: usize = start_pc;
                     var length: u32 = 0;
                     const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 
@@ -1009,15 +1012,16 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         if (opcode < opcode_info.len) {
                             gas = std.math.add(u64, gas, opcode_info[opcode].gas_cost) catch std.math.maxInt(u64);
 
-                            // Update stack effect
-                            stack_effect -= opcode_info[opcode].stack_inputs;
-                            if (stack_effect < min_stack) min_stack = stack_effect;
-                            stack_effect += opcode_info[opcode].stack_outputs;
+                            // Update stack effect. The height saturates in i32: a block of
+                            // millions of pops must not trap.
+                            const step = verified_ops.stackEffectStep(stack_effect, opcode_info[opcode].stack_inputs, opcode_info[opcode].stack_outputs);
+                            if (step.low < min_stack) min_stack = step.low;
+                            stack_effect = step.high;
                             if (stack_effect > max_stack) max_stack = stack_effect;
                         }
 
                         // Move to next instruction
-                        const instruction_size: PcType = if (opcode >= 0x60 and opcode <= 0x7f) opcode - 0x5f + 1 else 1;
+                        const instruction_size: usize = if (opcode >= 0x60 and opcode <= 0x7f) @as(usize, opcode - 0x5f) + 1 else 1;
                         current_pc += instruction_size;
 
                         // Check if this opcode terminates the block
@@ -1044,8 +1048,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                     return .{
                         .gas = gas,
-                        .min_stack = @intCast(@abs(min_stack)),
-                        .max_stack = @intCast(@max(0, max_stack)),
+                        // Saturating: 10,923 LOG4 in a row need 65,538 items, which no
+                        // u16 holds. The display clamps instead of trapping.
+                        .min_stack = verified_ops.saturatingMinStackU16(min_stack),
+                        .max_stack = verified_ops.saturatingMaxStackU16(max_stack),
                         .length = length,
                     };
                 }
@@ -1306,7 +1312,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     if (opcode_info.stack_inputs > 0 or opcode_info.stack_outputs > 0) {
                         try output.print(allocator, " {s}[stack: -{}, +{}]{s}", .{ Colors.dim, opcode_info.stack_inputs, opcode_info.stack_outputs, Colors.reset });
                         // Update stack depth based on this instruction
-                        stack_depth = stack_depth - @as(i32, @intCast(opcode_info.stack_inputs)) + @as(i32, @intCast(opcode_info.stack_outputs));
+                        stack_depth = verified_ops.stackEffectStep(stack_depth, opcode_info.stack_inputs, opcode_info.stack_outputs).high;
                     }
 
                     // Check if this is a block terminator

@@ -393,6 +393,7 @@ fn assertDifferentialParity(
         .gas_limit = gas_limit,
         .coinbase = BENEFICIARY,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var db_a = Database.init(allocator);
@@ -445,6 +446,7 @@ fn assertDifferentialParity(
     // 3. EXACT consensus parity assertions:
     //    (a) Fusion ON vs Fusion OFF
     try std.testing.expectEqual(res_a.success, res_b.success);
+    try std.testing.expectEqual(res_a.reverted, res_b.reverted);
     try std.testing.expectEqual(res_a.gas_left, res_b.gas_left);
     try std.testing.expectEqualSlices(u8, res_a.output, res_b.output);
     try std.testing.expectEqual(res_a.logs.len, res_b.logs.len);
@@ -458,6 +460,7 @@ fn assertDifferentialParity(
 
     //    (b) simulate() vs call() exact parity!
     try std.testing.expectEqual(res_a.success, sim_res.success);
+    try std.testing.expectEqual(res_a.reverted, sim_res.reverted);
     try std.testing.expectEqual(res_a.gas_left, sim_res.gas_left);
     try std.testing.expectEqualSlices(u8, res_a.output, sim_res.output);
     try std.testing.expectEqual(res_a.logs.len, sim_res.logs.len);
@@ -552,7 +555,7 @@ pub fn fuzzCreateAndCreate2Parity(_: void, input: []const u8) !void {
     const init_code = input[3..@min(input.len, 256)];
     const gas_limit: u64 = 1_000_000;
     const block_info = makeBlockInfo(input[0]);
-    const tx_ctx = TransactionContext{ .gas_limit = gas_limit, .coinbase = BENEFICIARY, .chain_id = 1 };
+    const tx_ctx = TransactionContext{ .gas_limit = gas_limit, .coinbase = BENEFICIARY, .chain_id = 1, .allow_gas_price_below_base_fee = true };
 
     var db_on = Database.init(allocator);
     defer db_on.deinit();

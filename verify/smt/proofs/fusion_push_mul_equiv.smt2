@@ -11,8 +11,17 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:41 (push_mul_inline)
-;;   |         pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:59 (push_mul_inline)
+;;   |         pub fn push_mul_inline(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_MUL_INLINE, cursor, s, gas);
 ;;   | 
@@ -22,8 +31,17 @@
 ;;   | 
 ;;   |             return N.next(self, .PUSH_MUL_INLINE, cursor, s, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:53 (push_mul_pointer)
-;;   |         pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:80 (push_mul_pointer)
+;;   |         pub fn push_mul_pointer(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_MUL_POINTER, cursor, s, gas);
 ;;   | 

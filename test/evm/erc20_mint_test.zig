@@ -88,6 +88,7 @@ test "ERC20 mint test" {
         .gas_limit = 10_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     // Initialize EVM

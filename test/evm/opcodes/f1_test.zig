@@ -54,6 +54,7 @@ test "opcode 0xf1 differential test" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var guillotine_evm = try evm.Evm(.{

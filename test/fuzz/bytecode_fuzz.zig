@@ -6,6 +6,10 @@
 //! 3. Fusion detection never produces out-of-bounds spans or crosses JUMPDEST boundaries.
 //! 4. Dispatch schedule & jump table construction succeeds cleanly with fusions ON and OFF.
 //! 5. OOM resilience via FailingAllocator (no leaks or crashes under allocation failure).
+//! 6. `pretty_print` never traps, for any content and length, and prints the first
+//!    block's stack requirement clamped to u16 exactly as a wide-integer oracle computes it.
+//! 7. Program counter width: `PcType` holds the largest code plus 33 bytes of lookahead,
+//!    and `Bytecode.init` accepts a length exactly when `len + 33` fits.
 
 const std = @import("std");
 const evm = @import("evm");
@@ -243,6 +247,139 @@ pub fn fuzzBytecodeOomResilience(_: void, input: []const u8) !void {
     }
 }
 
+/// A bytecode type whose program counter is 32 bits wide, as on every fork before
+/// Shanghai, so code far longer than 65,535 bytes is analyzable.
+const BytecodeWide = evm.Bytecode(.{ .hardfork = .LONDON });
+/// The smallest program counter: 8 bits, code of at most 222 bytes.
+const BytecodeTiny = evm.Bytecode(.{ .max_bytecode_size = 222, .max_initcode_size = 222 });
+
+/// Stack requirement of the block starting at pc 0, computed in i64 and clamped to
+/// u16 at the very end: the specification of what `pretty_print` shows in the
+/// first block header.
+fn referenceFirstBlockStack(code: []const u8) struct { min: u16, max: u16 } {
+    const info = evm.opcode_data.OPCODE_INFO;
+    var height: i64 = 0;
+    var lowest: i64 = 0;
+    var highest: i64 = 0;
+    var pc: usize = 0;
+    while (pc < code.len) {
+        const op = code[pc];
+        height -= info[op].stack_inputs;
+        lowest = @min(lowest, height);
+        height += info[op].stack_outputs;
+        highest = @max(highest, height);
+        pc += if (op >= 0x60 and op <= 0x7f) @as(usize, op - 0x5f) + 1 else 1;
+        switch (op) {
+            0x00, 0x56, 0x57, 0xf3, 0xfd, 0xfe, 0xff => break,
+            else => {},
+        }
+        if (pc < code.len and code[pc] == 0x5b) break;
+    }
+    return .{ .min = @intCast(@min(-lowest, 65_535)), .max = @intCast(@min(highest, 65_535)) };
+}
+
+/// `pretty_print` over long generated code. The first two bytes pick the length (up
+/// to 200,000 bytes, often exactly at an overflow edge) and the rest is a pattern
+/// repeated to that length. Long runs of one opcode drive the block's stack
+/// requirement past what the printed u16 holds: 10,923 LOG4 need 65,538 items.
+pub fn fuzzPrettyPrintNeverTraps(_: void, input: []const u8) !void {
+    if (input.len < 3) return;
+    const allocator = fuzz_alloc.get();
+    const choice: usize = (@as(usize, input[0]) << 8) | input[1];
+    const len: usize = switch (choice % 8) {
+        0 => 10_922,
+        1 => 10_923,
+        2 => 65_536,
+        3 => 100_000,
+        else => 1 + (choice * 200_000) / 65_536,
+    };
+    const pattern = input[2..];
+    const code = try allocator.alloc(u8, len);
+    defer allocator.free(code);
+    for (code, 0..) |*byte, i| byte.* = pattern[i % pattern.len];
+
+    var bytecode = BytecodeWide.init(allocator, code) catch |err| switch (err) {
+        // Refusing the code is fine. Trapping on it is not.
+        error.InitcodeTooLarge, error.InvalidJumpDestination, error.InvalidOpcode, error.TruncatedPush => return,
+        error.OutOfMemory => return err,
+    };
+    defer bytecode.deinit();
+    const text = try bytecode.pretty_print(allocator);
+    defer allocator.free(text);
+    try std.testing.expect(text.len > 0);
+
+    const want = referenceFirstBlockStack(code);
+    var expected: [48]u8 = undefined;
+    const header = try std.fmt.bufPrint(&expected, "stack: [{d}, {d}]", .{ want.min, want.max });
+    try std.testing.expect(std.mem.indexOf(u8, text, header) != null);
+}
+
+/// Program counter width against wide-integer arithmetic. The input picks a
+/// maximum code size anywhere in u32 and a code length near each type's limit.
+pub fn fuzzPcTypeAndCodeSize(_: void, input: []const u8) !void {
+    if (input.len < 9) return;
+    const max_code = std.mem.readInt(u32, input[0..4], .little);
+    const unbounded = input[8] & 1 == 1;
+
+    // Width: the smallest of 8/12/16/32 bits that holds max_code + 33.
+    const width = evm.verified_ops.pcTypeWidthBits(max_code, unbounded);
+    const needed: u128 = @as(u128, max_code) + 33;
+    const want: u8 = if (unbounded) 32 else if (needed <= 0xff) 8 else if (needed <= 0xfff) 12 else if (needed <= 0xffff) 16 else 32;
+    try std.testing.expectEqual(want, width);
+    if (width < 32) try std.testing.expect(needed <= (@as(u128, 1) << @intCast(width)) - 1);
+
+    // Fit: len + 33 <= pc_max, for any 64-bit length and limit.
+    const code_len = std.mem.readInt(u64, input[0..8], .little);
+    inline for (.{ u8, u12, u16, u32, u64 }) |Pc| {
+        const pc_max: u64 = std.math.maxInt(Pc);
+        try std.testing.expectEqual(@as(u128, code_len) + 33 <= pc_max, evm.verified_ops.codeFitsPc(code_len, pc_max));
+    }
+
+    // Bytecode.init at each program counter width, a few bytes around its limit.
+    const allocator = fuzz_alloc.get();
+    const offset: usize = input[4] % 8;
+    inline for (.{ BytecodeTiny, BytecodeFusionOn, BytecodeWide }) |Type| {
+        const limit: usize = @min(std.math.maxInt(Type.PcType) - 33, 70_000);
+        const len = limit + offset - 4;
+        const code = try allocator.alloc(u8, len);
+        defer allocator.free(code);
+        @memset(code, 0x5b);
+        if (Type.init(allocator, code)) |built| {
+            var bytecode = built;
+            defer bytecode.deinit();
+            try std.testing.expect(len + 33 <= std.math.maxInt(Type.PcType));
+            try std.testing.expectEqual(len, @as(usize, bytecode.len()));
+        } else |err| {
+            try std.testing.expectEqual(error.InitcodeTooLarge, err);
+            try std.testing.expect(len + 33 > std.math.maxInt(Type.PcType));
+        }
+    }
+}
+
+const pretty_print_corpus: []const []const u8 = &.{
+    &.{ 0x00, 0x00, 0xa4 }, // 10,922 LOG4: 65,532 items, the last count that fits
+    &.{ 0x00, 0x01, 0xa4 }, // 10,923 LOG4: 65,538 items, the first that does not
+    &.{ 0x00, 0x02, 0xa4 }, // 65,536 LOG4
+    &.{ 0x00, 0x03, 0xa4 }, // 100,000 LOG4
+    &.{ 0x00, 0x03, 0x80 }, // 100,000 DUP1: headroom saturates upward
+    &.{ 0x00, 0x03, 0x9f, 0x50 }, // SWAP16 and POP
+    &.{ 0xff, 0xff, 0x60, 0x00, 0x56, 0x5b, 0xa4 }, // 200,000 bytes of jumps and blocks
+    &.{ 0x00, 0x02, 0x7f }, // PUSH32 fed with itself
+    &.{ 0x12, 0x34, 0x5b, 0xa4, 0xa4, 0xa4, 0xf3 }, // short blocks
+    &.{ 0x00, 0x03, 0x0c }, // an undefined opcode
+};
+
+const pc_width_corpus: []const []const u8 = &.{
+    &.{ 222, 0, 0, 0, 0, 0, 0, 0, 0 }, // the largest size an 8-bit pc serves
+    &.{ 223, 0, 0, 0, 1, 0, 0, 0, 0 },
+    &.{ 255, 0, 0, 0, 2, 0, 0, 0, 0 },
+    &.{ 0xde, 0xff, 0, 0, 3, 0, 0, 0, 0 }, // 65,502
+    &.{ 0xdf, 0xff, 0, 0, 4, 0, 0, 0, 0 }, // 65,503
+    &.{ 0xff, 0xff, 0, 0, 5, 0, 0, 0, 0 }, // 65,535
+    &.{ 0xff, 0xff, 0xff, 0xff, 6, 0xff, 0xff, 0xff, 0 }, // u32 and u64 extremes
+    &.{ 0x00, 0xc0, 0, 0, 7, 0, 0, 0, 1 }, // 49,152 before Shanghai: unbounded
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{},
     &.{0x00},
@@ -266,6 +403,14 @@ test "fuzz dispatch schedule build fusion on and off" {
 
 test "fuzz structured fusion patterns and fake jumpdests" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzStructuredFusionPatterns), .{ .corpus = seed_corpus });
+}
+
+test "fuzz pretty_print never traps and clamps the block stack requirement exactly" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzPrettyPrintNeverTraps), .{ .corpus = pretty_print_corpus });
+}
+
+test "fuzz program counter width and code size limits at every PcType" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzPcTypeAndCodeSize), .{ .corpus = pc_width_corpus });
 }
 
 test "fuzz bytecode oom resilience without leaks" {

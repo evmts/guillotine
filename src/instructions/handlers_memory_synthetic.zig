@@ -158,9 +158,7 @@ pub fn Handlers(FrameType: type) type {
         /// frame cannot pay. The comparison is made in u64 before the subtraction, so a
         /// cost wider than GasType can neither wrap nor trap.
         inline fn chargeGas(self: *FrameType, cost: u64) bool {
-            if (self.gas_remaining < 0 or cost > @as(u64, @intCast(self.gas_remaining))) return false;
-            self.gas_remaining -= @intCast(cost);
-            return true;
+            return self.chargeDynamicGas(cost);
         }
 
         // Dispatch charges the original opcodes' static gas. Expansion depends

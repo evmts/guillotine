@@ -1031,6 +1031,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
         .gas_limit = 10000000,
         .coinbase = block_info.coinbase,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm_instance = try evm.DefaultEvm.init(

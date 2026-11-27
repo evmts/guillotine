@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
 const Mode = @import("../internal/safety_counter.zig").Mode;
+const verified_ops = @import("../core/verified_ops.zig");
+const Hardfork = @import("voltaire").Hardfork;
 
 /// Configure Bytecode validation
 pub const BytecodeConfig = struct {
@@ -11,7 +13,7 @@ pub const BytecodeConfig = struct {
     // defaults to true
     fusions_enabled: bool = true,
     /// Execution fork. Selects the static gas schedule used for basic-block gas.
-    hardfork: @import("../eips_and_hardforks/eips.zig").Hardfork = .CANCUN,
+    hardfork: Hardfork = .CANCUN,
     /// The maximum amount of bytes allowed in contract code
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in initcode (EIP-3860)
@@ -27,19 +29,28 @@ pub const BytecodeConfig = struct {
         return @max(self.max_bytecode_size, self.max_initcode_size);
     }
 
-    /// PcType: the smallest program counter type that can hold every offset into the
-    /// largest analyzable code, including the one-past-the-end offset (`len`).
-    /// Sizes above 65535 bytes select `u32`.
+    /// True when this fork has no initcode size limit: EIP-3860 (Shanghai) introduced
+    /// the 49152-byte cap. Earlier forks run initcode of any length the sender pays
+    /// for, and before EIP-170 (Spurious Dragon) deployed code is unbounded too, so
+    /// `max_initcode_size` does not bound the code the analyzer sees.
+    pub fn initcodeUnbounded(comptime self: Self) bool {
+        return !self.hardfork.isAtLeast(.SHANGHAI);
+    }
+
+    /// PcType: the smallest program counter type that can hold every offset the
+    /// analyzer forms for the largest analyzable code: the code length plus
+    /// `verified_ops.pc_headroom` (33) bytes of PUSH32 lookahead. `Bytecode.init`
+    /// rejects code for which `len + 33` does not fit, so a type chosen from the code
+    /// size alone would reject valid code near its top (223..255, 4063..4095 and
+    /// 65503..65535 bytes). Forks without an initcode limit always select `u32`.
+    /// The widths are proved in `verify/smt` (`pc_type_width_bits`).
     pub fn PcType(comptime self: Self) type {
-        const max_code = self.maxCodeSize();
-        return if (max_code <= std.math.maxInt(u8))
-            u8
-        else if (max_code <= std.math.maxInt(u12))
-            u12
-        else if (max_code <= std.math.maxInt(u16))
-            u16
-        else
-            u32;
+        return switch (verified_ops.pcTypeWidthBits(self.maxCodeSize(), self.initcodeUnbounded())) {
+            8 => u8,
+            12 => u12,
+            16 => u16,
+            else => u32,
+        };
     }
     /// Validate the configuration at compile time
     pub fn validate(comptime self: Self) void {
@@ -83,20 +94,20 @@ test "bytecode config default values" {
 }
 
 test "bytecode config pc type selection" {
-    // Test u8 range
-    const config_u8 = comptime BytecodeConfig{ .max_bytecode_size = 255, .max_initcode_size = 255 };
+    // 222 bytes plus 33 bytes of lookahead is exactly maxInt(u8)
+    const config_u8 = comptime BytecodeConfig{ .max_bytecode_size = 222, .max_initcode_size = 222 };
     try std.testing.expectEqual(u8, config_u8.PcType());
 
-    // Test u12 range (max = 4095)
-    const config_u12 = comptime BytecodeConfig{ .max_bytecode_size = 4095, .max_initcode_size = 4095 };
+    // 4062 + 33 = 4095 = maxInt(u12)
+    const config_u12 = comptime BytecodeConfig{ .max_bytecode_size = 4062, .max_initcode_size = 4062 };
     try std.testing.expectEqual(u12, config_u12.PcType());
 
     // Default sizes: 24576 bytes of code and 49152 bytes of initcode both fit u16
     const config_u16 = comptime BytecodeConfig{};
     try std.testing.expectEqual(u16, config_u16.PcType());
 
-    // Above 65535 bytes the program counter is u32
-    const config_u32 = comptime BytecodeConfig{ .max_bytecode_size = 65536, .max_initcode_size = 65536 };
+    // 65503 + 33 exceeds maxInt(u16): the program counter is u32
+    const config_u32 = comptime BytecodeConfig{ .max_bytecode_size = 65503, .max_initcode_size = 65503 };
     try std.testing.expectEqual(u32, config_u32.PcType());
     comptime config_u32.validate();
 }
@@ -104,7 +115,7 @@ test "bytecode config pc type selection" {
 test "bytecode config pc type covers initcode" {
     // Initcode runs through the same analysis as deployed code, so the larger of the
     // two limits picks the type.
-    const small_code = comptime BytecodeConfig{ .max_bytecode_size = 255, .max_initcode_size = 49152 };
+    const small_code = comptime BytecodeConfig{ .max_bytecode_size = 222, .max_initcode_size = 49152 };
     try std.testing.expectEqual(u16, small_code.PcType());
     try std.testing.expectEqual(@as(u32, 49152), small_code.maxCodeSize());
 
@@ -112,27 +123,45 @@ test "bytecode config pc type covers initcode" {
     try std.testing.expectEqual(u32, big_initcode.PcType());
     comptime big_initcode.validate();
 
+    // The headroom sum is computed wide: the largest sizes do not wrap it.
     const max_config = comptime BytecodeConfig{ .max_bytecode_size = std.math.maxInt(u32), .max_initcode_size = std.math.maxInt(u32) };
     try std.testing.expectEqual(u32, max_config.PcType());
     comptime max_config.validate();
 }
 
-test "bytecode config pc type boundaries" {
-    // Test exact boundary values
-    const config_u8_max = comptime BytecodeConfig{ .max_bytecode_size = std.math.maxInt(u8), .max_initcode_size = std.math.maxInt(u8) };
-    try std.testing.expectEqual(u8, config_u8_max.PcType());
+test "bytecode config pc type boundaries include the 33-byte lookahead" {
+    const Case = struct { size: u32, expected: type };
+    inline for (.{
+        Case{ .size = 222, .expected = u8 },
+        Case{ .size = 223, .expected = u12 },
+        Case{ .size = 255, .expected = u12 },
+        Case{ .size = 4062, .expected = u12 },
+        Case{ .size = 4063, .expected = u16 },
+        Case{ .size = 4095, .expected = u16 },
+        Case{ .size = 65502, .expected = u16 },
+        Case{ .size = 65503, .expected = u32 },
+        Case{ .size = 65535, .expected = u32 },
+    }) |case| {
+        const config = comptime BytecodeConfig{ .max_bytecode_size = case.size, .max_initcode_size = case.size };
+        try std.testing.expectEqual(case.expected, config.PcType());
+    }
+}
 
-    const config_u8_plus1 = comptime BytecodeConfig{ .max_bytecode_size = std.math.maxInt(u8) + 1, .max_initcode_size = std.math.maxInt(u8) + 1 };
-    try std.testing.expectEqual(u12, config_u8_plus1.PcType());
-
-    const config_u12_max = comptime BytecodeConfig{ .max_bytecode_size = std.math.maxInt(u12), .max_initcode_size = std.math.maxInt(u12) };
-    try std.testing.expectEqual(u12, config_u12_max.PcType());
-
-    const config_u12_plus1 = comptime BytecodeConfig{ .max_bytecode_size = std.math.maxInt(u12) + 1, .max_initcode_size = std.math.maxInt(u12) + 1 };
-    try std.testing.expectEqual(u16, config_u12_plus1.PcType());
-
-    const config_u16_max = comptime BytecodeConfig{ .max_bytecode_size = std.math.maxInt(u16), .max_initcode_size = std.math.maxInt(u16) };
-    try std.testing.expectEqual(u16, config_u16_max.PcType());
+test "bytecode config pc type is u32 on forks without an initcode limit" {
+    // EIP-3860 (Shanghai) introduced the cap. Before it the configured sizes do not
+    // bound the code the analyzer is given.
+    inline for (.{ Hardfork.FRONTIER, Hardfork.HOMESTEAD, Hardfork.SPURIOUS_DRAGON, Hardfork.LONDON, Hardfork.MERGE }) |hardfork| {
+        const config = comptime BytecodeConfig{ .hardfork = hardfork };
+        try std.testing.expect(config.initcodeUnbounded());
+        try std.testing.expectEqual(u32, config.PcType());
+        const tiny = comptime BytecodeConfig{ .hardfork = hardfork, .max_bytecode_size = 1, .max_initcode_size = 1 };
+        try std.testing.expectEqual(u32, tiny.PcType());
+    }
+    inline for (.{ Hardfork.SHANGHAI, Hardfork.CANCUN, Hardfork.PRAGUE, Hardfork.OSAKA }) |hardfork| {
+        const config = comptime BytecodeConfig{ .hardfork = hardfork };
+        try std.testing.expect(!config.initcodeUnbounded());
+        try std.testing.expectEqual(u16, config.PcType());
+    }
 }
 
 test "bytecode config custom values" {
@@ -167,17 +196,17 @@ test "bytecode config validation runtime checks" {
 }
 
 test "bytecode config pc type consistency" {
-    // Test that different sizes produce expected types
+    // Each size selects the smallest type that holds it plus the lookahead.
     const sizes_and_types = [_]struct { size: u32, expected_type: type }{
         .{ .size = 1, .expected_type = u8 },
         .{ .size = 100, .expected_type = u8 },
-        .{ .size = 255, .expected_type = u8 },
+        .{ .size = 222, .expected_type = u8 },
         .{ .size = 256, .expected_type = u12 },
         .{ .size = 1000, .expected_type = u12 },
-        .{ .size = 4095, .expected_type = u12 },
+        .{ .size = 4062, .expected_type = u12 },
         .{ .size = 4096, .expected_type = u16 },
         .{ .size = 24576, .expected_type = u16 }, // Default
-        .{ .size = 65535, .expected_type = u16 },
+        .{ .size = 65502, .expected_type = u16 },
         .{ .size = 65536, .expected_type = u32 },
     };
 

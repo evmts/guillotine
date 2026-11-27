@@ -1,4 +1,5 @@
 const std = @import("std");
+const verified_ops = @import("../core/verified_ops.zig");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
@@ -86,13 +87,12 @@ pub fn Handlers(FrameType: type) type {
 
                     // Dynamic gas cost: data gas + memory expansion. The comparison is made
                     // in u64 before the subtraction, so the cost can neither wrap nor trap.
-                    const data_gas_cost = @as(u64, length_usize) * GasConstants.LogDataGas;
-                    const total_dynamic_gas = data_gas_cost + memory_expansion_cost;
-                    if (self.gas_remaining < 0 or total_dynamic_gas > @as(u64, @intCast(self.gas_remaining))) {
+                    const data_gas_cost = @as(u64, length_usize) *| GasConstants.LogDataGas;
+                    const total_dynamic_gas = verified_ops.saturatingGasSum(data_gas_cost, memory_expansion_cost);
+                    if (!self.chargeDynamicGas(total_dynamic_gas)) {
                         self.afterComplete(unified_opcode);
                         return Error.OutOfGas;
                     }
-                    self.gas_remaining -= @intCast(total_dynamic_gas);
 
                     // EIP-214: LOG is forbidden in a static context and must fail the call
                     // (emit_log silently drops the log, so the check must live here). Matches
@@ -110,9 +110,9 @@ pub fn Handlers(FrameType: type) type {
                             return Error.OutOfBounds;
                         }
                         const call_alloc = self.getEvm().getCallArenaAllocator();
-                        self.memory.ensure_capacity(call_alloc, @as(u32, @intCast(memory_end))) catch {
+                        self.memory.ensure_capacity(call_alloc, @as(u32, @intCast(memory_end))) catch |err| {
                             self.afterComplete(unified_opcode);
-                            return Error.OutOfBounds;
+                            return FrameType.memoryHalt(err);
                         };
                     }
 

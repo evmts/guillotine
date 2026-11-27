@@ -482,8 +482,10 @@ pub fn evm_bytecode_pretty_print_with_allocator(
 
     const bytecode_slice = data[0..data_len];
 
-    // Create bytecode instance
-    var bytecode = BytecodeType.init(alloc, bytecode_slice) catch return 0;
+    // Create bytecode instance with wide 32-bit PCs so arbitrarily large inputs
+    // (> 65,502 bytes) disassemble cleanly across the C ABI.
+    const Printable = evm.Bytecode(.{ .max_initcode_size = std.math.maxInt(u32) });
+    var bytecode = Printable.init(alloc, bytecode_slice) catch return 0;
     defer bytecode.deinit(); // CRITICAL: Clean up bytecode resources
 
     // Call pretty_print

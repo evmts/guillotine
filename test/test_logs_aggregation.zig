@@ -44,6 +44,7 @@ test "logs are properly aggregated in CallResult" {
         .gas_limit = 1000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try evm_module.Evm(.{}).init(
@@ -171,6 +172,7 @@ test "nested call logs are properly aggregated" {
         .gas_limit = 1000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try evm_module.Evm(.{}).init(

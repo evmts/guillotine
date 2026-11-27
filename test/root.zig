@@ -114,6 +114,10 @@ test {
     // _ = @import("evm/warm_cold_access_tests.zig");
     _ = @import("evm/selfdestruct_records_test.zig");
     _ = @import("evm/allocation_failure_snapshot_test.zig");
+    _ = @import("evm/transaction_admission_test.zig");
+    _ = @import("evm/eip161_state_clearing_test.zig");
+    _ = @import("evm/host_oom_abort_test.zig");
+    _ = @import("evm/gas_and_code_bounds_test.zig");
 
     // Issue #852: Frame coupled to DefaultEvm type breaks custom configs
     _ = @import("evm/custom_evm_config_test.zig");

@@ -10,6 +10,7 @@ const memory_mod = @import("../memory/memory.zig");
 const eips = @import("../eips_and_hardforks/eips.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// EIP-2929 account access gas still owed by a handler. The warm cost (100) is the
 /// opcode's static gas, already charged with its basic block, so the handler charges
@@ -115,10 +116,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Charge gas for address access
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(accessSurcharge(.BALANCE, access_cost));
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(accessSurcharge(.BALANCE, access_cost))) {
                 self.afterComplete(.BALANCE);
                 return Error.OutOfGas;
             }
@@ -232,20 +230,16 @@ pub fn Handlers(FrameType: type) type {
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
-            const copy_cost = (length_usize + 31) / 32 * 3;
-            const total_gas = memory_expansion_cost + copy_cost;
+            const copy_cost: u64 = (@as(u64, length_usize) + 31) / 32 * 3;
+            // The expansion cost saturates at maxInt(u64) for a size no gas can pay.
+            const total_gas = verified_ops.saturatingGasSum(memory_expansion_cost, copy_cost);
 
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(total_gas);
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(total_gas)) {
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
-            };
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| return FrameType.memoryHalt(err);
 
             if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = self.calldata_slice, .offset = offset_usize, .length = length_usize })) {
                 return Error.OutOfBounds;
@@ -305,20 +299,16 @@ pub fn Handlers(FrameType: type) type {
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
-            const copy_cost = (length_usize + 31) / 32 * 3;
-            const total_gas = memory_expansion_cost + copy_cost;
+            const copy_cost: u64 = (@as(u64, length_usize) + 31) / 32 * 3;
+            // The expansion cost saturates at maxInt(u64) for a size no gas can pay.
+            const total_gas = verified_ops.saturatingGasSum(memory_expansion_cost, copy_cost);
 
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(total_gas);
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(total_gas)) {
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
-            };
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| return FrameType.memoryHalt(err);
 
             if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = self.code, .offset = offset_usize, .length = length_usize })) {
                 return Error.OutOfBounds;
@@ -355,10 +345,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Charge gas for address access
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(accessSurcharge(.EXTCODESIZE, access_cost));
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(accessSurcharge(.EXTCODESIZE, access_cost))) {
                 self.afterComplete(.EXTCODESIZE);
                 return Error.OutOfGas;
             }
@@ -398,10 +385,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Charge gas for address access
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(accessSurcharge(.EXTCODECOPY, access_cost));
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(accessSurcharge(.EXTCODECOPY, access_cost))) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfGas;
             }
@@ -433,26 +417,19 @@ pub fn Handlers(FrameType: type) type {
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
-            const copy_cost = (length_usize + 31) / 32 * 3;
-            const total_gas = memory_expansion_cost + copy_cost;
+            const copy_cost: u64 = (@as(u64, length_usize) + 31) / 32 * 3;
+            // The expansion cost saturates at maxInt(u64) for a size no gas can pay.
+            const total_gas = verified_ops.saturatingGasSum(memory_expansion_cost, copy_cost);
 
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(total_gas);
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(total_gas)) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.EXTCODECOPY);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.EXTCODECOPY);
-                    return Error.AllocationError;
-                },
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| {
+                self.afterComplete(.EXTCODECOPY);
+                return FrameType.memoryHalt(err);
             };
 
             const code = self.getEvm().get_code(addr) catch |err| switch (err) {
@@ -489,10 +466,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Charge gas for address access
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(accessSurcharge(.EXTCODEHASH, access_cost));
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(accessSurcharge(.EXTCODEHASH, access_cost))) {
                 self.afterComplete(.EXTCODEHASH);
                 return Error.OutOfGas;
             }
@@ -603,33 +577,26 @@ pub fn Handlers(FrameType: type) type {
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
-            const copy_cost = (length_usize + 31) / 32 * 3;
-            const total_gas = memory_expansion_cost + copy_cost;
+            const copy_cost: u64 = (@as(u64, length_usize) + 31) / 32 * 3;
+            // The expansion cost saturates at maxInt(u64) for a size no gas can pay.
+            const total_gas = verified_ops.saturatingGasSum(memory_expansion_cost, copy_cost);
 
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(total_gas);
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(total_gas)) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.RETURNDATACOPY);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.RETURNDATACOPY);
-                    return Error.AllocationError;
-                },
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| {
+                self.afterComplete(.RETURNDATACOPY);
+                return FrameType.memoryHalt(err);
             };
 
             // Copy return data to memory (no zero-padding needed since bounds are checked)
             const src_slice = return_data[offset_usize..][0..length_usize];
-            self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize)), src_slice) catch {
+            self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize)), src_slice) catch |err| {
                 self.afterComplete(.RETURNDATACOPY);
-                return Error.OutOfBounds;
+                return FrameType.memoryHalt(err);
             };
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .RETURNDATACOPY);

@@ -1,4 +1,5 @@
 const std = @import("std");
+const verified_ops = @import("../core/verified_ops.zig");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const memory_mod = @import("../memory/memory.zig");
@@ -97,9 +98,7 @@ pub fn Handlers(FrameType: type) type {
         /// frame cannot pay. The comparison is made in u64 before the subtraction, so a
         /// cost wider than GasType can neither wrap nor trap.
         inline fn chargeGas(self: *FrameType, cost: u64) bool {
-            if (self.gas_remaining < 0 or cost > @as(u64, @intCast(self.gas_remaining))) return false;
-            self.gas_remaining -= @intCast(cost);
-            return true;
+            return self.chargeDynamicGas(cost);
         }
 
         /// Check if an offset plus size would exceed memory limit
@@ -332,19 +331,19 @@ pub fn Handlers(FrameType: type) type {
             // Dynamic gas (static gas is charged at block entry): 3 per word copied,
             // plus expansion to cover the further of the two ranges.
             const words = (len + 31) >> 5;
-            const copy_gas_cost = words * GasConstants.CopyGas;
+            const copy_gas_cost = words *| GasConstants.CopyGas;
             const memory_end: u32 = @intCast(@max(src_end, dest_end));
             const memory_expansion_cost = self.memory.get_expansion_cost(memory_end);
-            if (!chargeGas(self, copy_gas_cost + memory_expansion_cost)) {
+            if (!chargeGas(self, verified_ops.saturatingGasSum(copy_gas_cost, memory_expansion_cost))) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfGas;
             }
 
             // Memory expands over both ranges before the copy; source bytes beyond the old
             // size read as zero.
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch |err| {
                 self.afterComplete(.MCOPY);
-                return Error.AllocationError;
+                return FrameType.memoryHalt(err);
             };
 
             // Copy in place. The ranges may overlap, which @memmove handles; no

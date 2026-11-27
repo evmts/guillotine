@@ -51,6 +51,7 @@ test "High gas limit crash reproduction" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
     
     // Try to create EVM instance - this might crash
@@ -131,6 +132,7 @@ test "High gas limit with smaller value" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm_instance = try evm.MainnetEvm.init(

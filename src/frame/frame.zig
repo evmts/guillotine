@@ -22,6 +22,7 @@ const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const handler_abi = @import("../preprocessor/handler_abi.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// The core most important datastructure of the entire EVM
 /// Holds the StackFrame state along with an `interpret` method for executing a stack frame
@@ -91,6 +92,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         /// analyzer's program counter type, sized for the larger of max_bytecode_size and
         /// max_initcode_size, so frame and analyzer always agree and initcode PCs never truncate.
         pub const PcType = (BytecodeConfig{
+            .hardfork = config.hardfork,
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,
         }).PcType();
@@ -314,7 +316,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 }
 
                 // Validate stack requirements for the first block using verified single-compare guard
-                const verified_ops = @import("../core/verified_ops.zig");
                 const current_stack_size: u32 = @intCast(self.stack.size());
                 const min_u16: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
                 const max_u16: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
@@ -392,19 +393,28 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             // Skip gas checks if disabled in config
             if (comptime config.disable_gas_checks) return;
 
-            // An amount that does not fit GasType exceeds any gas the frame can hold.
-            const amt = std.math.cast(GasType, amount) orelse {
-                (&self.getEvm().tracer).debug("Frame.consumeGasChecked: Out of gas, amount={} doesn't fit in GasType", .{amount});
-                return Error.OutOfGas;
-            };
-
-            // Check if we have enough gas
-            if (amt > self.gas_remaining) {
-                (&self.getEvm().tracer).debug("Frame.consumeGasChecked: Out of gas, required={}, remaining={}", .{ amt, self.gas_remaining });
+            if (!self.chargeDynamicGas(amount)) {
+                (&self.getEvm().tracer).debug("Frame.consumeGasChecked: Out of gas, required={}, remaining={}", .{ amount, self.gas_remaining });
                 return Error.OutOfGas;
             }
+        }
 
-            self.gas_remaining -= amt;
+        /// Charge `cost` of dynamic gas. Returns false, and charges nothing, when the
+        /// frame cannot pay. Every dynamic charge of the opcode handlers goes through
+        /// here: `verified_ops.chargeGasChecked` compares in `u64` before it narrows
+        /// `cost`, so a cost wider than `GasType` (a saturated memory expansion, or
+        /// 2^31 against an `i32` frame) is an out-of-gas halt and never a trap or a wrap.
+        pub inline fn chargeDynamicGas(self: *Self, cost: u64) bool {
+            self.gas_remaining = verified_ops.chargeGasChecked(GasType, self.gas_remaining, cost) orelse return false;
+            return true;
+        }
+
+        /// The halt a failed frame-memory operation ends the frame with. Running out
+        /// of host memory is `AllocationError`: `Evm.execute_frame` reports it as a
+        /// host failure, which aborts the transaction instead of deciding its outcome.
+        /// Every other error is a range the frame's memory cannot hold.
+        pub inline fn memoryHalt(err: anyerror) Error {
+            return if (err == error.OutOfMemory) Error.AllocationError else Error.OutOfBounds;
         }
 
         /// Recover the concrete parent specialization. Evm(config) passes itself

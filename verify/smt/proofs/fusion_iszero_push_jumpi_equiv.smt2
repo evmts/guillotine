@@ -11,7 +11,16 @@
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
 ;; --- src/instructions/handlers_advanced_synthetic.zig:22 (iszero_jumpi)
-;;   |         pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |         pub fn iszero_jumpi(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .ISZERO_JUMPI, cursor, s, gas);
 ;;   |             const value = s.pop_unsafe();

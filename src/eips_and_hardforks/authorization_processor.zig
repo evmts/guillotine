@@ -57,6 +57,9 @@ pub const TupleError = error{
 pub const AuthorizationError = TupleError || error{
     /// gas_remaining cannot cover the authorization list's intrinsic cost
     OutOfGas,
+    /// The configured fork is before Prague: EIP-7702 does not exist, and a
+    /// transaction that carries authorizations is invalid. Nothing was applied.
+    AuthorizationsNotActive,
 } || Database.Error;
 
 /// Result of processing a single authorization
@@ -143,6 +146,15 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
         /// EIP configuration for hardfork-specific behavior
         eips: Eips,
 
+        /// EIP-7702 exists from Prague on. Before it no tuple may change state: a set-code
+        /// transaction is invalid there, so applying its list would write delegations
+        /// that the fork's own rules treat as ordinary code. An empty list changes
+        /// nothing on any fork and is not an error.
+        fn requireActive(self: *const Self, tuple_count: usize) error{AuthorizationsNotActive}!void {
+            if (tuple_count == 0) return;
+            if (!self.eips.is_eip_active(7702)) return error.AuthorizationsNotActive;
+        }
+
         /// Apply one tuple whose authority is already known (steps 1-2 and 5-9).
         /// Returns a TupleError when the spec would skip the tuple; state is then unchanged.
         pub fn processAuthorization(
@@ -150,11 +162,19 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
             auth: Authorization,
             authority: Address,
         ) AuthorizationError!void {
+            try self.requireActive(1);
             try checkTupleFields(self.chain_id, auth);
             _ = try self.applyAuthorization(auth, authority);
         }
 
         /// Steps 5-9. Returns whether the authority account existed before.
+        ///
+        /// "Existed" is EIP-7702's "authority exists in the trie", which decides the
+        /// refund. It agrees with EIP-161 because the transaction processor deletes
+        /// every touched empty account when a transaction ends: an account that is
+        /// still in the database was either never emptied or never touched, and the
+        /// trie holds it. An authority left without nonce, balance or code is not
+        /// possible here: applying a tuple always raises the nonce.
         fn applyAuthorization(
             self: *Self,
             auth: Authorization,
@@ -234,6 +254,7 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
             allocator: std.mem.Allocator,
             auth_list: []const Authorization,
         ) AuthorizationError!AuthorizationListResult {
+            try self.requireActive(auth_list.len);
             const total_cost = try self.listCost(auth_list.len);
             if (self.gas_remaining.* < total_cost) return error.OutOfGas;
             const per_tuple = self.eips.eip_7702_per_empty_account_cost();
@@ -271,6 +292,7 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
             self: *Self,
             auth_list: []const Authorization,
         ) AuthorizationError!i64 {
+            try self.requireActive(auth_list.len);
             const total_cost = try self.listCost(auth_list.len);
             if (self.gas_remaining.* < total_cost) return error.OutOfGas;
             const per_tuple = self.eips.eip_7702_per_empty_account_cost();

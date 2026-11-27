@@ -25,6 +25,7 @@ const regression_context = evm.TransactionContext{
     .gas_limit = 1000000,
     .coinbase = primitives.ZERO_ADDRESS,
     .chain_id = 1,
+    .allow_gas_price_below_base_fee = true,
 };
 const regression_contract: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x43} };
 const regression_sender: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x10} };

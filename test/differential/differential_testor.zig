@@ -168,6 +168,7 @@ pub const DifferentialTestor = struct {
             .coinbase = primitives.Address.ZERO_ADDRESS,
             .blob_versioned_hashes = &.{},
             .blob_base_fee = 0,
+            .allow_gas_price_below_base_fee = true,
         };
 
         // Create both traced and non-traced EVMs based on config

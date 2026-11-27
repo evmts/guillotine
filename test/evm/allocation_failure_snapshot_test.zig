@@ -89,6 +89,7 @@ test "snapshot should be reverted on allocation failure during self-destruct ext
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     const storage_key: u256 = 0x0101010101010101010101010101010101010101010101010101010101010101;
     const initial_value: u256 = 0x4242424242424242424242424242424242424242424242424242424242424242;
@@ -172,6 +173,7 @@ test "snapshot should be reverted on allocation failure during log extraction" {
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     const storage_key: u256 = 0x0101010101010101010101010101010101010101010101010101010101010101;
     const initial_value: u256 = 0x4242424242424242424242424242424242424242424242424242424242424242;

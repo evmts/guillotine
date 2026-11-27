@@ -9,6 +9,10 @@
 //! 5. EIP-7702 AuthorizationProcessor: chain ID (0 or matching), EOA-only check, nonce equality & increment,
 //!    delegation target persistence, and rejection of invalid accounts without mutating state.
 //! 6. EIP-7623 / EIP-2028 / EIP-3860 calldata & initcode gas monotonicity.
+//! 7. Transaction admission through `Evm.call` on seven forks against an independent
+//!    model: fork-dependent CREATE intrinsic gas (EIP-2), EIP-2930 access lists, the
+//!    EIP-1559 base fee floor for legacy prices, EIP-3607, transaction nonces, checked
+//!    EIP-4844 blob fees, and EIP-161 cleanup of the touched target and the coinbase.
 
 const std = @import("std");
 const evm = @import("evm");
@@ -251,6 +255,237 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
     }
 }
 
+const admission_sender = Address{ .bytes = [_]u8{0x51} ++ @as([19]u8, @splat(0)) };
+const admission_coinbase = Address{ .bytes = [_]u8{0xC0} ++ @as([19]u8, @splat(0)) };
+/// Exists and is empty before every transaction: the target of every call.
+const admission_empty = Address{ .bytes = [_]u8{0xEE} ++ @as([19]u8, @splat(0)) };
+const admission_delegate = Address{ .bytes = [_]u8{0xDE} ++ @as([19]u8, @splat(0)) };
+
+/// One transaction through `Evm.call` on `hardfork`, checked against a model of
+/// transaction validity written from the EIPs, not from the EVM's code.
+fn checkAdmission(comptime hardfork: Hardfork, input: []const u8) !void {
+    const allocator = fuzz_alloc.get();
+    const Vm = evm.Evm(.{ .eips = .{ .hardfork = hardfork } });
+    const zero_hash = @as([32]u8, @splat(0));
+    const homestead = comptime hardfork.isAtLeast(.HOMESTEAD);
+    const spurious_dragon = comptime hardfork.isAtLeast(.SPURIOUS_DRAGON);
+    const berlin = comptime hardfork.isAtLeast(.BERLIN);
+    const london = comptime hardfork.isAtLeast(.LONDON);
+    const shanghai = comptime hardfork.isAtLeast(.SHANGHAI);
+    const cancun = comptime hardfork.isAtLeast(.CANCUN);
+    const prague = comptime hardfork.isAtLeast(.PRAGUE);
+
+    // ---- The transaction, decoded from the input.
+    const is_create = input[1] & 1 == 1;
+    const sender_kind: enum { eoa, contract, delegated } = switch (input[2] % 4) {
+        0, 1 => .eoa,
+        2 => .contract,
+        else => .delegated,
+    };
+    const sender_nonce: u64 = input[3] % 4;
+    const tx_nonce: ?u64 = switch (input[4] % 4) {
+        0 => null,
+        1 => sender_nonce,
+        2 => sender_nonce + 1,
+        else => if (sender_nonce > 0) sender_nonce - 1 else sender_nonce,
+    };
+    const gas_price: u256 = ([_]u256{ 0, 1, 5, 10 })[input[5] % 4];
+    const base_fee: u256 = ([_]u256{ 0, 5, 10 })[input[6] % 3];
+    const list_addresses: usize = input[7] % 3;
+    const list_keys: usize = (input[7] >> 4) % 3;
+    const blob_transaction = input[8] % 4 == 0;
+    const max_fee_per_blob_gas: u256 = ([_]u256{ 1, (@as(u256, 1) << 239) - 1, @as(u256, 1) << 239, std.math.maxInt(u256) })[input[9] % 4];
+    const rich_sender = input[10] % 4 != 0;
+    const gas_delta: i64 = ([_]i64{ -1, 0, 1, 50_000 })[input[11] % 4];
+
+    // ---- The model: intrinsic gas.
+    var intrinsic: u64 = 21_000;
+    if (is_create) {
+        if (homestead) intrinsic += 32_000; // EIP-2
+        intrinsic += 4; // one zero byte of init code
+        if (shanghai) intrinsic += 2; // EIP-3860: one word
+    }
+    if (berlin) intrinsic += @as(u64, list_addresses) * 2_400 + @as(u64, list_addresses * list_keys) * 1_900;
+    const gas_limit: u64 = @intCast(@as(i64, @intCast(intrinsic)) + gas_delta);
+
+    // ---- The model: validity.
+    const blob_gas: u256 = 131_072;
+    const blob_fee_overflows = blob_transaction and cancun and max_fee_per_blob_gas > std.math.maxInt(u256) / blob_gas;
+    const max_blob_fee: u256 = if (blob_transaction and cancun and !blob_fee_overflows) blob_gas * max_fee_per_blob_gas else 0;
+    const balance: u256 = if (rich_sender) std.math.maxInt(u256) else 0;
+    const gas_cost: u256 = @as(u256, gas_limit) * gas_price;
+    const cost_overflows = @addWithOverflow(gas_cost, max_blob_fee)[1] != 0;
+    var valid = true;
+    if (gas_limit < intrinsic) valid = false;
+    if (list_addresses != 0 and !berlin) valid = false; // EIP-2930
+    if (tx_nonce) |nonce| {
+        if (nonce != sender_nonce) valid = false;
+    }
+    if (sender_kind == .contract) valid = false; // EIP-3607
+    if (sender_kind == .delegated and !prague) valid = false; // a designator is code before EIP-7702
+    if (london and gas_price < base_fee) valid = false; // EIP-1559
+    if (blob_transaction) {
+        if (!cancun or is_create) valid = false; // EIP-4844
+        if (blob_fee_overflows) valid = false;
+    }
+    if (cost_overflows or balance < gas_cost +| max_blob_fee) valid = false;
+
+    // ---- The state.
+    var db = Database.init(allocator);
+    defer db.deinit();
+    var sender_account = Account{ .balance = balance, .nonce = sender_nonce, .code_hash = zero_hash, .storage_root = zero_hash };
+    switch (sender_kind) {
+        .eoa => {},
+        .contract => sender_account.code_hash = try db.set_code(&[_]u8{0x00}),
+        .delegated => sender_account.delegated_address = admission_delegate,
+    }
+    try db.set_account(admission_sender.bytes, sender_account);
+    try db.set_account(admission_empty.bytes, .{ .balance = 0, .nonce = 0, .code_hash = zero_hash, .storage_root = zero_hash });
+    const root_before = try db.get_state_root();
+
+    const keys = [_]u256{ 1, 2 };
+    var entries: [2]evm.AccessListEntry = undefined;
+    for (entries[0..list_addresses], 0..) |*entry, i| {
+        entry.* = .{ .address = Address{ .bytes = [_]u8{@intCast(0x90 + i)} ++ @as([19]u8, @splat(0)) }, .storage_keys = keys[0..list_keys] };
+    }
+    const blob_hashes = [_][32]u8{[_]u8{0x01} ++ @as([31]u8, @splat(0x77))};
+
+    var vm = try Vm.init(allocator, &db, .{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1,
+        .difficulty = 1,
+        .gas_limit = 30_000_000,
+        .coinbase = admission_coinbase,
+        .base_fee = base_fee,
+        .prev_randao = zero_hash,
+        .blob_base_fee = 1,
+        .blob_versioned_hashes = if (blob_transaction) &blob_hashes else &.{},
+    }, .{
+        .gas_limit = gas_limit,
+        .coinbase = admission_coinbase,
+        .chain_id = 1,
+        .blob_versioned_hashes = if (blob_transaction) &blob_hashes else &.{},
+        .is_blob_transaction = blob_transaction,
+        .max_fee_per_blob_gas = if (blob_transaction) max_fee_per_blob_gas else 0,
+        .access_list = entries[0..list_addresses],
+        .tx_nonce = tx_nonce,
+    }, gas_price, admission_sender);
+    defer vm.deinit();
+
+    var result = if (is_create)
+        vm.call(.{ .create = .{ .caller = admission_sender, .value = 0, .init_code = &[_]u8{0x00}, .gas = gas_limit } })
+    else
+        vm.call(.{ .call = .{ .caller = admission_sender, .to = admission_empty, .value = 0, .input = &.{}, .gas = gas_limit } });
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(?anyerror, null), vm.host_failure);
+
+    if (!valid) {
+        // Rejected: an error is reported and nothing changed.
+        try std.testing.expect(!result.success);
+        try std.testing.expect(result.error_info != null);
+        try std.testing.expect(std.mem.startsWith(u8, result.error_info.?, "invalid transaction"));
+        try std.testing.expectEqualSlices(u8, &root_before, &(try db.get_state_root()));
+        return;
+    }
+
+    // Accepted. A call to an account without code and init code `STOP` both succeed
+    // on any amount of execution gas, zero included.
+    try std.testing.expectEqual(@as(?[]const u8, null), result.error_info);
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(sender_nonce + 1, try db.get_nonce(admission_sender.bytes));
+    const gas_used: u64 = gas_limit - result.gas_left;
+    try std.testing.expectEqual(intrinsic, gas_used);
+
+    // Fees: the sender paid for the gas used and one blob; from London the base fee
+    // is burned and the coinbase gets the rest.
+    const blob_fee: u256 = if (blob_transaction) blob_gas else 0;
+    try std.testing.expectEqual(balance - @as(u256, gas_used) * gas_price - blob_fee, try db.get_balance(admission_sender.bytes));
+    const tip: u256 = if (london) gas_price - base_fee else gas_price;
+    try std.testing.expectEqual(@as(u256, gas_used) * tip, try db.get_balance(admission_coinbase.bytes));
+
+    // EIP-161. Before Spurious Dragon nothing is deleted and the fee payment creates
+    // the coinbase. From it on, the called empty account is deleted (a creation does
+    // not touch it) and a coinbase that was paid nothing is not left behind.
+    if (spurious_dragon) {
+        try std.testing.expectEqual(is_create, db.account_exists(admission_empty.bytes));
+        try std.testing.expectEqual(tip > 0, db.account_exists(admission_coinbase.bytes));
+    } else {
+        try std.testing.expect(db.account_exists(admission_empty.bytes));
+        try std.testing.expect(db.account_exists(admission_coinbase.bytes));
+    }
+}
+
+/// Transaction admission and finalization on a fork chosen by the first byte.
+pub fn fuzzTransactionAdmission(_: void, input: []const u8) !void {
+    if (input.len < 12) return;
+    switch (input[0] % 7) {
+        0 => try checkAdmission(.FRONTIER, input),
+        1 => try checkAdmission(.HOMESTEAD, input),
+        2 => try checkAdmission(.SPURIOUS_DRAGON, input),
+        3 => try checkAdmission(.BERLIN, input),
+        4 => try checkAdmission(.LONDON, input),
+        5 => try checkAdmission(.CANCUN, input),
+        else => try checkAdmission(.PRAGUE, input),
+    }
+}
+
+/// `blob_gas * fee` against 512-bit arithmetic: the helpers return the exact product
+/// or null, and never a clamped value.
+pub fn fuzzCheckedBlobFee(_: void, input: []const u8) !void {
+    if (input.len < 33) return;
+    const fee = std.mem.readInt(u256, input[0..32], .little) >> @intCast(input[32]);
+    const cancun = Eips{ .hardfork = .CANCUN };
+    for (0..10) |blob_count| {
+        const wide: u512 = @as(u512, blob_count) * 131_072 * fee;
+        const fits = wide <= std.math.maxInt(u256);
+        for ([_]?u256{ cancun.blob_gas_cost(fee, blob_count), cancun.max_blob_gas_cost(fee, blob_count) }) |cost| {
+            try std.testing.expectEqual(fits, cost != null);
+            if (cost) |value| try std.testing.expectEqual(wide, @as(u512, value));
+        }
+        try std.testing.expectEqual(fits, evm.verified_ops.checkedBlobGasCost(@intCast(blob_count * 131_072), fee) != null);
+    }
+    // Before Cancun there is no blob fee.
+    try std.testing.expectEqual(@as(?u256, 0), (Eips{ .hardfork = .SHANGHAI }).max_blob_gas_cost(fee, 6));
+}
+
+// Bytes: fork, create, sender kind, sender nonce, tx nonce, gas price, base fee,
+// access list, blob, blob fee cap, balance, gas delta.
+const admission_corpus: []const []const u8 = &.{
+    &.{ 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }, // Frontier CREATE at exactly 21,004 gas
+    &.{ 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 }, // Frontier CREATE one gas short
+    &.{ 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }, // Homestead CREATE at exactly 53,004 gas
+    &.{ 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 }, // Homestead CREATE one gas short
+    &.{ 4, 0, 0, 0, 0, 2, 2, 0, 1, 0, 1, 3 }, // London legacy price 5 under base fee 10
+    &.{ 4, 0, 0, 0, 0, 3, 2, 0, 1, 0, 1, 3 }, // London legacy price 10 equal to base fee 10
+    &.{ 3, 0, 0, 0, 0, 0, 2, 0, 1, 0, 1, 3 }, // Berlin: no base fee floor
+    &.{ 5, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 3 }, // Cancun blob fee cap 2^256 - 1: overflow
+    &.{ 5, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 3 }, // Cancun blob fee cap 2^239: smallest overflow
+    &.{ 5, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 3 }, // Cancun blob fee cap 2^239 - 1: fits
+    &.{ 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3 }, // London blob transaction: not yet a thing
+    &.{ 4, 0, 2, 0, 0, 0, 0, 0, 1, 0, 1, 3 }, // sender with code (EIP-3607)
+    &.{ 5, 0, 3, 0, 0, 0, 0, 0, 1, 0, 1, 3 }, // delegated sender before Prague
+    &.{ 6, 0, 3, 0, 0, 0, 0, 0, 1, 0, 1, 3 }, // delegated sender on Prague
+    &.{ 4, 0, 0, 2, 2, 0, 0, 0, 1, 0, 1, 3 }, // nonce too high
+    &.{ 4, 0, 0, 2, 3, 0, 0, 0, 1, 0, 1, 3 }, // nonce too low
+    &.{ 4, 0, 0, 2, 1, 0, 0, 0, 1, 0, 1, 3 }, // nonce exact
+    &.{ 3, 0, 0, 0, 0, 0, 0, 0x22, 1, 0, 1, 1 }, // Berlin access list, exact intrinsic gas
+    &.{ 3, 0, 0, 0, 0, 0, 0, 0x22, 1, 0, 1, 0 }, // Berlin access list, one gas short
+    &.{ 2, 0, 0, 0, 0, 0, 0, 0x01, 1, 0, 1, 3 }, // access list before Berlin
+    &.{ 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 3 }, // Spurious Dragon: touched empty target deleted
+    &.{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 3 }, // Homestead: zero-fee coinbase created
+    &.{ 4, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 3 }, // sender cannot pay for the gas
+};
+
+const blob_fee_corpus: []const []const u8 = &.{
+    &(@as([32]u8, @splat(0xff)) ++ [_]u8{0}), // 2^256 - 1
+    &(@as([32]u8, @splat(0xff)) ++ [_]u8{17}), // 2^239 - 1: the largest fee one blob can carry
+    &(@as([32]u8, @splat(0xff)) ++ [_]u8{16}), // 2^240 - 1: overflows from one blob on
+    &(@as([32]u8, @splat(0xff)) ++ [_]u8{21}), // 2^235 - 1: fits for every blob count up to nine
+    &([_]u8{7} ++ @as([31]u8, @splat(0)) ++ [_]u8{0}),
+    &(@as([32]u8, @splat(0)) ++ [_]u8{0}),
+};
+
 const seed_corpus: []const []const u8 = &.{
     &(@as([24]u8, @splat(0))),
     &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 },
@@ -266,6 +501,14 @@ test "fuzz EIP-4844 blob gas monotonicity and EIP-1559 effective gas price" {
 
 test "fuzz SSTORE gas costs and EIP-3529 refund caps across all 14 hardforks" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSstoreGasAndRefundAcrossHardforks), .{ .corpus = seed_corpus });
+}
+
+test "fuzz transaction admission through Evm.call on seven forks against an independent model" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzTransactionAdmission), .{ .corpus = admission_corpus });
+}
+
+test "fuzz checked EIP-4844 blob fee against 512-bit arithmetic" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCheckedBlobFee), .{ .corpus = blob_fee_corpus });
 }
 
 test "fuzz EIP-2028/3860/7623 calldata and initcode gas formulas" {

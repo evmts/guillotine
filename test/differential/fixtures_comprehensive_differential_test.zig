@@ -114,6 +114,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Create EVM instance

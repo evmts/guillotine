@@ -74,6 +74,18 @@ pub const FrameConfig = struct {
             }));
         }
 
+        // Dynamic gas costs are u64. `Frame.chargeDynamicGas` compares a cost with the
+        // gas left in u64 and only then narrows it to GasType, which is sound for a
+        // signed GasType of at most 64 bits that can hold the whole block gas limit.
+        const Gas = self.GasType();
+        const gas_info = @typeInfo(Gas).int;
+        if (gas_info.signedness != .signed or gas_info.bits < 32 or gas_info.bits > 64) {
+            @compileError("GasType must be a signed integer of 32 to 64 bits");
+        }
+        if (self.block_gas_limit > std.math.maxInt(Gas)) {
+            @compileError(std.fmt.comptimePrint("block_gas_limit ({d}) must fit in GasType ({s})", .{ self.block_gas_limit, @typeName(Gas) }));
+        }
+
         // Validate memory configuration
         const min_memory_for_stack = self.get_requested_alloc();
         if (self.memory_limit < min_memory_for_stack) {
@@ -106,18 +118,14 @@ pub const FrameConfig = struct {
     }
     // Below are derived properties that are derived from other config options
 
-    /// PcType: chosen PC integer type from max_bytecode_size
+    /// PcType: the bytecode analyzer's program counter type for this configuration
+    /// (`BytecodeConfig.PcType`), so frame and analyzer cannot disagree.
     pub fn PcType(self: Self) type {
-        return if (self.max_bytecode_size <= std.math.maxInt(u8))
-            u8
-        else if (self.max_bytecode_size <= std.math.maxInt(u12))
-            u12
-        else if (self.max_bytecode_size <= std.math.maxInt(u16))
-            u16
-        else if (self.max_bytecode_size <= std.math.maxInt(u32))
-            u32
-        else
-            @compileError("Bytecode size too large! It must have under u32 bytes");
+        return (@import("../bytecode/bytecode_config.zig").BytecodeConfig{
+            .hardfork = self.hardfork,
+            .max_bytecode_size = self.max_bytecode_size,
+            .max_initcode_size = self.max_initcode_size,
+        }).PcType();
     }
 
     /// StackIndexType: minimal integer type to index the configured stack

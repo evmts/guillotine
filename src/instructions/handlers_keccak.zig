@@ -1,4 +1,5 @@
 const std = @import("std");
+const verified_ops = @import("../core/verified_ops.zig");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const memory_mod = @import("../memory/memory.zig");
@@ -99,24 +100,20 @@ pub fn Handlers(FrameType: type) type {
             }
 
             const words: u64 = (@as(u64, size_usize) + 31) / 32;
-            const memory_expansion_cost = self.memory.get_expansion_cost(@intCast(end));
-            const gas_cost = (words * GasConstants.Keccak256WordGas) +| memory_expansion_cost;
-            const gas_charge = std.math.cast(FrameType.GasType, gas_cost) orelse {
-                @branchHint(.cold);
-                self.afterComplete(.KECCAK256);
-                return Error.OutOfGas;
-            };
-            self.gas_remaining -= gas_charge;
-            if (self.gas_remaining < 0) {
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end)));
+            // memory_expansion_cost saturates to maxInt(u64) for absurd sizes, so add saturating.
+            const gas_cost = verified_ops.saturatingGasSum(words *| GasConstants.Keccak256WordGas, memory_expansion_cost);
+            if (!self.chargeDynamicGas(gas_cost)) {
                 @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfGas;
             }
 
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @intCast(end)) catch |err| {
+            // Ensure memory is available
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(end))) catch |err| {
                 @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
-                return if (err == memory_mod.MemoryError.MemoryOverflow) Error.OutOfBounds else Error.AllocationError;
+                return FrameType.memoryHalt(err);
             };
             const data = self.memory.get_slice(@intCast(offset_usize), @intCast(size_usize)) catch {
                 @branchHint(.cold);

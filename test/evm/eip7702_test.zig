@@ -375,6 +375,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
         .gas_limit = 100_000,
         .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     var evm_instance = try evm.Evm(.{}).init(
         allocator,
@@ -454,6 +455,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
         .gas_limit = 100_000,
         .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     var evm_instance = try evm.Evm(.{}).init(
         allocator,
@@ -748,6 +750,7 @@ test "EIP-7702: Full transaction execution with authorization list" {
         .gas_limit = 100_000,
         .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     var evm_instance = try evm.Evm(.{}).init(
         allocator,

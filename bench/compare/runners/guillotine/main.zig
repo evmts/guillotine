@@ -287,6 +287,7 @@ fn executeWith(
         .gas_limit = tx_gas_limit,
         .coinbase = block.coinbase,
         .chain_id = @intCast(block.chain_id),
+        .allow_gas_price_below_base_fee = true,
     };
 
     const call_params = EvmType.CallParams{ .call = .{

@@ -8,21 +8,39 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:52 (push_add_dup1)
+;; --- src/instructions/handlers_advanced_synthetic.zig:79 (push_add_dup1)
 ;;   |         inline fn push_add_dup1(s: *N.StackView, push_value: WordType) void {
 ;;   |             const result = s.peek_unsafe() +% push_value;
 ;;   |             s.set_top_unsafe(result);
 ;;   |             s.push_unsafe(result);
 ;;   |         }
-;; --- src/instructions/handlers_advanced_synthetic.zig:34 (push_add_dup1_inline)
-;;   |         pub fn push_add_dup1_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;; --- src/instructions/handlers_advanced_synthetic.zig:43 (push_add_dup1_inline)
+;;   |         pub fn push_add_dup1_inline(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_ADD_DUP1_INLINE, cursor, s, gas);
 ;;   |             push_add_dup1(&s, cursor[1].push_inline.value);
 ;;   |             return N.next(self, .PUSH_ADD_DUP1_INLINE, cursor, s, gas);
 ;;   |         }
-;; --- src/instructions/handlers_advanced_synthetic.zig:42 (push_add_dup1_pointer)
-;;   |         pub fn push_add_dup1_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;; --- src/instructions/handlers_advanced_synthetic.zig:60 (push_add_dup1_pointer)
+;;   |         pub fn push_add_dup1_pointer(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_ADD_DUP1_POINTER, cursor, s, gas);
 ;;   |             push_add_dup1(&s, cursor[1].push_pointer.value_ptr.*);

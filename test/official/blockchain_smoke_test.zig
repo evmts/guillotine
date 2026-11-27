@@ -193,6 +193,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Iterate blocks

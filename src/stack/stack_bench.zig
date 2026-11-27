@@ -364,6 +364,7 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
         .gas_limit = BENCHMARK_GAS_LIMIT,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Create EVM instance
@@ -440,6 +441,7 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
         .gas_limit = BENCHMARK_GAS_LIMIT,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Create EVM instance

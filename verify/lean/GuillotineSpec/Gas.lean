@@ -232,9 +232,10 @@ def calldataTokens (f : Fork) (data : Bytes) : Nat :=
   let mult := if f.atLeast .istanbul then 4 else 17
   data.foldl (fun acc b => acc + (if b == 0 then 1 else mult)) 0
 
-/-- Intrinsic gas of a transaction with no access list. -/
+/-- Intrinsic gas of a transaction with no access list. The 32,000 surcharge of a
+contract creation is EIP-2 (Homestead): a Frontier creation pays `txGas` like a call. -/
 def intrinsicGas (f : Fork) (data : Bytes) (isCreate : Bool) : Nat :=
-  (if isCreate then txGasContractCreation else txGas)
+  (if isCreate && f.atLeast .homestead then txGasContractCreation else txGas)
     + calldataTokens f data * txDataZeroGas
     + (if isCreate then initcodeWordCost f data.size else 0)
 

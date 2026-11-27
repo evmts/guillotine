@@ -188,6 +188,8 @@ pub const MemoryDatabase = @import("storage/memory_database.zig").MemoryDatabase
 pub const SelfDestruct = @import("storage/self_destruct.zig").SelfDestruct;
 pub const Log = @import("voltaire").logs.Log;
 pub const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
+pub const AccessListEntry = @import("block/transaction_context.zig").AccessListEntry;
+pub const Authorization = @import("block/transaction_context.zig").Authorization;
 pub const AuthorizationProcessor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessor;
 pub const AuthorizationError = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationError;
 pub const trie = @import("trie/root.zig");
@@ -210,10 +212,10 @@ pub const verified_ops = @import("core/verified_ops.zig");
 // - Fail to compile because their tests use pre-0.17 or pre-refactor APIs, or
 //   instantiate `Evm` and so compile the handlers' stale inline tests:
 //   evm.zig, evm_tests.zig, evm_config.zig, evm_arena_allocator.zig,
-//   bytecode/{bytecode,bytecode_analyze,bytecode_config,bytecode_stats,bytecode_bench,
+//   bytecode/{bytecode,bytecode_analyze,bytecode_stats,bytecode_bench,
 //   bytecode_tests,bytecode_jump_validation_test,bytecode_jump_validation_tests}.zig,
 //   eips_and_hardforks/{authorization_processor,eips,hardfork}.zig,
-//   frame/{call_params,call_result,fork_gas,frame_config}.zig, stack/stack.zig,
+//   frame/{call_params,fork_gas,frame_config}.zig, stack/stack.zig,
 //   storage/{access_list,cache_storage,forked_storage,journal_bench,memory_database,
 //   storage,rpc_client}.zig, tracer/{tracer,minimal_frame,minimal_evm_precompile_test}.zig,
 //   preprocessor/{dispatch_test,dispatch_layout_test}.zig, every instructions/handlers_*.zig
@@ -240,6 +242,8 @@ test {
     _ = @import("core/wide_arith.zig");
     _ = @import("block/block_info.zig");
     _ = @import("block/transaction_context.zig");
+    _ = @import("frame/call_result.zig");
+    _ = @import("bytecode/bytecode_config.zig");
     _ = @import("frame/block_info_config.zig");
     _ = @import("opcodes/opcode.zig");
     _ = @import("opcodes/opcode_data.zig");

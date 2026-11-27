@@ -41,6 +41,7 @@ test "guillotine standalone: basic arithmetic operations" {
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Use EVM without tracing for cleaner output

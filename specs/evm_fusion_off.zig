@@ -10,6 +10,7 @@
 const std = @import("std");
 const base = @import("evm_base");
 
+pub const AccessListEntry = base.AccessListEntry;
 pub const Account = base.Account;
 pub const Database = base.Database;
 pub const EvmConfig = base.EvmConfig;

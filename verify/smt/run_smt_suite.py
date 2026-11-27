@@ -1034,6 +1034,264 @@ MUL -> value1 *% value2 (bytecode_analyze.zig checkConstantFoldingPatternWithFus
 )
 
 # ---------------------------------------------------------------------------
+# Overflow-safe gas charging, blob fee, program counter width, stack saturation
+# ---------------------------------------------------------------------------
+
+
+def charge_gas_defs(bits: int) -> str:
+    """verified_ops.zig chargeGasChecked for GasType = i<bits>, as (is-some, value)."""
+    narrow = "cost" if bits == 64 else f"((_ extract {bits - 1} 0) cost)"
+    return f"""; verified_ops.zig chargeGasChecked(i{bits}, gas, cost): null unless gas >= 0 and cost <= gas
+(define-fun chargeSome{bits} ((gas (_ BitVec {bits})) (cost (_ BitVec 64))) Bool
+  (and (not (bvslt gas {bv(0, bits)}))
+       (not (bvugt cost {zext('gas', bits, 64)}))))
+; the narrowing `@as(i{bits}, @intCast(cost))` keeps the low {bits} bits
+(define-fun chargeNarrow{bits} ((cost (_ BitVec 64))) (_ BitVec {bits}) {narrow})
+(define-fun chargeValue{bits} ((gas (_ BitVec {bits})) (cost (_ BitVec 64))) (_ BitVec {bits})
+  (bvsub gas (chargeNarrow{bits} cost)))"""
+
+
+for _bits in (32, 64):
+    theorem(
+        Theorem(
+            name=f"charge_gas_checked_i{_bits}",
+            claim=f"""For ALL i{_bits} gas_remaining and ALL u64 cost, chargeGasChecked(i{_bits}, gas, cost):
+  (1) returns a value  iff  gas >= 0 and cost <= gas as mathematical integers,
+  (2) when it returns a value, `@intCast(cost)` to i{_bits} is lossless (cost <= maxInt(i{_bits})),
+      so the narrowing can neither trap (Debug/ReleaseSafe) nor wrap (ReleaseFast),
+  (3) the value is exactly gas - cost (128-bit integer arithmetic),
+  (4) the value lies in [0, gas].
+A cost wider than the gas type (maxInt(u64), 2^31 against i32) is always refused.""",
+            logic="QF_BV",
+            decls=f"""(declare-const gas (_ BitVec {_bits}))
+(declare-const cost (_ BitVec 64))
+{charge_gas_defs(_bits)}
+; mathematical integers in 128-bit two's complement
+(define-fun gasInt () (_ BitVec 128) ((_ sign_extend {128 - _bits}) gas))
+(define-fun costInt () (_ BitVec 128) ((_ zero_extend 64) cost))""",
+            hyps=[],
+            goal=f"""(let ((some (chargeSome{_bits} gas cost)) (value (chargeValue{_bits} gas cost)))
+  (and (= some (and (bvsge gasInt {bv(0, 128)}) (bvsle costInt gasInt)))
+       (=> some (bvule cost {bv((1 << (_bits - 1)) - 1, 64)}))
+       (=> some (= ((_ sign_extend {128 - _bits}) (chargeNarrow{_bits} cost)) costInt))
+       (=> some (= ((_ sign_extend {128 - _bits}) value) (bvsub gasInt costInt)))
+       (=> some (and (bvsge value {bv(0, _bits)}) (bvsle value gas)))))""",
+            sources=src(VERIFIED_OPS, "chargeGasChecked"),
+        )
+    )
+
+theorem(
+    Theorem(
+        name="saturating_gas_sum",
+        claim="""For ALL u64 first, second: saturatingGasSum(first, second) = min(first + second, 2^64 - 1)
+in 65-bit integer arithmetic (it never wraps), and whenever the exact sum reaches
+2^64 - 1 the result is refused by chargeGasChecked for EVERY i32 and EVERY i64
+gas_remaining: a saturated composite cost always ends in out-of-gas.""",
+        logic="QF_BV",
+        decls=f"""(declare-const first (_ BitVec 64))
+(declare-const second (_ BitVec 64))
+(declare-const gas32 (_ BitVec 32))
+(declare-const gas64 (_ BitVec 64))
+; verified_ops.zig saturatingGasSum: first +| second (LLVM uadd.sat)
+(define-fun saturatingGasSum ((a (_ BitVec 64)) (b (_ BitVec 64))) (_ BitVec 64)
+  (let ((s (bvadd a b))) (ite (bvult s a) {bv((1 << 64) - 1, 64)} s)))
+{charge_gas_defs(32)}
+{charge_gas_defs(64)}
+(define-fun exactSum () (_ BitVec 65) (bvadd ((_ zero_extend 1) first) ((_ zero_extend 1) second)))""",
+        hyps=[],
+        goal=f"""(let ((sum (saturatingGasSum first second)))
+  (and (= ((_ zero_extend 1) sum)
+          (ite (bvuge exactSum {bv((1 << 64) - 1, 65)}) {bv((1 << 64) - 1, 65)} exactSum))
+       (=> (bvuge exactSum {bv((1 << 64) - 1, 65)})
+           (and (not (chargeSome32 gas32 sum)) (not (chargeSome64 gas64 sum))))))""",
+        sources=src(VERIFIED_OPS, "saturatingGasSum", "chargeGasChecked"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="checked_blob_gas_cost",
+        claim="""For ALL u64 blob_gas and ALL u256 fee_per_blob_gas, checkedBlobGasCost:
+  (1) returns a value  iff  blob_gas * fee_per_blob_gas < 2^256 (exact 320-bit product),
+  (2) the value is exactly that product (never clamped to 2^256 - 1),
+  (3) blob_gas = 0 or fee = 0 always yields 0, and blob_gas = 1 yields the fee.
+An overflowing EIP-4844 blob fee is rejected, not saturated.""",
+        logic="QF_BV",
+        decls=f"""(declare-const blob_gas (_ BitVec 64))
+(declare-const fee Word)
+; verified_ops.zig checkedBlobGasCost: @mulWithOverflow(@as(u256, blob_gas), fee)
+; LLVM umul.with.overflow.i256: low 256 bits, and a flag set iff the 512-bit product has a high half.
+(define-fun wide512 () (_ BitVec 512)
+  (bvmul ((_ zero_extend 448) blob_gas) ((_ zero_extend 256) fee)))
+(define-fun blobSome () Bool (= ((_ extract 511 256) wide512) {w(0)}))
+(define-fun blobValue () Word (bvmul ((_ zero_extend 192) blob_gas) fee))
+; exact product: a u64 times a u256 is below 2^320
+(define-fun exact320 () (_ BitVec 320)
+  (bvmul ((_ zero_extend 256) blob_gas) ((_ zero_extend 64) fee)))""",
+        hyps=[],
+        goal=f"""(and (= blobSome (= ((_ extract 319 256) exact320) {bv(0, 64)}))
+     (=> blobSome (= ((_ zero_extend 64) blobValue) exact320))
+     (=> (or (= blob_gas {bv(0, 64)}) (= fee {w(0)})) (and blobSome (= blobValue {w(0)})))
+     (=> (= blob_gas {bv(1, 64)}) (and blobSome (= blobValue fee))))""",
+        sources=src(VERIFIED_OPS, "checkedBlobGasCost"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="pc_type_width_bits",
+        claim="""For ALL u32 max_code and both values of unbounded_initcode, W = pcTypeWidthBits(...):
+  (1) W is one of 8, 12, 16, 32, and unbounded_initcode forces W = 32,
+  (2) max_code + 33 is computed without wrapping (u64 sum = 65-bit sum),
+  (3) W < 32 implies max_code + 33 <= 2^W - 1: every offset the analyzer addresses,
+      including the PUSH32 lookahead and the one-past-the-end offset, fits the type,
+  (4) W is minimal when bounded: W = 12 implies max_code + 33 > 255, W = 16 implies > 4095,
+      W = 32 implies > 65535,
+  (5) boundaries: 222 -> 8, 223 -> 12, 255 -> 12, 65502 -> 16, 65503 -> 32, 65535 -> 32.""",
+        logic="QF_BV",
+        decls=f"""(declare-const max_code (_ BitVec 32))
+(declare-const unbounded Bool)
+; verified_ops.zig pcTypeWidthBits
+(define-fun needed ((m (_ BitVec 32))) (_ BitVec 64) (bvadd ((_ zero_extend 32) m) {bv(33, 64)}))
+(define-fun pcTypeWidthBits ((m (_ BitVec 32)) (u Bool)) (_ BitVec 8)
+  (ite u #x20
+  (ite (bvule (needed m) {bv(255, 64)}) #x08
+  (ite (bvule (needed m) {bv(4095, 64)}) #x0c
+  (ite (bvule (needed m) {bv(65535, 64)}) #x10 #x20)))))
+(define-fun W () (_ BitVec 8) (pcTypeWidthBits max_code unbounded))
+; largest value of an unsigned W-bit integer, in 64 bits
+(define-fun pcMax () (_ BitVec 64) (bvsub (bvshl {bv(1, 64)} ((_ zero_extend 56) W)) {bv(1, 64)}))
+(define-fun exactNeeded () (_ BitVec 65) (bvadd ((_ zero_extend 33) max_code) {bv(33, 65)}))""",
+        hyps=[],
+        goal=f"""(and (or (= W #x08) (= W #x0c) (= W #x10) (= W #x20))
+     (=> unbounded (= W #x20))
+     (= ((_ zero_extend 1) (needed max_code)) exactNeeded)
+     (=> (not (= W #x20)) (bvule exactNeeded ((_ zero_extend 1) pcMax)))
+     (=> (and (not unbounded) (= W #x0c)) (bvugt exactNeeded {bv(255, 65)}))
+     (=> (and (not unbounded) (= W #x10)) (bvugt exactNeeded {bv(4095, 65)}))
+     (=> (and (not unbounded) (= W #x20)) (bvugt exactNeeded {bv(65535, 65)}))
+     (= (pcTypeWidthBits {bv(222, 32)} false) #x08)
+     (= (pcTypeWidthBits {bv(223, 32)} false) #x0c)
+     (= (pcTypeWidthBits {bv(255, 32)} false) #x0c)
+     (= (pcTypeWidthBits {bv(65502, 32)} false) #x10)
+     (= (pcTypeWidthBits {bv(65503, 32)} false) #x20)
+     (= (pcTypeWidthBits {bv(65535, 32)} false) #x20))""",
+        sources=src(VERIFIED_OPS, "pcTypeWidthBits"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="code_fits_pc",
+        claim="""For ALL u64 code_len and ALL u64 pc_max:
+  codeFitsPc(code_len, pc_max)  iff  code_len + 33 <= pc_max   (65-bit integer arithmetic).
+The subtraction pc_max - 33 is taken only when pc_max >= 33, so it never wraps, and the
+check never computes code_len + 33 (which wraps for lengths near 2^64).""",
+        logic="QF_BV",
+        decls=f"""(declare-const code_len (_ BitVec 64))
+(declare-const pc_max (_ BitVec 64))
+; verified_ops.zig codeFitsPc
+(define-fun codeFitsPc ((n (_ BitVec 64)) (m (_ BitVec 64))) Bool
+  (ite (bvult m {bv(33, 64)}) false (bvule n (bvsub m {bv(33, 64)}))))""",
+        hyps=[],
+        goal=f"""(and (= (codeFitsPc code_len pc_max)
+        (bvule (bvadd ((_ zero_extend 1) code_len) {bv(33, 65)}) ((_ zero_extend 1) pc_max)))
+     (=> (not (bvult pc_max {bv(33, 64)}))
+         (= ((_ zero_extend 1) (bvsub pc_max {bv(33, 64)})) (bvsub ((_ zero_extend 1) pc_max) {bv(33, 65)}))))""",
+        sources=src(VERIFIED_OPS, "codeFitsPc"),
+    )
+)
+
+SAT_STACK_DEFS = f"""; verified_ops.zig saturatingMinStackU16: needed = @intCast(-@as(i64, min_stack)) as u32
+(define-fun minNeeded64 ((m (_ BitVec 32))) (_ BitVec 64) (bvneg ((_ sign_extend 32) m)))
+(define-fun saturatingMinStackU16 ((m (_ BitVec 32))) (_ BitVec 16)
+  (ite (bvsge m {bv(0, 32)}) #x0000
+    (let ((needed ((_ extract 31 0) (minNeeded64 m))))
+      ((_ extract 15 0) (ite (bvult needed {bv(65535, 32)}) needed {bv(65535, 32)})))))
+; verified_ops.zig saturatingMaxStackU16: headroom = @intCast(max_stack) as u32
+(define-fun saturatingMaxStackU16 ((m (_ BitVec 32))) (_ BitVec 16)
+  (ite (bvsle m {bv(0, 32)}) #x0000
+    ((_ extract 15 0) (ite (bvult m {bv(65535, 32)}) m {bv(65535, 32)}))))
+; specification: clamp a 64-bit signed integer into [0, 65535]
+(define-fun clampU16 ((x (_ BitVec 64))) (_ BitVec 64)
+  (ite (bvslt x {bv(0, 64)}) {bv(0, 64)} (ite (bvsgt x {bv(65535, 64)}) {bv(65535, 64)} x)))"""
+
+theorem(
+    Theorem(
+        name="saturating_min_stack_u16",
+        claim="""For ALL i32 min_stack, minInt(i32) included:
+  saturatingMinStackU16(min_stack) = min(max(-min_stack, 0), 65535)   (64-bit signed arithmetic),
+and on the negative branch -@as(i64, min_stack) lies in [1, 2^31], so its `@intCast` to u32
+is lossless and cannot trap. 10,923 LOG4 opcodes (min_stack = -65538) give 65535, not a panic.""",
+        logic="QF_BV",
+        decls="(declare-const min_stack (_ BitVec 32))\n" + SAT_STACK_DEFS,
+        hyps=[],
+        goal=f"""(and (= ((_ zero_extend 48) (saturatingMinStackU16 min_stack))
+        (clampU16 (bvneg ((_ sign_extend 32) min_stack))))
+     (=> (bvslt min_stack {bv(0, 32)})
+         (and (bvsge (minNeeded64 min_stack) {bv(1, 64)})
+              (bvsle (minNeeded64 min_stack) {bv(1 << 31, 64)})
+              (= ((_ zero_extend 32) ((_ extract 31 0) (minNeeded64 min_stack))) (minNeeded64 min_stack))))
+     (= (saturatingMinStackU16 {bv(-65538, 32)}) #xffff)
+     (= (saturatingMinStackU16 {bv(-(1 << 31), 32)}) #xffff))""",
+        sources=src(VERIFIED_OPS, "saturatingMinStackU16"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="saturating_max_stack_u16",
+        claim="""For ALL i32 max_stack:
+  saturatingMaxStackU16(max_stack) = min(max(max_stack, 0), 65535)   (64-bit signed arithmetic).
+The `@intCast` to u32 is taken only for max_stack > 0, where it is lossless.""",
+        logic="QF_BV",
+        decls="(declare-const max_stack (_ BitVec 32))\n" + SAT_STACK_DEFS,
+        hyps=[],
+        goal="""(= ((_ zero_extend 48) (saturatingMaxStackU16 max_stack))
+   (clampU16 ((_ sign_extend 32) max_stack)))""",
+        sources=src(VERIFIED_OPS, "saturatingMaxStackU16"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="stack_effect_step",
+        claim="""For ALL i32 height and ALL u8 inputs, outputs, stackEffectStep(height, inputs, outputs):
+  low  = clamp_i32(height - inputs)
+  high = clamp_i32(low + outputs)
+in 64-bit signed integer arithmetic, where clamp_i32 saturates into [minInt(i32), maxInt(i32)].
+No step can overflow i32, however long the block is. When neither saturates,
+high = height - inputs + outputs exactly.""",
+        logic="QF_BV",
+        decls=f"""(declare-const height (_ BitVec 32))
+(declare-const inputs (_ BitVec 8))
+(declare-const outputs (_ BitVec 8))
+; verified_ops.zig stackEffectStep: low = height -| inputs (LLVM ssub.sat), high = low +| outputs (sadd.sat).
+; Both operands are non-negative, so the subtraction can only underflow and the addition only overflow.
+(define-fun stepLow ((h (_ BitVec 32)) (i (_ BitVec 8))) (_ BitVec 32)
+  (let ((d (bvsub h ((_ zero_extend 24) i))))
+    (ite (and (bvslt h {bv(0, 32)}) (bvsge d {bv(0, 32)})) {bv(1 << 31, 32)} d)))
+(define-fun stepHigh ((l (_ BitVec 32)) (o (_ BitVec 8))) (_ BitVec 32)
+  (let ((s (bvadd l ((_ zero_extend 24) o))))
+    (ite (and (bvsge l {bv(0, 32)}) (bvslt s {bv(0, 32)})) {bv((1 << 31) - 1, 32)} s)))
+(define-fun clampI32 ((x (_ BitVec 64))) (_ BitVec 64)
+  (ite (bvslt x {bv(-(1 << 31), 64)}) {bv(-(1 << 31), 64)}
+  (ite (bvsgt x {bv((1 << 31) - 1, 64)}) {bv((1 << 31) - 1, 64)} x)))
+(define-fun low () (_ BitVec 32) (stepLow height inputs))
+(define-fun high () (_ BitVec 32) (stepHigh low outputs))
+(define-fun exactLow () (_ BitVec 64) (bvsub ((_ sign_extend 32) height) ((_ zero_extend 56) inputs)))
+(define-fun exactHigh () (_ BitVec 64) (bvadd exactLow ((_ zero_extend 56) outputs)))""",
+        hyps=[],
+        goal="""(and (= ((_ sign_extend 32) low) (clampI32 exactLow))
+     (= ((_ sign_extend 32) high) (clampI32 (bvadd ((_ sign_extend 32) low) ((_ zero_extend 56) outputs))))
+     (=> (and (= (clampI32 exactLow) exactLow) (= (clampI32 exactHigh) exactHigh))
+         (= ((_ sign_extend 32) high) exactHigh)))""",
+        sources=src(VERIFIED_OPS, "stackEffectStep"),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Solver driver
 # ---------------------------------------------------------------------------
 

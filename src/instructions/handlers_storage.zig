@@ -45,8 +45,7 @@ pub fn Handlers(FrameType: type) type {
                 access_cost -| OPCODE_INFO[@backingInt(Opcode.SLOAD)].gas_cost
             else
                 0;
-            self.gas_remaining -= @intCast(surcharge);
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(surcharge)) {
                 self.afterComplete(.SLOAD);
                 return Error.OutOfGas;
             }
@@ -112,8 +111,10 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Access storage slot once to both warm it and get cost
-            const access_cost = evm.access_list.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            // Access storage slot once to both warm it and get cost. `Evm.access_storage_slot`
+            // records a failed allocation as a host failure; warming the slot through the
+            // access list directly would let it pass as an ordinary frame halt.
+            const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => {
                     self.afterComplete(.SSTORE);
                     return Error.AllocationError;
@@ -138,9 +139,7 @@ pub fn Handlers(FrameType: type) type {
                 .{ slot, original_value, current_value, value, is_cold, cost.gas, cost.refund },
             );
 
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(cost.gas);
-            if (self.gas_remaining < 0) {
+            if (!self.chargeDynamicGas(cost.gas)) {
                 self.afterComplete(.SSTORE);
                 return Error.OutOfGas;
             }

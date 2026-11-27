@@ -45,6 +45,7 @@ test "trace validation - basic trace population on successful call" {
         .gas_limit = 1_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try Evm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO_ADDRESS);
@@ -133,6 +134,7 @@ test "trace validation - trace step details are correct" {
         .gas_limit = 1_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try Evm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO_ADDRESS);
@@ -230,6 +232,7 @@ test "trace validation - REVERT produces trace" {
         .gas_limit = 1_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try Evm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO_ADDRESS);
@@ -316,6 +319,7 @@ test "trace validation - gas consumption tracking" {
         .gas_limit = 1_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try Evm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO_ADDRESS);
@@ -404,6 +408,7 @@ test "trace validation - snapshot test" {
         .gas_limit = 1_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try Evm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO_ADDRESS);
@@ -512,6 +517,7 @@ test "trace validation - CREATE operation produces trace" {
         .gas_limit = 1_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try Evm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO_ADDRESS);

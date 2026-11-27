@@ -34,6 +34,7 @@ fn setup_evm(allocator: std.mem.Allocator) !struct {
         .gas_limit = 1_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     const instance = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, ZERO_ADDRESS);
 

@@ -33,7 +33,8 @@ fn setup_test_evm(allocator: std.mem.Allocator) !struct {
     const context = TransactionContext{
         .gas_limit = 5000000,
         .coinbase = ZERO_ADDRESS,
-        .chain_id = 1, // Ethereum mainnet
+        .chain_id = 1, // Ethereum mainnet,
+        .allow_gas_price_below_base_fee = true,
     };
     
     const evm_instance = try evm.DefaultEvm.init(
@@ -424,6 +425,7 @@ test "EVM2 Comprehensive - Hardfork Support" {
             .gas_limit = 1000000,
             .coinbase = ZERO_ADDRESS,
             .chain_id = 1,
+            .allow_gas_price_below_base_fee = true,
         };
         
         var evm_instance = try evm.DefaultEvm.init(testing.allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, hf);

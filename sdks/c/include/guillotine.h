@@ -34,8 +34,10 @@
  * from any thread. Zero-length arrays use non-NULL placeholder pointers; never
  * free them yourself.
  *
- * Threads: different handles may be used from different threads at once. A
- * single handle must not be used by two threads at the same time.
+ * Threads: every function may be called from any thread. Calls on different
+ * handles run in parallel; calls on one handle run one at a time. A handle
+ * destroyed (or cleaned up) while another thread is inside a call on it stays
+ * alive until that call returns, and is invalid for every later call.
  *
  * Pointer arguments: a NULL pointer with a non-zero length (input, code, data)
  * is rejected. A NULL pointer with length 0 is accepted as empty.

@@ -98,6 +98,7 @@ fn run_div_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var guillotine_evm = try evm.Evm(.{
@@ -366,6 +367,7 @@ fn run_div_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void 
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var guillotine_evm = try evm.Evm(.{

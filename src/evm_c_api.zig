@@ -15,7 +15,14 @@
 //!   (the `*_tracing` variants are kept as aliases for existing callers).
 //! - All memory handed to the caller comes from `std.heap.c_allocator` and may be freed
 //!   from any thread with the matching `guillotine_free_*` function.
-//! - A single handle must not be used by two threads at the same time.
+//! - Threads. Any function may be called from any thread at any time. An entry point
+//!   borrows its handle under the registry lock and holds the borrow until it returns;
+//!   `guillotine_evm_destroy` and `guillotine_cleanup` take the handle out of the
+//!   registry at once and free it only when no borrow is left, so a call in progress
+//!   on another thread finishes on a live EVM. Calls on one handle run one at a time
+//!   (an EVM is single-threaded); calls on different handles run in parallel.
+//! - `guillotine_call` commits its state changes only together with its result: when
+//!   the result cannot be allocated it returns NULL and the call is rolled back.
 //!
 //! Errors: functions return NULL/false and record a message readable with
 //! `guillotine_get_last_error()` (thread-local, valid until the next failing call on
@@ -231,11 +238,27 @@ fn inputSlice(ptr: ?[*]const u8, len: usize, comptime what: []const u8) ?[]const
 // HANDLE REGISTRY
 // ============================================================================
 
-/// Tagged owner of one EVM instance. The active tag is the handle's concrete EVM type,
-/// and every entry point dispatches on it so a handle is never reinterpreted as another type.
+/// One registered handle: the concrete EVM instance and the bookkeeping that keeps it
+/// alive while an entry point uses it.
+///
+/// Lifetime. An entry point borrows the box with `acquireHandle` and returns it with
+/// `releaseHandle`. `borrows` counts the entry points between the two, and `retired`
+/// is set once the handle has left the registry (`guillotine_evm_destroy`,
+/// `guillotine_cleanup`). Both are read and written only under `registry_mutex`.
+/// The box is torn down by whoever observes `retired` with `borrows == 0`: the
+/// destroyer when nobody is inside, otherwise the last borrower on its way out. No
+/// thread ever waits for another one to leave, so nothing can deadlock, and no
+/// thread can free a box that another is still using.
+///
+/// Exclusion. An EVM is single-threaded. `use` serializes the entry points of one
+/// handle, so concurrent calls on the same handle queue up instead of racing.
 const HandleBox = struct {
     variant: Variant,
     call_tracer: ?*evm.CallTracer = null,
+    borrows: usize = 0,
+    retired: bool = false,
+    retired_next: ?*HandleBox = null,
+    use: std.Io.Mutex = .init,
 
     const Variant = union(enum) {
         mainnet: *MainnetEvm,
@@ -266,18 +289,51 @@ fn unlockRegistry() void {
     std.Io.Threaded.mutexUnlock(&registry_mutex);
 }
 
-/// Look up a live handle. Sets an error and returns null for NULL, unknown, or destroyed handles.
-fn resolve(handle: ?*EvmHandle) ?*HandleBox {
+/// Borrow a live handle for the duration of one entry point. Sets an error and
+/// returns null for NULL, unknown, or destroyed handles. The borrow is counted under
+/// the registry lock, in the same critical section as the lookup, so a concurrent
+/// destroy either removes the handle before the lookup (and the caller gets null)
+/// or sees the borrow and leaves the teardown to `releaseHandle`. Every successful
+/// call must be paired with `releaseHandle`.
+fn acquireHandle(handle: ?*EvmHandle) ?*HandleBox {
     const h = handle orelse {
         setError("EVM handle is NULL", .{});
         return null;
     };
-    lockRegistry();
-    defer unlockRegistry();
-    return handle_registry.get(@intFromPtr(h)) orelse {
-        setError("Invalid or destroyed EVM handle", .{});
-        return null;
+    const box = blk: {
+        lockRegistry();
+        defer unlockRegistry();
+        const found = handle_registry.get(@intFromPtr(h)) orelse {
+            setError("Invalid or destroyed EVM handle", .{});
+            return null;
+        };
+        found.borrows += 1;
+        break :blk found;
     };
+    // Taken after the registry lock is released: a long call on this handle must
+    // not stall lookups of other handles.
+    std.Io.Threaded.mutexLockUncancelable(&box.use);
+    return box;
+}
+
+/// Return a handle borrowed with `acquireHandle`. Tears the box down when it was
+/// retired while borrowed and this was the last borrow.
+fn releaseHandle(box: *HandleBox) void {
+    std.Io.Threaded.mutexUnlock(&box.use);
+    const last = blk: {
+        lockRegistry();
+        defer unlockRegistry();
+        box.borrows -= 1;
+        break :blk box.retired and box.borrows == 0;
+    };
+    if (last) destroyBox(box);
+}
+
+/// Take a handle that has left the registry out of service. Returns true when the
+/// caller must destroy it now; false when a borrower will. Requires `registry_mutex`.
+fn retireLocked(box: *HandleBox) bool {
+    box.retired = true;
+    return box.borrows == 0;
 }
 
 fn toBlockInfo(info: *const BlockInfoFFI) BlockInfo {
@@ -325,6 +381,10 @@ fn createBox(comptime tag: HandleBox.VariantTag, info: *const BlockInfoFFI) !*Ha
         .chain_id = chain_id,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        // This ABI has no fee fields: every call is priced at zero, like `eth_call`
+        // without a gas price. A block base fee above zero would otherwise make
+        // every call an invalid transaction (EIP-1559).
+        .allow_gas_price_below_base_fee = true,
     }, 0, Address.ZERO_ADDRESS);
     errdefer instance.deinit();
     // `Evm.init` returns by value, so the arena's tracer pointer still refers to init's
@@ -350,6 +410,7 @@ fn createBox(comptime tag: HandleBox.VariantTag, info: *const BlockInfoFFI) !*Ha
         .variant = @unionInit(HandleBox.Variant, @tagName(tag), instance),
         .call_tracer = ct_ptr,
     };
+    if (builtin.is_test) _ = test_hooks.live_boxes.fetchAdd(1, .monotonic);
     return box;
 }
 
@@ -370,6 +431,7 @@ fn createHostBox(info: *const BlockInfoFFI, vtable: GuillotineHostVTable, user_c
         .chain_id = chain_id,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     }, 0, Address.ZERO_ADDRESS);
     errdefer instance.deinit();
     instance.call_arena.tracer = @ptrCast(&instance.tracer);
@@ -377,6 +439,7 @@ fn createHostBox(info: *const BlockInfoFFI, vtable: GuillotineHostVTable, user_c
 
     const box = try ffi_allocator.create(HandleBox);
     box.* = .{ .variant = .{ .host_callback = instance } };
+    if (builtin.is_test) _ = test_hooks.live_boxes.fetchAdd(1, .monotonic);
     return box;
 }
 
@@ -428,6 +491,7 @@ fn createHostBoxOnLargeStack(
     return job.result;
 }
 
+/// Free a box and its EVM. The box must be out of the registry and unborrowed.
 fn destroyBox(box: *HandleBox) void {
     if (box.call_tracer) |ct| {
         ct.deinit();
@@ -443,6 +507,7 @@ fn destroyBox(box: *HandleBox) void {
         },
     }
     ffi_allocator.destroy(box);
+    if (builtin.is_test) _ = test_hooks.live_boxes.fetchSub(1, .monotonic);
 }
 
 fn registerBox(box: *HandleBox) ?*EvmHandle {
@@ -505,15 +570,32 @@ export fn guillotine_init() void {
 }
 
 /// Destroy every live handle and disable handle creation until the next `guillotine_init`.
-/// Handles used after cleanup are rejected as invalid.
+/// Handles used after cleanup are rejected as invalid. A handle that another thread
+/// is using at this moment leaves the registry now and is freed when that thread's
+/// call returns.
 export fn guillotine_cleanup() void {
-    lockRegistry();
-    defer unlockRegistry();
-    var it = handle_registry.valueIterator();
-    while (it.next()) |box| destroyBox(box.*);
-    handle_registry.deinit(ffi_allocator);
-    handle_registry = .empty;
-    initialized = false;
+    var to_destroy: ?*HandleBox = null;
+    {
+        lockRegistry();
+        defer unlockRegistry();
+        var it = handle_registry.valueIterator();
+        while (it.next()) |box_ptr| {
+            const box = box_ptr.*;
+            // Unborrowed boxes cannot be reached any more: chain them intrusively
+            // and destroy them outside `registry_mutex` with zero heap allocation.
+            if (retireLocked(box)) {
+                box.retired_next = to_destroy;
+                to_destroy = box;
+            }
+        }
+        handle_registry.deinit(ffi_allocator);
+        handle_registry = .empty;
+        initialized = false;
+    }
+    while (to_destroy) |box| {
+        to_destroy = box.retired_next;
+        destroyBox(box);
+    }
 }
 
 /// Create an EVM with configuration 0 (mainnet), 1 (structLogs tracer), 2 (test mode), or 3 (call tracer).
@@ -588,7 +670,8 @@ export fn guillotine_evm_create_with_host(
 
 /// Update block context on an existing handle without recreating it or dropping `DispatchCache`.
 export fn guillotine_set_block_info(handle: ?*EvmHandle, block_info: ?*const BlockInfoFFI) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     const info = block_info orelse {
         setError("block_info is NULL", .{});
         return false;
@@ -606,6 +689,8 @@ export fn guillotine_set_block_info(handle: ?*EvmHandle, block_info: ?*const Blo
 
 /// Free a handle and all of its state. NULL is a no-op; an unknown or already destroyed
 /// handle is reported through `guillotine_get_last_error` and otherwise ignored.
+/// The handle is invalid as soon as this returns. If another thread is inside a call
+/// on it, that call finishes on the still-live EVM and frees it on return.
 export fn guillotine_evm_destroy(handle: ?*EvmHandle) void {
     const h = handle orelse return;
     const box = blk: {
@@ -615,6 +700,7 @@ export fn guillotine_evm_destroy(handle: ?*EvmHandle) void {
             setError("guillotine_evm_destroy: invalid or already destroyed handle", .{});
             return;
         };
+        if (!retireLocked(entry.value)) return;
         break :blk entry.value;
     };
     destroyBox(box);
@@ -653,7 +739,8 @@ fn editAccount(instance: anytype, address: [20]u8, edit: AccountEdit) !void {
 }
 
 fn applyEdit(handle: ?*EvmHandle, address: ?*const [20]u8, edit: AccountEdit) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     const addr = address orelse {
         setError("address is NULL", .{});
         return false;
@@ -688,7 +775,8 @@ export fn guillotine_set_nonce_tracing(handle: ?*EvmHandle, address: ?*const [20
 }
 
 export fn guillotine_get_nonce(handle: ?*EvmHandle, address: ?*const [20]u8, nonce_out: ?*u64) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     const addr = address orelse {
         setError("address is NULL", .{});
         return false;
@@ -722,7 +810,8 @@ export fn guillotine_set_code_tracing(
 }
 
 export fn guillotine_get_balance(handle: ?*EvmHandle, address: ?*const [20]u8, balance_out: ?*[32]u8) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     const addr = address orelse {
         setError("address is NULL", .{});
         return false;
@@ -763,7 +852,8 @@ fn storedCode(
 /// Copy the code stored under an account (what EXTCODECOPY reads; see `storedCode`).
 /// Free a non-empty result with `guillotine_free_code`.
 export fn guillotine_get_code(handle: ?*EvmHandle, address: ?*const [20]u8, code_out: ?*[*]u8, len_out: ?*usize) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     const addr = address orelse {
         setError("address is NULL", .{});
         return false;
@@ -814,7 +904,8 @@ export fn guillotine_set_storage(
     key: ?*const [32]u8,
     value: ?*const [32]u8,
 ) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     if (address == null or key == null or value == null) {
         setError("address, key, and value must not be NULL", .{});
         return false;
@@ -836,7 +927,8 @@ export fn guillotine_get_storage(
     key: ?*const [32]u8,
     value_out: ?*[32]u8,
 ) bool {
-    const box = resolve(handle) orelse return false;
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
     if (address == null or key == null or value_out == null) {
         setError("address, key, and value_out must not be NULL", .{});
         return false;
@@ -905,44 +997,72 @@ fn execute(
 ) ?*EvmResult {
     const E = @TypeOf(instance.*);
     const call_params = buildCallParams(E, p, input) orelse return null;
-    // `Evm.call` subtracts the intrinsic cost from the gas limit. An EVM built with gas
-    // checks disabled (test mode) skips the comparison that makes the subtraction safe,
-    // so a limit below the intrinsic cost is rejected here, with the result every other
-    // configuration returns for it: failure with no gas left.
-    const is_create = call_params.isCreate();
-    const eips = evm.Eips{ .hardfork = instance.get_hardfork() };
-    const calldata_gas = eips.calldata_gas_cost(eips.tokens_in_calldata(input), is_create, input.len);
-    const initial_gas = eips.intrinsic_gas_cost(is_create) + calldata_gas;
-    if (p.gas < initial_gas) {
-        var rejected = E.CallResult.failed(0);
-        return convertCallResult(&rejected, false) catch |err| {
-            setError("Failed to copy call result: {s}", .{@errorName(err)});
-            return null;
-        };
-    }
+    // Transaction admission, intrinsic gas included, is `Evm.call`'s alone: it rejects
+    // a gas limit below the fork's intrinsic cost on every configuration, and a copy
+    // of that rule here could only disagree with it.
     if (call_tracer) |ct| ct.clear();
+
     // The caller is the transaction origin for top-level calls and simulations alike
-    // (ORIGIN opcode, nonce increment, fee accounting).
+    // (ORIGIN opcode, nonce increment, fee accounting), for this call only.
+    const saved_origin = instance.origin;
     instance.origin = Address{ .bytes = p.caller };
-    var result = switch (mode) {
-        .call => instance.call(call_params),
-        .simulate => instance.simulate(call_params),
-    };
-    defer result.deinit(instance.allocator);
-    const out = convertCallResult(&result, include_trace) catch |err| {
-        setError("Failed to copy call result: {s}", .{@errorName(err)});
-        return null;
-    };
-    attachCallTraceJson(out, call_tracer) catch |err| {
-        freeResult(out);
-        setError("Failed to serialize call trace: {s}", .{@errorName(err)});
-        return null;
-    };
-    return out;
+    defer instance.origin = saved_origin;
+
+    const database = instance.database;
+    switch (mode) {
+        .simulate => {
+            // `simulate` runs on an ephemeral view of the database and discards it:
+            // nothing is committed, whatever happens to the result afterwards.
+            var result = instance.simulate(call_params);
+            defer result.deinit(instance.allocator);
+            const out = convertCallResult(result_allocator, &result, include_trace) catch |err| {
+                setError("Failed to copy call result: {s}", .{@errorName(err)});
+                return null;
+            };
+            attachCallTraceJson(out, call_tracer) catch |err| {
+                freeResult(out);
+                setError("Failed to serialize call trace: {s}", .{@errorName(err)});
+                return null;
+            };
+            return out;
+        },
+        .call => {
+            // `Evm.call` commits the transaction to the database before the C result
+            // exists. Run it inside an outer snapshot, so that a result that cannot
+            // be built takes the transaction back with it: a NULL return must mean
+            // "nothing happened", or the host and the database disagree from then on.
+            const depth = database.snapshot_depth();
+            const snapshot = database.create_snapshot() catch |err| {
+                setError("Failed to open the call snapshot: {s}", .{@errorName(err)});
+                return null;
+            };
+            var result = instance.call(call_params);
+            defer result.deinit(instance.allocator);
+            const converted = convertCallResult(result_allocator, &result, include_trace) catch |err| {
+                database.revert_to_depth(depth);
+                setError("Failed to copy call result, call rolled back: {s}", .{@errorName(err)});
+                return null;
+            };
+            attachCallTraceJson(converted, call_tracer) catch |err| {
+                database.revert_to_depth(depth);
+                freeResult(converted);
+                setError("Failed to serialize call trace, call rolled back: {s}", .{@errorName(err)});
+                return null;
+            };
+            database.commit_snapshot(snapshot) catch |err| {
+                database.revert_to_depth(depth);
+                freeResult(converted);
+                setError("Failed to commit the call, call rolled back: {s}", .{@errorName(err)});
+                return null;
+            };
+            return converted;
+        },
+    }
 }
 
 fn run(handle: ?*EvmHandle, params: ?*const CallParams, mode: ExecMode) ?*EvmResult {
-    const box = resolve(handle) orelse return null;
+    const box = acquireHandle(handle) orelse return null;
+    defer releaseHandle(box);
     const p = params orelse {
         setError("params is NULL", .{});
         return null;
@@ -981,7 +1101,7 @@ fn convertTxResult(tx_res: *const evm.tx_runner.TxResult, call_tracer: ?*evm.Cal
 
     out.success = tx_res.success;
     out.gas_left = tx_res.gas_left;
-    out.output = try dupeOrEmpty(u8, tx_res.output);
+    out.output = try dupeOrEmpty(ffi_allocator, u8, tx_res.output);
     out.output_len = tx_res.output.len;
 
     if (tx_res.logs.len > 0) {
@@ -1003,7 +1123,7 @@ fn convertTxResult(tx_res: *const evm.tx_runner.TxResult, call_tracer: ?*evm.Cal
                 entry.topics = topics.ptr;
                 entry.topics_len = topics.len;
             }
-            entry.data = try dupeOrEmpty(u8, item.data);
+            entry.data = try dupeOrEmpty(ffi_allocator, u8, item.data);
             entry.data_len = item.data.len;
         }
     }
@@ -1036,22 +1156,38 @@ fn executeTxOnInstance(
         .input = input,
         .disable_balance_check = p.disable_balance_check,
     };
+    const database = instance.database;
+    const depth = database.snapshot_depth();
+    const snapshot = database.create_snapshot() catch |err| {
+        setError("Failed to open transaction snapshot: {s}", .{@errorName(err)});
+        return null;
+    };
     var tx_res = evm.tx_runner.executeTx(E, ffi_allocator, instance, tx) catch |err| {
+        database.revert_to_depth(depth);
         setError("Transaction failed: {s}", .{@errorName(err)});
         return null;
     };
     defer tx_res.deinit(ffi_allocator);
-    return convertTxResult(&tx_res, call_tracer) catch |err| {
-        setError("Failed to copy transaction result: {s}", .{@errorName(err)});
+    const converted = convertTxResult(&tx_res, call_tracer) catch |err| {
+        database.revert_to_depth(depth);
+        setError("Failed to copy transaction result, transaction rolled back: {s}", .{@errorName(err)});
         return null;
     };
+    database.commit_snapshot(snapshot) catch |err| {
+        database.revert_to_depth(depth);
+        freeResult(converted);
+        setError("Failed to commit transaction, transaction rolled back: {s}", .{@errorName(err)});
+        return null;
+    };
+    return converted;
 }
 
 /// Execute a full Ethereum transaction (intrinsic gas, EIP-1559 fee validation,
 /// EIP-7623 calldata floor, EIP-3529 refund cap, EIP-7825 gas cap, coinbase tip).
 /// Free the result with `guillotine_free_result`.
 export fn guillotine_execute_tx(handle: ?*EvmHandle, params: ?*const TxParamsFFI) ?*EvmResult {
-    const box = resolve(handle) orelse return null;
+    const box = acquireHandle(handle) orelse return null;
+    defer releaseHandle(box);
     const p = params orelse {
         setError("params is NULL", .{});
         return null;
@@ -1085,36 +1221,87 @@ fn emptyResult() EvmResult {
     };
 }
 
-/// Copy `items` with the C allocator, or return the shared empty pointer for none.
-fn dupeOrEmpty(comptime T: type, items: []const T) ![*]const T {
+/// Allocator of everything a call result copies into C memory. It is the C allocator.
+/// A test build routes it through `test_hooks`, which can make one chosen allocation
+/// fail; the memory still comes from the C allocator, so `freeResult` frees it as usual.
+const result_allocator: std.mem.Allocator = if (builtin.is_test)
+    .{ .ptr = undefined, .vtable = &test_hooks.vtable }
+else
+    ffi_allocator;
+
+/// Fault injection for tests of this ABI. Nothing here exists in a non-test build.
+pub const test_hooks = if (builtin.is_test) struct {
+    /// When set, the allocation with this index (0 = the next one) made while a call
+    /// result is copied into C memory fails, once. Per thread, so a test that
+    /// injects a failure does not disturb calls on other threads.
+    pub threadlocal var fail_result_allocation_at: ?usize = null;
+
+    /// Handle boxes that exist right now: created and not yet torn down. A stress
+    /// test reads it to prove that no box leaks and none is destroyed twice.
+    pub var live_boxes: std.atomic.Value(usize) = .init(0);
+
+    const vtable = std.mem.Allocator.VTable{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    fn alloc(_: *anyopaque, len: usize, alignment: std.mem.Alignment, return_address: usize) ?[*]u8 {
+        if (fail_result_allocation_at) |remaining| {
+            if (remaining == 0) {
+                fail_result_allocation_at = null;
+                return null;
+            }
+            fail_result_allocation_at = remaining - 1;
+        }
+        return ffi_allocator.rawAlloc(len, alignment, return_address);
+    }
+
+    fn resize(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, return_address: usize) bool {
+        return ffi_allocator.rawResize(memory, alignment, new_len, return_address);
+    }
+
+    fn remap(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, return_address: usize) ?[*]u8 {
+        return ffi_allocator.rawRemap(memory, alignment, new_len, return_address);
+    }
+
+    fn free(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, return_address: usize) void {
+        ffi_allocator.rawFree(memory, alignment, return_address);
+    }
+} else struct {};
+
+/// Copy `items` with `allocator`, or return the shared empty pointer for none.
+fn dupeOrEmpty(allocator: std.mem.Allocator, comptime T: type, items: []const T) ![*]const T {
     if (items.len == 0) return emptyPtr(T);
-    return (try ffi_allocator.dupe(T, items)).ptr;
+    return (try allocator.dupe(T, items)).ptr;
 }
 
 /// Owned NUL-terminated copy of `text`. Interior NULs become '?' so the C string
 /// length equals the allocation length minus one (needed to free it exactly).
-fn dupeCString(text: []const u8) ![*:0]const u8 {
-    const copy = try ffi_allocator.allocSentinel(u8, text.len, 0);
+fn dupeCString(allocator: std.mem.Allocator, text: []const u8) ![*:0]const u8 {
+    const copy = try allocator.allocSentinel(u8, text.len, 0);
     for (copy, text) |*dst, c| dst.* = if (c == 0) '?' else c;
     return copy.ptr;
 }
 
 /// Copy a CallResult into a C-allocated EvmResult. Every pointer is set before any
 /// allocation that can fail, so `freeResult` releases a partial copy correctly.
-fn convertCallResult(result: anytype, include_trace: bool) !*EvmResult {
-    const out = try ffi_allocator.create(EvmResult);
+/// `allocator` must hand out C-allocator memory (see `result_allocator`).
+fn convertCallResult(allocator: std.mem.Allocator, result: anytype, include_trace: bool) !*EvmResult {
+    const out = try allocator.create(EvmResult);
     out.* = emptyResult();
     errdefer freeResult(out);
 
     out.success = result.success;
     out.gas_left = result.gas_left;
-    if (result.error_info) |info| out.error_message = try dupeCString(info);
+    if (result.error_info) |info| out.error_message = try dupeCString(allocator, info);
 
-    out.output = try dupeOrEmpty(u8, result.output);
+    out.output = try dupeOrEmpty(allocator, u8, result.output);
     out.output_len = result.output.len;
 
     if (result.logs.len > 0) {
-        const logs = try ffi_allocator.alloc(LogEntry, result.logs.len);
+        const logs = try allocator.alloc(LogEntry, result.logs.len);
         for (logs, result.logs) |*entry, item| entry.* = .{
             .address = item.address.bytes,
             .topics = emptyPtr([32]u8),
@@ -1126,18 +1313,18 @@ fn convertCallResult(result: anytype, include_trace: bool) !*EvmResult {
         out.logs_len = logs.len;
         for (logs, result.logs) |*entry, item| {
             if (item.topics.len > 0) {
-                const topics = try ffi_allocator.alloc([32]u8, item.topics.len);
+                const topics = try allocator.alloc([32]u8, item.topics.len);
                 for (topics, item.topics) |*dst, topic| std.mem.writeInt(u256, dst, topic, .big);
                 entry.topics = topics.ptr;
                 entry.topics_len = topics.len;
             }
-            entry.data = try dupeOrEmpty(u8, item.data);
+            entry.data = try dupeOrEmpty(allocator, u8, item.data);
             entry.data_len = item.data.len;
         }
     }
 
     if (result.selfdestructs.len > 0) {
-        const records = try ffi_allocator.alloc(SelfDestructRecord, result.selfdestructs.len);
+        const records = try allocator.alloc(SelfDestructRecord, result.selfdestructs.len);
         for (records, result.selfdestructs) |*dst, sd| {
             dst.* = .{ .contract = sd.contract.bytes, .beneficiary = sd.beneficiary.bytes };
         }
@@ -1146,14 +1333,14 @@ fn convertCallResult(result: anytype, include_trace: bool) !*EvmResult {
     }
 
     if (result.accessed_addresses.len > 0) {
-        const addresses = try ffi_allocator.alloc([20]u8, result.accessed_addresses.len);
+        const addresses = try allocator.alloc([20]u8, result.accessed_addresses.len);
         for (addresses, result.accessed_addresses) |*dst, a| dst.* = a.bytes;
         out.accessed_addresses = addresses.ptr;
         out.accessed_addresses_len = addresses.len;
     }
 
     if (result.accessed_storage.len > 0) {
-        const slots = try ffi_allocator.alloc(StorageAccessRecord, result.accessed_storage.len);
+        const slots = try allocator.alloc(StorageAccessRecord, result.accessed_storage.len);
         for (slots, result.accessed_storage) |*dst, access| {
             dst.address = access.address.bytes;
             std.mem.writeInt(u256, &dst.slot, access.slot, .big);
@@ -1169,7 +1356,7 @@ fn convertCallResult(result: anytype, include_trace: bool) !*EvmResult {
 
     if (include_trace) {
         if (result.trace) |*trace| {
-            const json = try writeTraceJson(ffi_allocator, trace);
+            const json = try writeTraceJson(allocator, trace);
             if (json.len == 0) {
                 ffi_allocator.free(json);
             } else {
@@ -1297,7 +1484,7 @@ fn dumpState(instance: anytype) !*StateDumpFFI {
         acc.address = try parseDumpAddress(entry.key_ptr.*);
         std.mem.writeInt(u256, &acc.balance, entry.value_ptr.balance, .big);
         acc.nonce = entry.value_ptr.nonce;
-        acc.code = try dupeOrEmpty(u8, entry.value_ptr.code);
+        acc.code = try dupeOrEmpty(ffi_allocator, u8, entry.value_ptr.code);
         acc.code_len = entry.value_ptr.code.len;
 
         const slots = entry.value_ptr.storage.count();
@@ -1322,7 +1509,8 @@ fn dumpState(instance: anytype) !*StateDumpFFI {
 
 /// Dump every touched, non-empty account. Free with `guillotine_free_state_dump`.
 export fn guillotine_dump_state(handle: ?*EvmHandle) ?*StateDumpFFI {
-    const box = resolve(handle) orelse return null;
+    const box = acquireHandle(handle) orelse return null;
+    defer releaseHandle(box);
     return switch (box.variant) {
         inline else => |instance| dumpState(instance),
     } catch |err| {

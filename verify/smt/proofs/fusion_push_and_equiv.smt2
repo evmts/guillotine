@@ -12,7 +12,16 @@
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
 ;; --- src/instructions/handlers_bitwise_synthetic.zig:18 (push_and_inline)
-;;   |         pub fn push_and_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |         pub fn push_and_inline(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_AND_INLINE, cursor, s, gas);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -27,8 +36,17 @@
 ;;   | 
 ;;   |             return N.next(self, .PUSH_AND_INLINE, cursor, s, gas);
 ;;   |         }
-;; --- src/instructions/handlers_bitwise_synthetic.zig:35 (push_and_pointer)
-;;   |         pub fn push_and_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;; --- src/instructions/handlers_bitwise_synthetic.zig:44 (push_and_pointer)
+;;   |         pub fn push_and_pointer(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_AND_POINTER, cursor, s, gas);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");

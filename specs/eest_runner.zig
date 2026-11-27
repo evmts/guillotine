@@ -324,10 +324,6 @@ fn hasNoCode(account: Account) bool {
     return std.mem.eql(u8, &account.code_hash, &zero_hash) or std.mem.eql(u8, &account.code_hash, &emptyCodeHash());
 }
 
-fn isEmptyAccount(account: Account) bool {
-    return account.nonce == 0 and account.balance == 0 and hasNoCode(account) and account.delegated_address == null;
-}
-
 fn delegationCode(target: [20]u8) [23]u8 {
     var code: [23]u8 = undefined;
     @memcpy(code[0..3], &delegation_prefix);
@@ -869,6 +865,45 @@ const Validated = struct {
     }
 };
 
+/// True for the rejections `Evm.call` decides from the transaction, the sender
+/// account and the block: for these the runner requires `Evm.call` to reject the
+/// transaction too. The others depend on inputs `Evm.call` is never given: the
+/// signature and envelope type (it takes a sender, not a signed transaction), the
+/// block gas limit, and a fixture's own blob schedule.
+fn evmCallDecides(exception: TxException) bool {
+    return switch (exception) {
+        .INTRINSIC_GAS_TOO_LOW,
+        .INTRINSIC_GAS_BELOW_FLOOR_GAS_COST,
+        .NONCE_IS_MAX,
+        .INITCODE_SIZE_EXCEEDED,
+        .GAS_LIMIT_EXCEEDS_MAXIMUM,
+        .PRIORITY_GREATER_THAN_MAX_FEE_PER_GAS,
+        .INSUFFICIENT_MAX_FEE_PER_GAS,
+        .TYPE_3_TX_ZERO_BLOBS,
+        .TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH,
+        .INSUFFICIENT_MAX_FEE_PER_BLOB_GAS,
+        .TYPE_3_TX_CONTRACT_CREATION,
+        .TYPE_4_TX_CONTRACT_CREATION,
+        .TYPE_4_EMPTY_AUTHORIZATION_LIST,
+        .NONCE_MISMATCH_TOO_LOW,
+        .NONCE_MISMATCH_TOO_HIGH,
+        .GASLIMIT_PRICE_PRODUCT_OVERFLOW,
+        .INSUFFICIENT_ACCOUNT_FUNDS,
+        .SENDER_NOT_EOA,
+        => true,
+        .TYPE_1_TX_PRE_FORK,
+        .TYPE_2_TX_PRE_FORK,
+        .TYPE_3_TX_PRE_FORK,
+        .TYPE_4_TX_PRE_FORK,
+        .INVALID_CHAINID,
+        .INVALID_SIGNATURE_VRS,
+        .GAS_ALLOWANCE_EXCEEDED,
+        .TYPE_3_TX_MAX_BLOB_GAS_ALLOWANCE_EXCEEDED,
+        .TYPE_3_TX_BLOB_COUNT_EXCEEDED,
+        => false,
+    };
+}
+
 fn validateTx(
     fork: Fork,
     fork_name: []const u8,
@@ -1020,74 +1055,6 @@ fn loadPre(db: *Database, pre: []const PreAccount) !void {
     }
 }
 
-fn precompileAddresses(fork: Fork) []const u16 {
-    if (fork.atLeast(.Osaka)) return &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x100 };
-    if (fork.atLeast(.Prague)) return &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11 };
-    if (fork.atLeast(.Cancun)) return &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a };
-    if (fork.atLeast(.Istanbul)) return &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-    if (fork.atLeast(.Byzantium)) return &.{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    return &.{ 1, 2, 3, 4 };
-}
-
-fn precompileAddress(number: u16) [20]u8 {
-    var bytes = @as([20]u8, @splat(0));
-    std.mem.writeInt(u16, bytes[18..20], number, .big);
-    return bytes;
-}
-
-fn createAddress(a: Allocator, sender: [20]u8, nonce: u64) ![20]u8 {
-    var payload: std.ArrayList(u8) = .empty;
-    try rlpAppendBytes(a, &payload, &sender);
-    try rlpAppendUint(a, &payload, nonce);
-    const digest = keccak(try rlpWrapList(a, payload.items));
-    return digest[12..32].*;
-}
-
-const Executed = struct {
-    success: bool,
-    gas_used: u64,
-    logs_hash: [32]u8,
-};
-
-const AddressSet = std.AutoHashMapUnmanaged([20]u8, void);
-
-/// EIP-7702 authorization list. Returns the gas refund it earns.
-fn applyAuthorizations(
-    a: Allocator,
-    db: *Database,
-    access_list: anytype,
-    chain_id: u64,
-    authorizations: []const Authorization,
-    touched: *AddressSet,
-) !u64 {
-    var refund: u64 = 0;
-    for (authorizations) |authorization| {
-        if (authorization.chain_id != 0 and authorization.chain_id != chain_id) continue;
-        if (authorization.nonce >= std.math.maxInt(u64)) continue;
-        if (authorization.y_parity > 1) continue;
-        if (authorization.r == 0 or authorization.r >= secp256k1_n) continue;
-        if (authorization.s == 0 or authorization.s > secp256k1_n / 2) continue;
-        const authority = authorization.signer orelse continue;
-
-        try access_list.pre_warm_addresses(&.{primitives.Address{ .bytes = authority }});
-        const existing = try db.get_account(authority);
-        var account = existing orelse Account.zero();
-        if (!hasNoCode(account)) continue;
-        if (account.nonce != authorization.nonce) continue;
-
-        if (existing != null) refund += 25000 - 12500;
-        if (std.mem.eql(u8, &authorization.address, &(@as([20]u8, @splat(0))))) {
-            account.delegated_address = null;
-        } else {
-            account.delegated_address = .{ .bytes = authorization.address };
-        }
-        account.nonce += 1;
-        try db.set_account(authority, account);
-        try touched.put(a, authority, {});
-    }
-    return refund;
-}
-
 fn logsHash(a: Allocator, logs: anytype) ![32]u8 {
     var list: std.ArrayList(u8) = .empty;
     for (logs) |log| {
@@ -1106,40 +1073,82 @@ fn logsHash(a: Allocator, logs: anytype) ![32]u8 {
     return keccak(try rlpWrapList(a, list.items));
 }
 
-/// Applies one valid transaction to `db` and finalizes it.
-fn applyTx(
+const Executed = struct {
+    success: bool,
+    gas_used: u64,
+    logs_hash: [32]u8,
+};
+
+/// What `Evm.call` made of one fixture transaction.
+const CallOutcome = union(enum) {
+    /// `Evm.call` refused the transaction as invalid and changed no state.
+    rejected: []const u8,
+    executed: Executed,
+};
+
+/// A fixture authorization tuple as the EVM's EIP-7702 tuple. Fixtures state every
+/// field as a 256-bit integer; the EVM's tuple holds 64-bit chain ID, nonce and
+/// parity. A value that does not fit makes the tuple invalid (EIP-7702 skips it),
+/// and the conversion keeps it invalid for the same reason the specification gives.
+fn toEvmAuthorization(authorization: Authorization) primitives.Authorization.Authorization {
+    var r: [32]u8 = undefined;
+    var s: [32]u8 = undefined;
+    std.mem.writeInt(u256, &r, authorization.r, .big);
+    std.mem.writeInt(u256, &s, authorization.s, .big);
+    const max_u64 = std.math.maxInt(u64);
+    // A chain ID above 2^64 - 1 can match no chain. `chain_id` 0 means "any chain",
+    // so the mismatch is expressed with the one nonce the EIP rejects outright.
+    const chain_fits = authorization.chain_id <= max_u64;
+    return .{
+        .chain_id = if (chain_fits) @intCast(authorization.chain_id) else 0,
+        .address = .{ .bytes = authorization.address },
+        .nonce = if (chain_fits and authorization.nonce < max_u64) @intCast(authorization.nonce) else max_u64,
+        // Parity above 1 is invalid whatever its size.
+        .v = if (authorization.y_parity <= 1) @intCast(authorization.y_parity) else 2,
+        .r = r,
+        .s = s,
+    };
+}
+
+/// Runs one fixture transaction through `Evm.call`, the EVM's own transaction
+/// processor: admission (intrinsic gas, nonce, fees, EIP-3607, blob and set-code
+/// rules), gas purchase, EIP-2930 warming, the EIP-7702 authorization list,
+/// execution, refunds, the fee payment, SELFDESTRUCT and EIP-161 cleanup. The
+/// runner adds nothing to the state afterwards, so the fixture's state root and
+/// receipt check `Evm.call` itself.
+fn callTx(
     comptime fork: Fork,
     a: Allocator,
     gpa: Allocator,
     db: *Database,
     test_case: *const TestCase,
     tx: Tx,
-    validated: Validated,
-) !Executed {
+    tx_type: u8,
+    blob_base_fee: u256,
+) !CallOutcome {
     const Vm = VmFor(fork);
     const template = tx.template;
     const env = test_case.env;
     const sender_address = primitives.Address{ .bytes = template.sender };
     const coinbase_address = primitives.Address{ .bytes = env.coinbase };
-    const tx_nonce: u64 = @intCast(template.nonce);
-    const gas_price = validated.effective_gas_price;
 
-    // Accounts that exist before the transaction, for EIP-161 cleanup.
-    var existed: AddressSet = .empty;
-    var existed_it = db.accounts.keyIterator();
-    while (existed_it.next()) |key| try existed.put(a, key.*, {});
+    const gas_limit = std.math.cast(u64, tx.gas_limit) orelse return error.GasLimitExceedsU64;
+    const tx_nonce = std.math.cast(u64, template.nonce) orelse return error.NonceExceedsU64;
 
-    var touched: AddressSet = .empty;
-    try touched.put(a, template.sender, {});
-    try touched.put(a, env.coinbase, {});
-    if (template.to) |to| try touched.put(a, to, {});
+    const access_list = try a.alloc(evm.AccessListEntry, tx.access_list.len);
+    for (access_list, tx.access_list) |*entry, source| {
+        entry.* = .{ .address = .{ .bytes = source.address }, .storage_keys = source.keys };
+    }
+    const fixture_authorizations: []const Authorization = template.authorizations orelse &.{};
+    const authorization_list = try a.alloc(primitives.Authorization.Authorization, fixture_authorizations.len);
+    for (authorization_list, fixture_authorizations) |*tuple, source| tuple.* = toEvmAuthorization(source);
 
-    // Buy gas and increment the sender nonce. A creation transaction derives its
-    // address from the pre-increment nonce (`tx_nonce`).
-    var sender = try accountOrZero(db, template.sender);
-    sender.balance -= @as(u256, validated.gas_limit) * gas_price + validated.blob_fee;
-    sender.nonce = tx_nonce + 1;
-    try db.set_account(template.sender, sender);
+    // A typed fee market transaction states its caps and the EVM derives the price
+    // from them; a legacy or EIP-2930 transaction states the price.
+    const has_fee_caps = tx_type >= 2;
+    const gas_price: ?u256 = if (has_fee_caps) null else template.gas_price orelse return error.MissingGasPrice;
+    const max_fee_per_gas: ?u256 = if (has_fee_caps) template.max_fee_per_gas orelse return error.MissingMaxFeePerGas else null;
+    const max_priority_fee_per_gas: u256 = if (has_fee_caps) template.max_priority_fee_per_gas orelse return error.MissingMaxPriorityFeePerGas else 0;
 
     const blob_hashes: []const [32]u8 = template.blob_hashes orelse &.{};
     const prevrandao: [32]u8 = env.random orelse zero_hash;
@@ -1156,148 +1165,66 @@ fn applyTx(
             .coinbase = coinbase_address,
             .base_fee = env.base_fee orelse 0,
             .prev_randao = if (fork.atLeast(.Paris)) prevrandao else zero_hash,
-            .blob_base_fee = validated.blob_base_fee,
+            .blob_base_fee = blob_base_fee,
             .blob_versioned_hashes = blob_hashes,
             .block_hashes = ancestor_hashes,
         },
         .{
-            .gas_limit = validated.gas_limit,
+            .gas_limit = gas_limit,
             .coinbase = coinbase_address,
-            // TransactionContext keeps 16 bits; CHAINID reads BlockInfo.chain_id.
-            .chain_id = @truncate(test_case.chain_id),
+            .chain_id = test_case.chain_id,
             .blob_versioned_hashes = blob_hashes,
-            .blob_base_fee = validated.blob_base_fee,
+            .blob_base_fee = blob_base_fee,
+            .is_blob_transaction = tx_type == 3,
+            .max_fee_per_gas = max_fee_per_gas,
+            .max_priority_fee_per_gas = max_priority_fee_per_gas,
+            .max_fee_per_blob_gas = template.max_fee_per_blob_gas orelse 0,
+            .access_list = access_list,
+            .authorization_list = authorization_list,
+            .is_set_code_transaction = tx_type == 4,
+            .tx_nonce = tx_nonce,
         },
         gas_price,
         sender_address,
     );
     defer vm.deinit();
 
-    // EIP-2929 / EIP-2930 / EIP-3651 warm set.
-    if (fork.atLeast(.Berlin)) {
-        try vm.access_list.pre_warm_addresses(&.{sender_address});
-        for (precompileAddresses(fork)) |number| {
-            try vm.access_list.pre_warm_addresses(&.{primitives.Address{ .bytes = precompileAddress(number) }});
-        }
-        if (template.to) |to| {
-            try vm.access_list.pre_warm_addresses(&.{primitives.Address{ .bytes = to }});
-        } else {
-            const created = try createAddress(a, template.sender, tx_nonce);
-            try vm.access_list.pre_warm_addresses(&.{primitives.Address{ .bytes = created }});
-        }
-        if (fork.atLeast(.Shanghai)) try vm.access_list.pre_warm_addresses(&.{coinbase_address});
-        for (tx.access_list) |entry| {
-            const address = primitives.Address{ .bytes = entry.address };
-            try vm.access_list.pre_warm_addresses(&.{address});
-            for (entry.keys) |key| _ = try vm.access_list.access_storage_slot(address, key);
-        }
-    }
-
-    var authorization_refund: u64 = 0;
-    if (fork.atLeast(.Prague)) {
-        if (template.authorizations) |authorizations| {
-            authorization_refund = try applyAuthorizations(a, db, &vm.access_list, test_case.chain_id, authorizations, &touched);
-        }
-        // The authorization list can change the target's delegation, so the
-        // delegate is warmed after it is applied.
-        if (template.to) |to| try vm.warmDelegatedTarget(.{ .bytes = to });
-    }
-
-    const execution_gas = validated.gas_limit - validated.intrinsic.gas;
-    var success = false;
-    var gas_left: u64 = 0;
-    if (template.to) |to| {
-        const result = vm.inner_call(.{ .call = .{
+    var result = if (template.to) |to|
+        vm.call(.{ .call = .{
             .caller = sender_address,
             .to = .{ .bytes = to },
             .value = tx.value,
             .input = tx.data,
-            .gas = execution_gas,
-        } });
-        success = result.success;
-        gas_left = result.gas_left;
-    } else {
-        // Intrinsic gas already paid CreateGas and the EIP-3860 initcode words, and the
-        // sender nonce is already incremented. The flag makes the EVM run this as the
-        // transaction's own creation: no opcode CREATE charge, no 1/64 retention, and
-        // the address derived from the pre-increment nonce.
-        vm.tx_sender_nonce_incremented = true;
-        const result = vm.inner_call(.{ .create = .{
+            .gas = gas_limit,
+        } })
+    else
+        vm.call(.{ .create = .{
             .caller = sender_address,
             .value = tx.value,
             .init_code = tx.data,
-            .gas = execution_gas,
+            .gas = gas_limit,
         } });
-        success = result.success;
-        gas_left = result.gas_left;
-    }
+    defer result.deinit(gpa);
+
     // A host failure (allocation, database, missing KZG setup) is not a
     // transaction outcome: the test errors instead of comparing a state root.
     if (vm.host_failure) |err| return err;
-    if (gas_left > execution_gas) return error.EvmReturnedMoreGasThanSupplied;
+    // Without a host failure, `error_info` is set only for an invalid transaction.
+    if (result.error_info) |reason| return .{ .rejected = try a.dupe(u8, reason) };
+    if (result.gas_left > gas_limit) return error.EvmReturnedMoreGasThanSupplied;
 
-    // Refunds (EIP-3529 cap from London) and the EIP-7623 floor.
-    var gas_used = validated.gas_limit - gas_left;
-    var refund_counter = authorization_refund;
-    if (success) refund_counter += vm.gas_refund_counter;
-    const refund_quotient: u64 = if (fork.atLeast(.London)) 5 else 2;
-    gas_used -= @min(refund_counter, gas_used / refund_quotient);
-    if (fork.atLeast(.Prague)) gas_used = @max(gas_used, validated.intrinsic.floor);
+    return .{ .executed = .{
+        .success = result.success,
+        .gas_used = gas_limit - result.gas_left,
+        .logs_hash = try logsHash(a, result.logs),
+    } };
+}
 
-    // The nonce was incremented when gas was bought; a self-sponsored EIP-7702
-    // authorization may have incremented it again, so it is not rewritten here.
-    sender = try accountOrZero(db, template.sender);
-    sender.balance += @as(u256, validated.gas_limit - gas_used) * gas_price;
-    try db.set_account(template.sender, sender);
-
-    // EIP-1559 burns the base fee; the coinbase receives the tip.
-    const tip: u256 = if (fork.atLeast(.London)) gas_price - (env.base_fee orelse 0) else gas_price;
-    var coinbase = try accountOrZero(db, env.coinbase);
-    coinbase.balance += @as(u256, gas_used) * tip;
-    try db.set_account(env.coinbase, coinbase);
-
-    const logs_hash = if (success) try logsHash(a, vm.logs.items) else try logsHash(a, vm.logs.items[0..0]);
-
-    if (success) {
-        // The EVM records SELFDESTRUCT and moved the balance when the opcode ran; the
-        // transaction deletes the accounts. Ether an account received after its
-        // SELFDESTRUCT is burned with it. From Cancun the record holds only contracts
-        // created in this transaction.
-        const Destruction = struct { contract: [20]u8, recipient: [20]u8 };
-        var destructions: std.ArrayList(Destruction) = .empty;
-        var destruct_it = vm.self_destruct.iterator();
-        while (destruct_it.next()) |entry| {
-            try destructions.append(a, .{ .contract = entry.key_ptr.bytes, .recipient = entry.value_ptr.bytes });
-        }
-        for (destructions.items) |destruction| {
-            try touched.put(a, destruction.recipient, {});
-            try db.delete_account(destruction.contract);
-        }
-        // Before EIP-161 a successful call creates its target account.
-        if (!fork.atLeast(.SpuriousDragon)) {
-            if (template.to) |to| {
-                if ((try db.get_account(to)) == null) try db.set_account(to, Account.zero());
-            }
-        }
-    }
-
-    // EIP-161: delete every touched account that is empty.
-    if (fork.atLeast(.SpuriousDragon)) {
-        var touched_it = vm.touched_addresses.keyIterator();
-        while (touched_it.next()) |key| try touched.put(a, key.bytes, {});
-        var doomed: std.ArrayList([20]u8) = .empty;
-        var account_it = db.accounts.iterator();
-        while (account_it.next()) |entry| {
-            if (!isEmptyAccount(entry.value_ptr.*)) continue;
-            const address = entry.key_ptr.*;
-            // An empty account that did not exist before was created, and so
-            // touched, by this transaction.
-            if (touched.contains(address) or !existed.contains(address)) try doomed.append(a, address);
-        }
-        for (doomed.items) |address| try db.delete_account(address);
-    }
-
-    return .{ .success = success, .gas_used = gas_used, .logs_hash = logs_hash };
+/// Blob base fee of the fixture's block, or 0 before Cancun.
+fn fixtureBlobBaseFee(fork: Fork, fork_name: []const u8, test_case: *const TestCase) !u256 {
+    if (!fork.atLeast(.Cancun)) return 0;
+    const params = try blobParams(fork, fork_name, test_case.blob_schedule);
+    return blobBaseFee(test_case.env.excess_blob_gas orelse 0, params.update_fraction);
 }
 
 /// Explains a state-root mismatch with the fixture's expected `state` dump.
@@ -1360,6 +1287,18 @@ fn diagnoseState(a: Allocator, db: *Database, expected: std.json.ObjectMap) !?Ou
     return null;
 }
 
+/// Envelope type of a signed transaction: the first byte of a typed transaction
+/// (EIP-2718), 0 for a legacy one, which starts with an RLP list header.
+fn txType(tx_bytes: []const u8) u8 {
+    if (tx_bytes.len == 0 or tx_bytes[0] >= 0xc0) return 0;
+    return tx_bytes[0];
+}
+
+/// True when the transaction's nonce fits the EVM's 64-bit nonce.
+fn nonceFitsEvm(tx: Tx) bool {
+    return tx.template.nonce <= std.math.maxInt(u64);
+}
+
 fn runPostFor(
     comptime fork: Fork,
     a: Allocator,
@@ -1375,6 +1314,7 @@ fn runPostFor(
     const tx = try selectTx(&test_case.tx, post);
     const sender = try accountOrZero(&db, test_case.tx.sender);
     const validated = try validateTx(fork, fork_name, test_case, tx, post.tx_bytes, sender);
+    const tx_type = txType(post.tx_bytes);
 
     if (post.expect_exception) |expected| {
         const exception = validated.exception orelse {
@@ -1387,8 +1327,23 @@ fn runPostFor(
         return Outcome.failure("unexpected_tx_rejection", try std.fmt.allocPrint(a, "valid transaction rejected with {s}{s}", .{ exception_prefix, @tagName(exception) }));
     }
 
+    // Every transaction the EVM can judge goes through `Evm.call`. The runner's own
+    // validation above names the fixture's exception; `Evm.call` must reach the same
+    // verdict, and for an accepted transaction it alone produces the post-state.
     var executed: ?Executed = null;
-    if (validated.exception == null) executed = try applyTx(fork, a, gpa, &db, test_case, tx, validated);
+    if (validated.exception) |exception| {
+        if (evmCallDecides(exception) and tx.gas_limit <= std.math.maxInt(i64) and nonceFitsEvm(tx)) {
+            switch (try callTx(fork, a, gpa, &db, test_case, tx, tx_type, try fixtureBlobBaseFee(fork, fork_name, test_case))) {
+                .rejected => {},
+                .executed => return Outcome.failure("evm_call_accepted_invalid_tx", try std.fmt.allocPrint(a, "Evm.call executed a transaction that is invalid with {s}{s}", .{ exception_prefix, @tagName(exception) })),
+            }
+        }
+    } else {
+        switch (try callTx(fork, a, gpa, &db, test_case, tx, tx_type, validated.blob_base_fee)) {
+            .rejected => |reason| return Outcome.failure("evm_call_rejected_valid_tx", try std.fmt.allocPrint(a, "Evm.call rejected a valid transaction: {s}", .{reason})),
+            .executed => |result| executed = result,
+        }
+    }
 
     const root = try db.get_state_root();
     const logs_hash = if (executed) |result| result.logs_hash else try logsHash(a, &[_]evm.Log{});

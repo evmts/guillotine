@@ -35,6 +35,7 @@ test "SELFDESTRUCT records should be tracked in CallResult" {
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     
@@ -130,6 +131,7 @@ test "SELFDESTRUCT multiple contracts in single call" {
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Create EVM instance with LONDON hardfork (pre-EIP-6780)
@@ -251,6 +253,7 @@ test "EIP-6780: SELFDESTRUCT only destroys contracts created in same transaction
         .gas_limit = 100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Create EVM instance with CANCUN hardfork (EIP-6780 enabled)

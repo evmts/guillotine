@@ -6,6 +6,7 @@ const Address = primitives.Address;
 // Access to call params through the call params module
 const call_params_mod = @import("../frame/call_params.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
+const verified_ops = @import("../core/verified_ops.zig");
 // u256 is now a built-in type in Zig 0.14+
 
 /// System opcode handlers for the EVM stack frame.
@@ -44,10 +45,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// Deduct `amount` from the gas left. False when the frame cannot pay.
         fn chargeGas(self: *FrameType, amount: u64) bool {
-            const charge = std.math.cast(FrameType.GasType, amount) orelse return false;
-            if (charge > self.gas_remaining) return false;
-            self.gas_remaining -= charge;
-            return true;
+            return self.chargeDynamicGas(amount);
         }
 
         /// True when `addr` does not exist or is empty (EIP-161 "dead").
@@ -81,21 +79,21 @@ pub fn Handlers(FrameType: type) type {
 
             if (comptime hardfork.isAtLeast(.PRAGUE)) {
                 if (try delegateOf(self, addr)) |delegate| {
-                    extra_gas += evm.access_address(delegate) catch {
+                    extra_gas +|= evm.access_address(delegate) catch {
                         @branchHint(.cold);
                         self.afterComplete(opcode);
                         return Error.AllocationError;
                     };
                 }
             }
-            if (value != 0) extra_gas += GasConstants.CallValueTransferGas;
+            if (value != 0) extra_gas +|= GasConstants.CallValueTransferGas;
 
             if (comptime kind == .call) {
                 const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork))
                     value != 0 and try isDeadAccount(self, addr)
                 else
                     !evm.database.account_exists(addr.bytes);
-                if (charge_new_account) extra_gas += fork_gas.new_account_gas;
+                if (charge_new_account) extra_gas +|= fork_gas.new_account_gas;
             }
             return extra_gas;
         }
@@ -171,7 +169,8 @@ pub fn Handlers(FrameType: type) type {
             const memory_cost: u64 = if (memory_end > 0) self.memory.get_expansion_cost(memory_end) else 0;
             const extra_gas = try computeCallExtraGas(self, kind, opcode, addr, value);
 
-            if (!chargeGas(self, memory_cost + extra_gas)) {
+            // The memory cost saturates at maxInt(u64) for a range no gas can pay.
+            if (!chargeGas(self, verified_ops.saturatingGasSum(memory_cost, extra_gas))) {
                 @branchHint(.cold);
                 self.afterComplete(opcode);
                 return Error.OutOfGas;
@@ -184,15 +183,19 @@ pub fn Handlers(FrameType: type) type {
                 }
             }
             if (memory_end > 0) {
-                self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch {
+                self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch |err| {
                     @branchHint(.cold);
                     self.afterComplete(opcode);
-                    return Error.AllocationError;
+                    return FrameType.memoryHalt(err);
                 };
             }
 
             const forwarded = try computeForwardedGas(self, opcode, gas_param);
-            self.gas_remaining -= @intCast(forwarded);
+            if (!chargeGas(self, forwarded)) {
+                @branchHint(.cold);
+                self.afterComplete(opcode);
+                return Error.OutOfGas;
+            }
 
             const input: []const u8 = if (input_size != 0)
                 self.memory.get_slice(@intCast(input_offset), @intCast(input_size)) catch {
@@ -215,10 +218,10 @@ pub fn Handlers(FrameType: type) type {
 
             const copy_len: usize = @min(@as(usize, @intCast(output_size)), result.output.len);
             if (copy_len > 0) {
-                self.memory.set_data(evm.getCallArenaAllocator(), @intCast(output_offset), result.output[0..copy_len]) catch {
+                self.memory.set_data(evm.getCallArenaAllocator(), @intCast(output_offset), result.output[0..copy_len]) catch |err| {
                     @branchHint(.cold);
                     self.afterComplete(opcode);
-                    return Error.AllocationError;
+                    return FrameType.memoryHalt(err);
                 };
             }
 
@@ -297,8 +300,8 @@ pub fn Handlers(FrameType: type) type {
             // able to pay them, otherwise it halts out of gas here.
             const words: u64 = (init_code_len + 31) / 32;
             var overhead: u64 = GasConstants.CreateGas;
-            if (comptime hardfork.isAtLeast(.SHANGHAI)) overhead += words * GasConstants.InitcodeWordGas;
-            if (is_create2) overhead += words * GasConstants.Keccak256WordGas;
+            if (comptime hardfork.isAtLeast(.SHANGHAI)) overhead +|= words *| GasConstants.InitcodeWordGas;
+            if (is_create2) overhead +|= words *| GasConstants.Keccak256WordGas;
             const available: u64 = @intCast(self.gas_remaining);
             if (available < overhead) {
                 self.afterComplete(opcode);
@@ -313,9 +316,9 @@ pub fn Handlers(FrameType: type) type {
 
             var init_code: []const u8 = &.{};
             if (memory_end > 0) {
-                self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch {
+                self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch |err| {
                     self.afterComplete(opcode);
-                    return Error.AllocationError;
+                    return FrameType.memoryHalt(err);
                 };
                 init_code = self.memory.get_slice(@intCast(offset), @intCast(size)) catch {
                     self.afterComplete(opcode);
@@ -407,14 +410,13 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(memory_expansion_cost);
-            if (self.gas_remaining < 0) {
+            if (!chargeGas(self, memory_expansion_cost)) {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
+            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32).
+            // A host that cannot grow the memory has failed; that is not an out-of-bounds halt.
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch |err| return FrameType.memoryHalt(err);
 
             // Copy the output range out of frame memory into the call arena.
             const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
@@ -467,14 +469,13 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(memory_expansion_cost);
-            if (self.gas_remaining < 0) {
+            if (!chargeGas(self, memory_expansion_cost)) {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
+            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32).
+            // A host that cannot grow the memory has failed; that is not an out-of-bounds halt.
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch |err| return FrameType.memoryHalt(err);
 
             // Copy the output range out of frame memory into the call arena.
             const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
@@ -530,7 +531,7 @@ pub fn Handlers(FrameType: type) type {
                     };
                     break :blk balance != 0 and try isDeadAccount(self, recipient);
                 } else !evm.database.account_exists(recipient.bytes);
-                if (charge_new_account) extra_gas += fork_gas.new_account_gas;
+                if (charge_new_account) extra_gas +|= fork_gas.new_account_gas;
             }
 
             if (!chargeGas(self, extra_gas)) {
@@ -547,6 +548,9 @@ pub fn Handlers(FrameType: type) type {
                     self.afterComplete(.SELFDESTRUCT);
                     return Error.WriteProtection;
                 },
+                // The transaction's own doing: the beneficiary cannot hold the sum.
+                // The frame halts. It is not a failure of the host, which is what
+                // `AllocationError` below reports.
                 error.BalanceOverflow => {
                     @branchHint(.cold);
                     self.afterComplete(.SELFDESTRUCT);

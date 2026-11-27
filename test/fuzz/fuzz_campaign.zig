@@ -50,6 +50,9 @@ const TARGETS = [_]TargetSpec{
     .{ .name = "arithmetic_u256", .weight = 14, .max_len = 128, .func = arithmetic_u256_fuzz.fuzzBinaryAndTernaryArithmetic },
     .{ .name = "bytecode_oracle", .weight = 8, .max_len = 512, .func = bytecode_fuzz.fuzzBytecodeJumpdestOracle },
     .{ .name = "bytecode_fusions", .weight = 8, .max_len = 256, .func = bytecode_fuzz.fuzzStructuredFusionPatterns },
+    .{ .name = "bytecode_pretty_print", .weight = 2, .max_len = 64, .func = bytecode_fuzz.fuzzPrettyPrintNeverTraps },
+    .{ .name = "bytecode_pc_width", .weight = 2, .max_len = 16, .func = bytecode_fuzz.fuzzPcTypeAndCodeSize },
+    .{ .name = "memory_gas_charge", .weight = 4, .max_len = 32, .func = memory_fuzz.fuzzHugeExpansionAndGasCharge },
     .{ .name = "stack_model", .weight = 6, .max_len = 256, .func = stack_fuzz.fuzzDefaultStack },
     .{ .name = "stack_overflow", .weight = 5, .max_len = 192, .func = stack_fuzz.fuzzSmallStackOverflow },
     .{ .name = "memory_model", .weight = 8, .max_len = 192, .func = memory_fuzz.fuzzMemoryModel },
@@ -63,8 +66,12 @@ const TARGETS = [_]TargetSpec{
     .{ .name = "trie_mpt", .weight = 6, .max_len = 192, .func = trie_fuzz.fuzzMerkleTrieModelAndOrderIndependence },
     .{ .name = "eip_blob_1559", .weight = 4, .max_len = 64, .func = eip_hardfork_fuzz.fuzzBlobGasAndEip1559Invariants },
     .{ .name = "eip_sstore_refunds", .weight = 4, .max_len = 64, .func = eip_hardfork_fuzz.fuzzSstoreGasAndRefundAcrossHardforks },
+    .{ .name = "eip_tx_admission", .weight = 8, .max_len = 16, .func = eip_hardfork_fuzz.fuzzTransactionAdmission },
+    .{ .name = "eip_blob_fee", .weight = 2, .max_len = 40, .func = eip_hardfork_fuzz.fuzzCheckedBlobFee },
     .{ .name = "eip_7702", .weight = 4, .max_len = 64, .func = eip_hardfork_fuzz.fuzzEip7702AuthorizationProcessor },
     .{ .name = "c_api_ffi", .weight = 6, .max_len = 160, .func = c_api_fuzz.fuzzCApiLifecycleAndExecution },
+    .{ .name = "c_api_pretty_print", .weight = 2, .max_len = 64, .func = c_api_fuzz.fuzzCApiPrettyPrint },
+    .{ .name = "c_api_handle_lifetime", .weight = 2, .max_len = 48, .func = c_api_fuzz.fuzzCApiHandleLifetime },
 };
 
 const INTERESTING_BYTES = [_]u8{

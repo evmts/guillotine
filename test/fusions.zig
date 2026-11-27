@@ -81,6 +81,7 @@ test "fusion: PUSH+ADD fusion detection and execution" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
@@ -589,6 +590,7 @@ test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
         .gas_limit = 10000000,
         .coinbase = Address.ZERO,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO);

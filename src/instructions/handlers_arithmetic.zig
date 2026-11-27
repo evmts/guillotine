@@ -428,11 +428,10 @@ pub fn Handlers(FrameType: type) type {
             const fork_eips = comptime eips.Eips{ .hardfork = FrameType.config.hardfork };
             const exp_byte_gas: u64 = comptime @intCast(fork_eips.eip_160_exp_byte_gas_cost());
             const gas_cost = exp_byte_gas * exp_bytes;
-            if (self.gas_remaining < 0 or gas_cost > @as(u64, @intCast(self.gas_remaining))) {
+            if (!self.chargeDynamicGas(gas_cost)) {
                 self.afterComplete(.EXP);
                 return Error.OutOfGas;
             }
-            self.gas_remaining -= @intCast(gas_cost);
 
             // Calculate base^exponent with wrapping multiplication (mod 2^256)
             var result: WordType = 1;

@@ -57,6 +57,7 @@ test "opcode overrides - replace ADD with custom handler" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try TestEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .CANCUN);
@@ -135,6 +136,7 @@ test "opcode overrides - add handler for invalid opcode 0xFE" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try TestEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .CANCUN);
@@ -237,6 +239,7 @@ test "opcode overrides - multiple overrides" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try TestEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .CANCUN);

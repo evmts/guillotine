@@ -260,6 +260,7 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = blob_base_fee,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try DefaultEvm.init(allocator, &db, block_info, tx_context, gas_price, sender);

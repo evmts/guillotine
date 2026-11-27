@@ -402,9 +402,179 @@ pub inline fn stackSwap1Top(top: [*]u256) void {
     top[1] = a;
 }
 
+/// Deduct `cost` of dynamic gas from `gas_remaining`, or return null when the frame
+/// cannot pay. `GasType` is the frame's signed gas type (`i32` or `i64`).
+///
+/// The comparison is made in `u64` before `cost` is narrowed, so a cost wider than
+/// `GasType` (a saturated `maxInt(u64)` memory expansion, a 2^31 cost against an `i32`
+/// frame) can neither trap in a checked build nor wrap in an unchecked one.
+/// Specification (proved in `charge_gas_checked_i32` / `charge_gas_checked_i64`):
+///   result == gas_remaining - cost  when 0 <= cost <= gas_remaining (as integers),
+///   result == null                  otherwise; a non-null result is in [0, gas_remaining].
+pub inline fn chargeGasChecked(comptime GasType: type, gas_remaining: GasType, cost: u64) ?GasType {
+    if (gas_remaining < 0) return null;
+    const available: u64 = @intCast(gas_remaining);
+    if (cost > available) return null;
+    return gas_remaining - @as(GasType, @intCast(cost));
+}
+
+/// Sum of two dynamic gas costs, saturating at `maxInt(u64)`. A saturated sum is
+/// unpayable by `chargeGasChecked` for every `GasType`, so it always ends in out-of-gas.
+pub inline fn saturatingGasSum(first: u64, second: u64) u64 {
+    return first +| second;
+}
+
+/// EIP-4844 blob fee `blob_gas * fee_per_blob_gas`, or null when the product does not
+/// fit in 256 bits. An overflowing fee is unpayable; it is never clamped.
+pub inline fn checkedBlobGasCost(blob_gas: u64, fee_per_blob_gas: u256) ?u256 {
+    const product = @mulWithOverflow(@as(u256, blob_gas), fee_per_blob_gas);
+    if (product[1] != 0) return null;
+    return product[0];
+}
+
+/// Bytes the bytecode analyzer may address past the end of the code: one PUSH32
+/// immediate (32 bytes) plus the one-past-the-end offset.
+pub const pc_headroom: u32 = 33;
+
+/// Width in bits (8, 12, 16 or 32) of the smallest program counter type that can
+/// hold `max_code + pc_headroom`. A fork before Shanghai has no initcode size limit
+/// (EIP-3860), so `unbounded_initcode` always selects 32 bits.
+/// The sum is computed in `u64`: `max_code + 33` cannot wrap for any `u32`.
+pub inline fn pcTypeWidthBits(max_code: u32, unbounded_initcode: bool) u8 {
+    if (unbounded_initcode) return 32;
+    const needed: u64 = @as(u64, max_code) + pc_headroom;
+    if (needed <= std.math.maxInt(u8)) return 8;
+    if (needed <= std.math.maxInt(u12)) return 12;
+    if (needed <= std.math.maxInt(u16)) return 16;
+    return 32;
+}
+
+/// True when code of `code_len` bytes, plus the analyzer's lookahead, is addressable
+/// by a program counter whose largest value is `pc_max`. Subtracting on the limit
+/// side keeps the check exact for every `u64` length (`code_len + 33` could wrap).
+pub inline fn codeFitsPc(code_len: u64, pc_max: u64) bool {
+    if (pc_max < pc_headroom) return false;
+    return code_len <= pc_max - pc_headroom;
+}
+
+/// Required incoming stack depth of a block whose lowest signed prefix height is
+/// `min_stack` (<= 0 for real blocks), saturated into `u16`. Total: every `i32`,
+/// `minInt(i32)` included, has a result and nothing traps.
+pub inline fn saturatingMinStackU16(min_stack: i32) u16 {
+    if (min_stack >= 0) return 0;
+    const needed: u32 = @intCast(-@as(i64, min_stack));
+    return @intCast(@min(needed, @as(u32, std.math.maxInt(u16))));
+}
+
+/// Required peak stack headroom of a block whose highest signed prefix height is
+/// `max_stack`, saturated into `u16`.
+pub inline fn saturatingMaxStackU16(max_stack: i32) u16 {
+    if (max_stack <= 0) return 0;
+    const headroom: u32 = @intCast(max_stack);
+    return @intCast(@min(headroom, @as(u32, std.math.maxInt(u16))));
+}
+
+/// One step of a block's signed stack height: `height - inputs + outputs`, with both
+/// the intermediate and the result saturating in `i32`. Returns the height after
+/// the pops (for the minimum) and after the pushes (for the maximum).
+pub inline fn stackEffectStep(height: i32, inputs: u8, outputs: u8) struct { low: i32, high: i32 } {
+    const low = height -| @as(i32, inputs);
+    return .{ .low = low, .high = low +| @as(i32, outputs) };
+}
 // ====== UNIT TESTS ======
 
 const testing = std.testing;
+
+test "verified_ops: chargeGasChecked pays exactly or refuses, for i32 and i64" {
+    inline for (.{ i32, i64 }) |GasType| {
+        const max: GasType = std.math.maxInt(GasType);
+        try testing.expectEqual(@as(?GasType, 0), chargeGasChecked(GasType, 0, 0));
+        try testing.expectEqual(@as(?GasType, null), chargeGasChecked(GasType, 0, 1));
+        try testing.expectEqual(@as(?GasType, 0), chargeGasChecked(GasType, 100, 100));
+        try testing.expectEqual(@as(?GasType, null), chargeGasChecked(GasType, 100, 101));
+        try testing.expectEqual(@as(?GasType, 0), chargeGasChecked(GasType, max, @intCast(max)));
+        try testing.expectEqual(@as(?GasType, null), chargeGasChecked(GasType, max, @as(u64, @intCast(max)) + 1));
+        try testing.expectEqual(@as(?GasType, null), chargeGasChecked(GasType, max, std.math.maxInt(u64)));
+        try testing.expectEqual(@as(?GasType, null), chargeGasChecked(GasType, -1, 0));
+        try testing.expectEqual(@as(?GasType, null), chargeGasChecked(GasType, std.math.minInt(GasType), 0));
+    }
+    // A cost that fits u32 but not i32 is refused, not narrowed.
+    try testing.expectEqual(@as(?i32, null), chargeGasChecked(i32, std.math.maxInt(i32), 1 << 31));
+}
+
+test "verified_ops: saturatingGasSum never wraps" {
+    const max = std.math.maxInt(u64);
+    try testing.expectEqual(@as(u64, 5), saturatingGasSum(2, 3));
+    try testing.expectEqual(@as(u64, max), saturatingGasSum(max, 1));
+    try testing.expectEqual(@as(u64, max), saturatingGasSum(max, max));
+    try testing.expectEqual(@as(?i64, null), chargeGasChecked(i64, std.math.maxInt(i64), saturatingGasSum(max, 3)));
+}
+
+test "verified_ops: checkedBlobGasCost rejects overflow instead of clamping" {
+    const max = std.math.maxInt(u256);
+    try testing.expectEqual(@as(?u256, 0), checkedBlobGasCost(0, max));
+    try testing.expectEqual(@as(?u256, max), checkedBlobGasCost(1, max));
+    try testing.expectEqual(@as(?u256, null), checkedBlobGasCost(2, max));
+    try testing.expectEqual(@as(?u256, 131072 * 7), checkedBlobGasCost(131072, 7));
+    // 2^17 * 2^239 = 2^256 overflows; one less fits.
+    try testing.expectEqual(@as(?u256, null), checkedBlobGasCost(131072, @as(u256, 1) << 239));
+    try testing.expectEqual(@as(?u256, 131072 * ((@as(u256, 1) << 239) - 1)), checkedBlobGasCost(131072, (@as(u256, 1) << 239) - 1));
+}
+
+test "verified_ops: pcTypeWidthBits accounts for the 33-byte headroom" {
+    try testing.expectEqual(@as(u8, 8), pcTypeWidthBits(0, false));
+    try testing.expectEqual(@as(u8, 8), pcTypeWidthBits(222, false));
+    try testing.expectEqual(@as(u8, 12), pcTypeWidthBits(223, false));
+    try testing.expectEqual(@as(u8, 12), pcTypeWidthBits(255, false));
+    try testing.expectEqual(@as(u8, 12), pcTypeWidthBits(4062, false));
+    try testing.expectEqual(@as(u8, 16), pcTypeWidthBits(4063, false));
+    try testing.expectEqual(@as(u8, 16), pcTypeWidthBits(49152, false));
+    try testing.expectEqual(@as(u8, 16), pcTypeWidthBits(65502, false));
+    try testing.expectEqual(@as(u8, 32), pcTypeWidthBits(65503, false));
+    try testing.expectEqual(@as(u8, 32), pcTypeWidthBits(65535, false));
+    try testing.expectEqual(@as(u8, 32), pcTypeWidthBits(std.math.maxInt(u32), false));
+    try testing.expectEqual(@as(u8, 32), pcTypeWidthBits(1, true));
+    try testing.expectEqual(@as(u8, 32), pcTypeWidthBits(49152, true));
+}
+
+test "verified_ops: codeFitsPc is exact at every boundary and never wraps" {
+    try testing.expect(codeFitsPc(222, std.math.maxInt(u8)));
+    try testing.expect(!codeFitsPc(223, std.math.maxInt(u8)));
+    try testing.expect(codeFitsPc(65502, std.math.maxInt(u16)));
+    try testing.expect(!codeFitsPc(65503, std.math.maxInt(u16)));
+    try testing.expect(codeFitsPc(65503, std.math.maxInt(u32)));
+    try testing.expect(codeFitsPc(std.math.maxInt(u32) - 33, std.math.maxInt(u32)));
+    try testing.expect(!codeFitsPc(std.math.maxInt(u32) - 32, std.math.maxInt(u32)));
+    try testing.expect(!codeFitsPc(std.math.maxInt(u64), std.math.maxInt(u32)));
+    try testing.expect(!codeFitsPc(std.math.maxInt(u64), std.math.maxInt(u64)));
+    try testing.expect(!codeFitsPc(0, 32));
+    try testing.expect(codeFitsPc(0, 33));
+}
+
+test "verified_ops: saturatingMinStackU16 and saturatingMaxStackU16 are total" {
+    try testing.expectEqual(@as(u16, 0), saturatingMinStackU16(0));
+    try testing.expectEqual(@as(u16, 0), saturatingMinStackU16(7));
+    try testing.expectEqual(@as(u16, 6), saturatingMinStackU16(-6));
+    try testing.expectEqual(@as(u16, 65535), saturatingMinStackU16(-65535));
+    try testing.expectEqual(@as(u16, 65535), saturatingMinStackU16(-65536));
+    try testing.expectEqual(@as(u16, 65535), saturatingMinStackU16(-65538));
+    try testing.expectEqual(@as(u16, 65535), saturatingMinStackU16(std.math.minInt(i32)));
+    try testing.expectEqual(@as(u16, 0), saturatingMaxStackU16(-3));
+    try testing.expectEqual(@as(u16, 1024), saturatingMaxStackU16(1024));
+    try testing.expectEqual(@as(u16, 65535), saturatingMaxStackU16(65536));
+    try testing.expectEqual(@as(u16, 65535), saturatingMaxStackU16(std.math.maxInt(i32)));
+}
+
+test "verified_ops: stackEffectStep saturates at both ends of i32" {
+    const step = stackEffectStep(0, 6, 0);
+    try testing.expectEqual(@as(i32, -6), step.low);
+    try testing.expectEqual(@as(i32, -6), step.high);
+    const floor = stackEffectStep(std.math.minInt(i32) + 2, 17, 1);
+    try testing.expectEqual(@as(i32, std.math.minInt(i32)), floor.low);
+    try testing.expectEqual(@as(i32, std.math.minInt(i32) + 1), floor.high);
+    const ceiling = stackEffectStep(std.math.maxInt(i32), 0, 1);
+    try testing.expectEqual(@as(i32, std.math.maxInt(i32)), ceiling.high);
+}
 
 test "verified_ops: expGasByteLenFast matches expGasByteLenRef on boundary values" {
     const cases = [_]u256{

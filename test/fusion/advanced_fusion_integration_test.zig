@@ -51,6 +51,7 @@ test "integration: constant folding executes correctly" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     // Create EVM instance
@@ -126,6 +127,7 @@ test "integration: multi-PUSH executes correctly" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
@@ -203,6 +205,7 @@ test "integration: multi-POP executes correctly" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
@@ -289,6 +292,7 @@ test "integration: ISZERO-JUMPI fusion executes correctly" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
@@ -361,6 +365,7 @@ test "integration: complex pattern with SHL executes correctly" {
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);

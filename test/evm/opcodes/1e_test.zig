@@ -47,7 +47,7 @@ test "CLZ opcode Osaka values, gas and Prague rejection" {
                     .prev_randao = @as([32]u8, @splat(0)),
                     .blob_base_fee = 1,
                     .blob_versioned_hashes = &.{},
-                }, .{ .gas_limit = 22_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
+                }, .{ .gas_limit = 22_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1, .allow_gas_price_below_base_fee = true }, 0, caller);
                 defer engine.deinit();
                 var result = engine.call(.{ .call = .{
                     .caller = caller,

@@ -27,7 +27,7 @@ test "blob gas pricing and excess accumulation across hardforks" {
     const max_blobs = cancun.max_blob_gas() / blob.BLOB_GAS_PER_BLOB;
     for (1..max_blobs + 1) |count| {
         try std.testing.expectEqual(
-            @as(u256, count * blob.BLOB_GAS_PER_BLOB * 7),
+            @as(?u256, count * blob.BLOB_GAS_PER_BLOB * 7),
             cancun.blob_gas_cost(7, count),
         );
     }

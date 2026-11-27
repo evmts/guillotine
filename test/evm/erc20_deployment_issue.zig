@@ -65,6 +65,7 @@ test "ERC20 deployment with standard EVM" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Use standard EVM (MinimalEvm is used automatically in debug mode)
@@ -151,6 +152,7 @@ test "Simple contract deployment test" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     // Use standard EVM (MinimalEvm is used automatically in debug mode)
@@ -232,6 +234,7 @@ test "Snailtracer deployment comparison" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var deploy_evm = try evm.Evm(.{}).init(

@@ -12,15 +12,33 @@
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
 ;; --- src/instructions/handlers_arithmetic_synthetic.zig:21 (push_add_inline)
-;;   |         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |         pub fn push_add_inline(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_ADD_INLINE, cursor, s, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
 ;;   |             s.set_top_unsafe(op_data.metadata.value +% s.peek_unsafe());
 ;;   |             return N.next(self, .PUSH_ADD_INLINE, cursor, s, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:31 (push_add_pointer)
-;;   |         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:40 (push_add_pointer)
+;;   |         pub fn push_add_pointer(
+;;   |             self: *FrameType,
+;;   |             cursor: [*]const Dispatch.Item,
+;;   |             sp: [*]WordType,
+;;   |             gas: FrameType.GasType,
+;;   |             t0: u64,
+;;   |             t1: u64,
+;;   |             t2: u64,
+;;   |             t3: u64,
+;;   |         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
 ;;   |             N.before(self, .PUSH_ADD_POINTER, cursor, s, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);

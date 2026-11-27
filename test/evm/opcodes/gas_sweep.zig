@@ -36,6 +36,7 @@ fn guillotineRun(code: []const u8) !Outcome {
         .gas_limit = gas_limit,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     const CancunEvm = evm.Evm(.{ .eips = evm.Eips{ .hardfork = .CANCUN } });
     var vm = try CancunEvm.init(allocator, &db, block_info, context, 0, caller);

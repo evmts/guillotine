@@ -286,6 +286,7 @@ test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try @import("../evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
@@ -331,6 +332,7 @@ test "EIP-2929: warm/cold access - SLOAD opcode gas costs" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try @import("../evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
@@ -369,6 +371,7 @@ test "EIP-2929: transaction pre-warming" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try @import("../evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
@@ -414,6 +417,7 @@ test "EIP-2929: SELFBALANCE always warm" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try @import("../evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
@@ -462,6 +466,7 @@ test "EIP-2929: access list cleared between transactions" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try @import("../evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
@@ -738,6 +743,7 @@ test "EIP-2929 - SLOAD multiple slots warm/cold pattern" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20, ZERO_ADDRESS, Hardfork.BERLIN);
@@ -787,6 +793,7 @@ test "EIP-2929 - SSTORE warm/cold access patterns" {
         .chain_id = 1,
         .blob_versioned_hashes = &.{},
         .blob_base_fee = 0,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20, ZERO_ADDRESS, Hardfork.BERLIN);
@@ -823,6 +830,7 @@ test "EIP-2929 - Cross-opcode warm address sharing" {
         .gas_limit = 1_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
@@ -877,6 +885,7 @@ test "EIP-2929 - CALL warm/cold recipient costs" {
         .gas_limit = 10_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, caller_address, Hardfork.BERLIN);
@@ -907,6 +916,7 @@ test "EIP-2929 - Self-referential operations (BALANCE on self)" {
         .gas_limit = 1_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, contract_address, Hardfork.BERLIN);
@@ -932,6 +942,7 @@ test "EIP-2929 - Precompiled contract access costs" {
         .gas_limit = 1_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
@@ -971,6 +982,7 @@ test "EIP-2929 - Storage slots with maximum values" {
         .gas_limit = 1_000_000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);

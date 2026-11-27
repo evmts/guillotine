@@ -33,6 +33,7 @@ test "LOG2 with a length that wraps offset plus length halts the frame" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -95,6 +96,7 @@ test "LOG0 without data ignores its offset" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -158,6 +160,7 @@ test "CODECOPY of zero bytes ignores its destination offset" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -220,6 +223,7 @@ test "CODECOPY reads zeros from a source offset beyond the code" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -283,6 +287,7 @@ test "KECCAK256 of zero bytes ignores its offset" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -348,6 +353,7 @@ test "EXTCODEHASH of an existing but empty account is zero" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -419,6 +425,7 @@ test "EXTCODEHASH of an account with only a balance is the empty code hash" {
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);
@@ -491,6 +498,7 @@ test "SSTORE in a reverted call is undone when the caller wrote the slot first" 
         .gas_limit = 1_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var vm = try evm.Evm(.{}).init(allocator, &database, block_info, tx_context, 0, caller_address);

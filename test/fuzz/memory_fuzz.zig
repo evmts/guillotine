@@ -8,6 +8,8 @@
 //!    including gas cache invalidation when child frames expand the shared buffer!
 //! 3. Nested child frame checkpoint isolation (`init_child`) and parent integrity.
 //! 4. Memory limit enforcement (`MemoryOverflow`) and `OutOfBounds` on unallocated reads.
+//! 5. Expansion costs of any size up to 2^64 - 1 bytes, and the overflow-safe gas charge
+//!    (`verified_ops.chargeGasChecked`) for `i32` and `i64` gas, against wide integers.
 
 const std = @import("std");
 const evm = @import("evm");
@@ -196,6 +198,87 @@ pub fn fuzzMemoryGasFormula(_: void, input: []const u8) !void {
     try std.testing.expectEqual(referenceMemoryCost(max_aligned), cost_a + cost_b_after_a);
 }
 
+/// A memory whose limit is the largest the configuration allows, so expansion costs
+/// range from 0 to far above what any gas type holds.
+const HugeMemory = evm.Memory(.{ .initial_capacity = 64, .memory_limit = std.math.maxInt(u32) });
+
+/// Expansion cost of `byte_size` bytes from empty memory, in integers that cannot
+/// overflow. Memory.get_expansion_cost reports `maxInt(u64)` when the size is past
+/// 134,217,727 words or cannot be rounded up to a word.
+fn referenceExpansionCost(byte_size: u64) u64 {
+    const words: u128 = (@as(u128, byte_size) + 31) / 32;
+    if (words > 134_217_727) return std.math.maxInt(u64);
+    return @intCast(3 * words + (words * words) / 512);
+}
+
+/// `chargeGasChecked` in integers wide enough for every input.
+fn referenceCharge(gas: i128, cost: u64) ?i128 {
+    if (gas < 0 or @as(i128, cost) > gas) return null;
+    return gas - cost;
+}
+
+/// Huge memory expansion against `i32` and `i64` gas. The input picks a size up to
+/// 2^64 - 1, a second cost and a gas balance for each gas type; every result is
+/// compared with wide-integer arithmetic. A cost above `maxInt(GasType)` must be
+/// refused, never narrowed.
+pub fn fuzzHugeExpansionAndGasCharge(_: void, input: []const u8) !void {
+    if (input.len < 32) return;
+    const allocator = fuzz_alloc.get();
+    var mem = try HugeMemory.init(allocator);
+    defer mem.deinit(allocator);
+
+    const raw_size = std.mem.readInt(u64, input[0..8], .little);
+    // Half of the inputs land in the range the EVM can address (up to 4 GiB), where
+    // the cost crosses maxInt(i32) at about 32 MiB; the rest go anywhere in u64.
+    const size: u64 = if (input[31] & 1 == 0) raw_size % (@as(u64, 1) << 33) else raw_size;
+    const extra = std.mem.readInt(u64, input[8..16], .little) >> @intCast(input[30] & 63);
+    const gas64: i64 = @bitCast(std.mem.readInt(u64, input[16..24], .little));
+    const gas32: i32 = @bitCast(std.mem.readInt(u32, input[24..28], .little));
+
+    const cost = mem.get_expansion_cost(std.math.cast(usize, size) orelse std.math.maxInt(usize));
+    try std.testing.expectEqual(referenceExpansionCost(size), cost);
+
+    // Composite cost, as RETURN/REVERT/*COPY/LOG/MCOPY/CALL build it.
+    const total = evm.verified_ops.saturatingGasSum(cost, extra);
+    const wide_total: u128 = @as(u128, cost) + extra;
+    try std.testing.expectEqual(@as(u64, @intCast(@min(wide_total, std.math.maxInt(u64)))), total);
+
+    for ([_]u64{ cost, extra, total }) |charge| {
+        const paid64 = evm.verified_ops.chargeGasChecked(i64, gas64, charge);
+        const want64 = referenceCharge(gas64, charge);
+        try std.testing.expectEqual(want64 == null, paid64 == null);
+        if (paid64) |left| {
+            try std.testing.expectEqual(want64.?, @as(i128, left));
+            try std.testing.expect(left >= 0 and left <= gas64);
+        }
+        const paid32 = evm.verified_ops.chargeGasChecked(i32, gas32, charge);
+        const want32 = referenceCharge(gas32, charge);
+        try std.testing.expectEqual(want32 == null, paid32 == null);
+        if (paid32) |left| {
+            try std.testing.expectEqual(want32.?, @as(i128, left));
+            try std.testing.expect(left >= 0 and left <= gas32);
+        }
+        // A frame holding the most gas its type allows pays exactly when the cost fits.
+        try std.testing.expectEqual(charge <= std.math.maxInt(i32), evm.verified_ops.chargeGasChecked(i32, std.math.maxInt(i32), charge) != null);
+        try std.testing.expectEqual(charge <= std.math.maxInt(i64), evm.verified_ops.chargeGasChecked(i64, std.math.maxInt(i64), charge) != null);
+    }
+}
+
+const gas_charge_corpus: []const []const u8 = &.{
+    // 32 MiB: 2,150,629,376 gas, the first cost above maxInt(i32), against full i32 gas.
+    &([_]u8{ 0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0 } ++ @as([8]u8, @splat(0)) ++ @as([8]u8, @splat(0x7f)) ++ [_]u8{ 0xff, 0xff, 0xff, 0x7f } ++ [_]u8{ 0, 0, 0, 0 }),
+    // 64 MiB with a 34,600 gas extra.
+    &([_]u8{ 0x00, 0x00, 0x00, 0x04, 0, 0, 0, 0 } ++ [_]u8{ 0x28, 0x87, 0, 0, 0, 0, 0, 0 } ++ @as([8]u8, @splat(0x7f)) ++ [_]u8{ 0xff, 0xff, 0xff, 0x7f } ++ [_]u8{ 0, 0, 0, 0 }),
+    // 2^64 - 1 bytes: the cost saturates, and so does every sum with it.
+    &(@as([8]u8, @splat(0xff)) ++ @as([8]u8, @splat(0xff)) ++ @as([8]u8, @splat(0x7f)) ++ [_]u8{ 0xff, 0xff, 0xff, 0x7f } ++ [_]u8{ 0, 0, 0, 1 }),
+    // 4 GiB exactly, the largest addressable size.
+    &([_]u8{ 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0 } ++ @as([8]u8, @splat(1)) ++ @as([8]u8, @splat(0x10)) ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{ 0, 0, 3, 0 }),
+    // Negative gas of both types.
+    &([_]u8{ 0x20, 0, 0, 0, 0, 0, 0, 0 } ++ @as([8]u8, @splat(0)) ++ @as([8]u8, @splat(0xff)) ++ [_]u8{ 0xff, 0xff, 0xff, 0xff } ++ [_]u8{ 0, 0, 0, 0 }),
+    // A small expansion a small balance pays for exactly: 32 bytes cost 3 gas.
+    &([_]u8{ 0x20, 0, 0, 0, 0, 0, 0, 0 } ++ @as([8]u8, @splat(0)) ++ [_]u8{ 3, 0, 0, 0, 0, 0, 0, 0 } ++ [_]u8{ 3, 0, 0, 0 } ++ [_]u8{ 0, 0, 0, 0 }),
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{},
     &.{ 0, 0, 0xaa, 1, 2, 0xbb, 2, 0, 0, 4, 1, 5, 6, 0, 0x33 },
@@ -206,6 +289,10 @@ const seed_corpus: []const []const u8 = &.{
 
 test "fuzz memory stateful model checker and child checkpoints" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMemoryModel), .{ .corpus = seed_corpus });
+}
+
+test "fuzz huge memory expansion and overflow-safe gas charging for i32 and i64 gas" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzHugeExpansionAndGasCharge), .{ .corpus = gas_charge_corpus });
 }
 
 test "fuzz memory quadratic gas expansion exactness and monotonicity" {

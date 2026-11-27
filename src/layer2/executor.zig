@@ -187,7 +187,11 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
     var caller = before;
     caller.balance -= @intCast(prepaid);
     try host.setCaller(tx.sender, caller);
-    const result = try host.executeFrame(tx);
+    const H = @TypeOf(host.*);
+    const Effects = if (@hasDecl(H, "Finalization")) H.Finalization else void;
+    var effects: Effects = if (Effects == void) {} else .{};
+    defer if (Effects != void) effects.deinit(host.allocator);
+    const result = if (Effects != void) try host.executeFrameBeforeFees(tx, &effects) else try host.executeFrame(tx);
     // An invalid user transaction must be an error from the host, never a result.
     if (result.invalid) return error.InvalidUserTransactionResult;
     const settlement = try fees.settle(
@@ -204,6 +208,7 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
     try host.credit(constants.BASE_FEE_VAULT_ADDRESS, settlement.base_fee_vault);
     try host.credit(constants.L1_FEE_VAULT_ADDRESS, settlement.l1_fee_vault);
     try host.credit(constants.OPERATOR_FEE_VAULT_ADDRESS, settlement.operator_fee_vault);
+    if (Effects != void) try host.finalize(&effects);
     host.commit(checkpoint);
     active = false;
     return result;

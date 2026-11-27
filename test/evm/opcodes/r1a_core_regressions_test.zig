@@ -1875,14 +1875,15 @@ test "R3A P2-8: invalid EIP-1559 fee caps are refused" {
         try std.testing.expectEqual(nonce, after.nonce);
     }
 
-    // A context without fee caps has none to check: a call priced below the base
-    // fee, as tests and simulations make, still runs.
-    {
-        var vm = try Vm.init(allocator, &db, block, .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, origin);
+    // A context without fee caps is priced by its gas price, which must cover the
+    // base fee too. Only an explicit simulation override accepts a lower price.
+    for ([_]bool{ false, true }) |simulation| {
+        var vm = try Vm.init(allocator, &db, block, .{ .gas_limit = 100_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1, .allow_gas_price_below_base_fee = simulation }, 0, origin);
         defer vm.deinit();
         var result = vm.call(.{ .call = .{ .caller = origin, .to = target, .value = 0, .input = &.{}, .gas = 100_000 } });
         defer result.deinit(allocator);
-        try std.testing.expect(result.success);
+        try std.testing.expectEqual(simulation, result.success);
+        if (!simulation) try std.testing.expectEqualStrings("invalid transaction: gas price is below the block base fee (EIP-1559)", result.error_info.?);
     }
 
     // Before London there is no base fee to compare with.

@@ -87,6 +87,7 @@ fn runAndCompareWord(allocator: std.mem.Allocator, code: []const u8) !struct { w
         .gas_limit = gas_limit,
         .coinbase = Address.ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
 
     var db_on = Database.init(allocator);

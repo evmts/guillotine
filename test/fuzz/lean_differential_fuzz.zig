@@ -605,7 +605,7 @@ fn execOn(comptime E: type, gpa: Allocator, a: Allocator, req: *const ExecReq) !
         .blob_base_fee = 3,
         .blob_versioned_hashes = &.{},
     };
-    const tx_ctx = evm.TransactionContext{ .gas_limit = req.gas, .coinbase = COINBASE, .chain_id = 1, .blob_base_fee = 3 };
+    const tx_ctx = evm.TransactionContext{ .gas_limit = req.gas, .coinbase = COINBASE, .chain_id = 1, .blob_base_fee = 3, .allow_gas_price_below_base_fee = true };
 
     var vm = try E.init(gpa, &db, block_info, tx_ctx, 0, ORIGIN);
     defer vm.deinit();
@@ -619,7 +619,7 @@ fn execOn(comptime E: type, gpa: Allocator, a: Allocator, req: *const ExecReq) !
     defer res.deinit(gpa);
 
     var line = Line.init(a);
-    try line.tok(if (res.success) "S" else "N");
+    try line.tok(if (res.success) "S" else if (res.reverted) "R" else "F");
     try line.num(res.gas_left);
     try line.bytes(res.output);
     try line.num(res.logs.len);
@@ -661,22 +661,11 @@ fn execZig(gpa: Allocator, a: Allocator, req: *const ExecReq, fusion: bool) ![]c
     return isolated(a, ExecJob{ .gpa = gpa, .req = req, .fusion = fusion }, execJob);
 }
 
-/// The oracle distinguishes revert (`R`) from exceptional halt (`F`); Guillotine's
-/// `CallResult` only has `success`. Both become `N`; gas, output and state still differ.
-fn normalizeLeanExec(a: Allocator, lean: []const u8) ![]const u8 {
-    if (lean.len > 0 and (lean[0] == 'R' or lean[0] == 'F')) {
-        const out = try a.dupe(u8, lean);
-        out[0] = 'N';
-        return out;
-    }
-    return lean;
-}
-
 const ExecVerdict = struct { equal: bool, lean: []const u8, zig: []const u8 };
 
 fn compareExec(suite: *Suite, a: Allocator, req: *const ExecReq, fusion: bool) !ExecVerdict {
     const request = try req.request(a);
-    const lean = try normalizeLeanExec(a, try a.dupe(u8, try suite.oracle.ask(request)));
+    const lean = try a.dupe(u8, try suite.oracle.ask(request));
     const zig = try execZig(suite.gpa, a, req, fusion);
     return .{ .equal = std.mem.eql(u8, lean, zig), .lean = lean, .zig = zig };
 }

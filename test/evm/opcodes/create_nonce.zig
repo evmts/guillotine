@@ -37,6 +37,7 @@ const context = evm.TransactionContext{
     .gas_limit = gas_limit,
     .coinbase = primitives.ZERO_ADDRESS,
     .chain_id = 1,
+    .allow_gas_price_below_base_fee = true,
 };
 const PragueEvm = evm.Evm(.{ .eips = evm.Eips{ .hardfork = .PRAGUE } });
 

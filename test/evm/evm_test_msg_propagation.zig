@@ -59,6 +59,7 @@ test "EVM msg.sender propagation in CALL" {
         .gas_limit = 1000000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, original_caller);
@@ -132,6 +133,7 @@ test "EVM msg.sender preservation in DELEGATECALL" {
         .gas_limit = 1000000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, original_caller);
@@ -213,6 +215,7 @@ test "EVM msg.value propagation" {
         .gas_limit = 1000000,
         .coinbase = ZERO_ADDRESS,
         .chain_id = 1,
+        .allow_gas_price_below_base_fee = true,
     };
     
     var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, caller_address);
