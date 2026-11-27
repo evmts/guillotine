@@ -11,7 +11,7 @@
   "last_timestamp": 1795680779,
   "total_transactions": 29560,
   "total_gas_used": 2973053521,
-  "prestate_accounts": 25919,
-  "unique_contracts": 5026,
-  "bundle_sha256": "45318de9f5dc7e7ce958d3b5a6e48a44fbdf57f1765d02814a9bde0046e1ed84"
+  "prestate_accounts": 25924,
+  "unique_contracts": 5030,
+  "bundle_sha256": "0d5f37acd48cef2568ffa25cfcfeeb16d0c842ecd02c1531fe32e6c6876ef184"
 }

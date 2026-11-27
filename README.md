@@ -60,12 +60,14 @@ Measured with `zig build bench -- --iterations 5 --warmup 1` in `ReleaseFast` on
 
 ### 100-Block Mainnet Replay (`26,498,000`–`26,498,099`)
 
-Single-threaded offline replay of 100 contiguous recent Ethereum mainnet blocks (Osaka / BPO2, `29,560` transactions, `2.973B` gas, `5,026` unique contracts, pinned in [`bench/blocks/manifest.json`](bench/blocks/manifest.json)) on x86_64 Linux (`ReleaseFast`, node-sized 8,192-entry `DispatchCache`), including EIP-4788/EIP-2935 system calls, EIP-2930/4844/7702 transactions, and EIP-4895 withdrawals:
+Single-threaded offline replay of 100 contiguous Ethereum mainnet blocks against cached pre-state (Osaka / BPO2, `29,560` transactions, `2,973,053,521` gas, `23,932` true pre-start accounts, `64,755` storage slots, `5,030` unique contracts, pinned in [`bench/blocks/manifest.json`](bench/blocks/manifest.json)) on Apple M3 Max (`ReleaseFast` with 8,192-entry `DispatchCache` vs `revm` `61eb0f231227` with `-C target-cpu=native`), executing EIP-4788/2935/7002/7251 system calls, legacy/2930/1559/4844/7702 transactions, and EIP-4895 withdrawals:
 
-| Mode | Total (100 blocks) | Per block | Throughput | Tx rate | Receipt parity |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Cold bytecode cache | `5.35 s` | `53.54 ms` | `555.3 MGas/s` | `5,521 tx/s` | `99.92%` exact gas+status (`99.98%` status) |
-| Warm bytecode cache (median, 5 runs) | `3.81 s` | `38.10 ms` | `780.2 MGas/s` | `7,758 tx/s` | `99.92%` exact gas+status (`99.98%` status) |
+| Engine & Mode | Total (100 blocks) | Per block | Throughput | Tx rate | vs `revm` | Receipt parity |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **`revm`** (warm bytecode cache, median of 5) | `1.69 s` | `16.89 ms` | `1,760.8 MGas/s` | `17,506 tx/s` | `1.00×` | `29,560 / 29,560` (`100.00%`) |
+| **`revm`** (cold bytecode cache) | `1.69 s` | `16.90 ms` | `1,759.4 MGas/s` | `17,493 tx/s` | `1.00×` | `29,560 / 29,560` (`100.00%`) |
+| **Guillotine** (warm bytecode cache, median of 5) | `3.38 s` | `33.83 ms` | `878.8 MGas/s` | `8,737 tx/s` | `0.50×` | `29,560 / 29,560` (`100.00%`) |
+| **Guillotine** (cold bytecode cache) | `6.47 s` | `64.65 ms` | `459.9 MGas/s` | `4,572 tx/s` | `0.26×` | `29,560 / 29,560` (`100.00%`) |
 
 Reproduce locally:
 
@@ -73,7 +75,9 @@ Reproduce locally:
 $ zig build bench                                # in-repo ReleaseFast suite
 $ ./bench/compare/build-all.sh && node bench/compare/run.mjs  # cross-EVM suite
 $ ETHEREUM_RPC_URL=https://... node bench/blocks/fetch.mjs --start 26498000 --count 100
-$ zig build bench-blocks -- --iterations 5 --warmup 1         # 100-block mainnet replay
+$ zig build bench-blocks -- --iterations 5 --warmup 1         # Guillotine 100-block replay
+$ RUSTFLAGS="-C target-cpu=native" cargo build --release --locked --manifest-path bench/blocks/runners/revm/Cargo.toml
+$ ./bench/blocks/runners/revm/target/release/blocks-revm --iterations 5 --warmup 1
 ```
 
 ## Verification & Testing

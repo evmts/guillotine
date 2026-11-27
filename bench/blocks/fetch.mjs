@@ -158,15 +158,25 @@ async function main() {
     return id;
   }
 
+  const systemQueueContracts = [
+    '0x00000961ef480eb55e80d19ad83579a64c007002', // EIP-7002 withdrawal requests
+    '0x0000bbddc7ce488642fb579f8b00f3a590007251', // EIP-7251 consolidation requests
+  ];
   const externalTouchAddrs = new Set([
     '0x000f3df6d732807ef1319fb7b8bb8522d0beac02', // EIP-4788 beacon roots
     '0x0000f90827f1c53a10cb7a02335b175320002935', // EIP-2935 history storage
+    ...systemQueueContracts,
   ]);
 
   for (let bi = 0; bi < fetched.length; bi++) {
     const { blk, traces } = fetched[bi];
     externalTouchAddrs.add(blk.miner.toLowerCase());
     for (const w of blk.withdrawals || []) externalTouchAddrs.add(w.address.toLowerCase());
+    for (const tx of blk.transactions || []) {
+      for (const a of tx.authorizationList || []) {
+        if (a.address) externalTouchAddrs.add(a.address.toLowerCase());
+      }
+    }
     for (let ti = 0; ti < traces.length; ti++) {
       const res = traces[ti].result || {};
       for (const [rawAddr, st] of Object.entries(res)) {
@@ -184,7 +194,9 @@ async function main() {
           };
           prestate.set(addr, acc);
         } else if (acc.code_id === 0 && st.code && st.code !== '0x') {
-          acc.code_id = internCode(st.code);
+          // Account had no code on first trace touch (could be omitted by prestateTracer
+          // OR delegated/deployed mid-window via EIP-7702/CREATE). Query exact state at start-1.
+          externalTouchAddrs.add(addr);
         }
         if (st.storage) {
           for (const [slot, val] of Object.entries(st.storage)) {
@@ -198,9 +210,10 @@ async function main() {
     }
   }
 
-  // 4. Refresh exact pre-block-(start-1) state for coinbases, withdrawal recipients, and system contracts.
+  // 4. Refresh exact pre-block-(start-1) state for coinbases, withdrawal recipients,
+  // system contracts, EIP-7702 delegation targets, and late-code accounts.
   const toRefresh = Array.from(externalTouchAddrs);
-  console.error(`Refreshing exact pre-state at block #${start - 1} for ${toRefresh.length} coinbase/withdrawal/system accounts...`);
+  console.error(`Refreshing exact pre-state at block #${start - 1} for ${toRefresh.length} external/system/delegation accounts...`);
   for (let i = 0; i < toRefresh.length; i += 25) {
     const chunk = toRefresh.slice(i, i + 25);
     const calls = [];
@@ -227,6 +240,26 @@ async function main() {
         acc.first_tx = 0;
         acc.exact_pre_start = true;
       }
+    }
+  }
+
+  // 4b. Fetch exact pre-start-block queue metadata slots (0..3) for EIP-7002 & EIP-7251
+  // so post-block system calls start from exact mainnet queue state on block 0.
+  const queueSlotCalls = [];
+  const queueSlotKeys = [];
+  for (const contract of systemQueueContracts) {
+    for (let s = 0; s < 4; s++) {
+      const slotHex = '0x' + s.toString(16).padStart(64, '0');
+      queueSlotCalls.push({ method: 'eth_getStorageAt', params: [contract, slotHex, preBlockTag] });
+      queueSlotKeys.push({ contract, slotHex });
+    }
+  }
+  const queueSlotVals = await rpcBatch(queueSlotCalls);
+  for (let i = 0; i < queueSlotKeys.length; i++) {
+    const { contract, slotHex } = queueSlotKeys[i];
+    const acc = prestate.get(contract);
+    if (acc) {
+      acc.storage.set(slotHex, { val: normHex(queueSlotVals[i], '0x0'), first_block: 0, first_tx: 0 });
     }
   }
 

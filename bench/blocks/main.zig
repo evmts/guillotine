@@ -2,10 +2,11 @@
 //!
 //! Executes a pinned contiguous range of real Ethereum mainnet blocks (default:
 //! 26,498,000..26,498,099, Osaka) offline against pre-fetched pre-state,
-//! running EIP-4788 beacon root + EIP-2935 history system calls, all legacy /
-//! EIP-2930 / EIP-1559 / EIP-4844 / EIP-7702 transactions, and EIP-4895
-//! withdrawals, while verifying per-transaction status and gas against mainnet
-//! receipts.
+//! running EIP-4788 beacon root + EIP-2935 history pre-block system calls,
+//! all legacy / EIP-2930 / EIP-1559 / EIP-4844 / EIP-7702 transactions,
+//! EIP-7002 withdrawal + EIP-7251 consolidation post-block system calls, and
+//! EIP-4895 withdrawals, while verifying per-transaction status and gas against
+//! mainnet receipts.
 const std = @import("std");
 const builtin = @import("builtin");
 const evm = @import("guillotine");
@@ -29,6 +30,8 @@ const Authorization = voltaire.Authorization.Authorization;
 const SYSTEM_ADDRESS = Address{ .bytes = .{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe } };
 const BEACON_ROOTS_ADDRESS = Address{ .bytes = .{ 0x00, 0x0f, 0x3d, 0xf6, 0xd7, 0x32, 0x80, 0x7e, 0xf1, 0x31, 0x9f, 0xb7, 0xb8, 0xbb, 0x85, 0x22, 0xd0, 0xbe, 0xac, 0x02 } };
 const HISTORY_STORAGE_ADDRESS = Address{ .bytes = .{ 0x00, 0x00, 0xf9, 0x08, 0x27, 0xf1, 0xc5, 0x3a, 0x10, 0xcb, 0x7a, 0x02, 0x33, 0x5b, 0x17, 0x53, 0x20, 0x00, 0x29, 0x35 } };
+const WITHDRAWAL_REQUEST_ADDRESS = Address{ .bytes = .{ 0x00, 0x00, 0x09, 0x61, 0xef, 0x48, 0x0e, 0xb5, 0x5e, 0x80, 0xd1, 0x9a, 0xd8, 0x35, 0x79, 0xa6, 0x4c, 0x00, 0x70, 0x02 } };
+const CONSOLIDATION_REQUEST_ADDRESS = Address{ .bytes = .{ 0x00, 0x00, 0xbb, 0xdd, 0xc7, 0xce, 0x48, 0x86, 0x42, 0xfb, 0x57, 0x9f, 0x8b, 0x00, 0xf3, 0xa5, 0x90, 0x00, 0x72, 0x51 } };
 
 const JsonAccessListEntry = struct {
     address: []const u8,
@@ -775,6 +778,9 @@ fn discoverTruePrestate(allocator: std.mem.Allocator, bundle: *const Bundle, vm:
             _ = try executeOneTx(allocator, &db, vm, eips, bundle.chain_id, &blk, &tx);
         }
 
+        try runSystemCall(vm, WITHDRAWAL_REQUEST_ADDRESS, &.{});
+        try runSystemCall(vm, CONSOLIDATION_REQUEST_ADDRESS, &.{});
+
         for (blk.withdrawals) |w| {
             if (w.amount_wei == 0) continue;
             var acc = (try db.get_account(w.address.bytes)) orelse Account.zero();
@@ -867,6 +873,9 @@ fn replayAllBlocks(
                 stderr.interface.flush() catch {};
             }
         }
+
+        try runSystemCall(vm, WITHDRAWAL_REQUEST_ADDRESS, &.{});
+        try runSystemCall(vm, CONSOLIDATION_REQUEST_ADDRESS, &.{});
 
         for (blk.withdrawals) |w| {
             if (w.amount_wei == 0) continue;
