@@ -6,7 +6,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:222 (sarRef)
+;; --- src/core/verified_ops.zig:242 (sarRef)
 ;;   | pub inline fn sarRef(shift: u256, value: u256) u256 {
 ;;   |     const value_signed: i256 = @bitCast(value);
 ;;   |     if (shift >= 256) {
@@ -15,7 +15,7 @@
 ;;   |     const shift_amt: u8 = @intCast(shift);
 ;;   |     return @bitCast(value_signed >> shift_amt);
 ;;   | }
-;; --- src/core/verified_ops.zig:234 (sarFast)
+;; --- src/core/verified_ops.zig:254 (sarFast)
 ;;   | pub inline fn sarFast(shift: u256, value: u256) u256 {
 ;;   |     const value_signed: i256 = @bitCast(value);
 ;;   |     const shift_amt: u8 = if (shift >= 255) 255 else @truncate(shift);

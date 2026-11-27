@@ -222,6 +222,8 @@ zig build test-unit -Dtest-filter='stack'
 - `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=N --threads=M` - Multi-threaded havoc fuzz campaign; failing inputs land in `.fuzz-crashes/`
 - `zig build test-jit` - Native JIT tests (`src/jit`)
 - `zig build state-tests` - Official EEST state fixtures (`scripts/fetch-eest-fixtures.sh` first)
+- `zig build verify-zean` - Zean direct Zig `0.17.1` AIR → Lean `4.35.0` proofs (`verify/lean/GuillotineZean`, 24 functions / 55 `#audit_proof` theorems; set `ZEAN_BIN` + `ZEAN_TOOLCHAIN` to also enforce `zean --check` AIR freshness)
+- `zig build verify-lean` - Hand-authored Lean `4.35.0` proofs & executable spec (`verify/lean/GuillotineVerify` + `GuillotineSpec`)
 - `zig build verify-smt` - Bitwuzla/Z3 SMT proofs (`model_pins.json` must exist; refresh with `--update-pins` after review)
 
 Tests use the Zig standard test runner. `zig build test-unit` only runs the
@@ -486,7 +488,7 @@ Key Steps:
   bench / bench-build          Run / build the self-contained ReleaseFast benchmark runner
   test-bench                   Check benchmark statistics, CLI, and workload construction
   shared / static              Build the C FFI shared / static library
-  verify / verify-smt / verify-ir / verify-lean   Formal verification suite
+  verify / verify-smt / verify-ir / verify-lean / verify-zean   Formal verification suite (dual Zean direct Zig AIR + hand-authored Lean 4, SMT, LLVM IR)
 
 Options:
   --release[=mode]             Release mode: fast, safe, small

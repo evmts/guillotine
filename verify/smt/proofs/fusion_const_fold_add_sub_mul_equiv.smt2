@@ -15,10 +15,10 @@
 ;;   |         fn check(bytecode: []const u8, position: PcType) ?FusionInfo {
 ;;   |             if (position + 4 >= bytecode.len) return null;
 ;;   | 
-;;   |             if (bytecode[position] != @intFromEnum(Opcode.PUSH1)) return null;
+;;   |             if (bytecode[position] != @backingInt(Opcode.PUSH1)) return null;
 ;;   |             const value1 = bytecode[position + 1];
 ;;   | 
-;;   |             if (bytecode[position + 2] != @intFromEnum(Opcode.PUSH1)) return null;
+;;   |             if (bytecode[position + 2] != @backingInt(Opcode.PUSH1)) return null;
 ;;   |             const value2 = bytecode[position + 3];
 ;;   | 
 ;;   |             const arith_op = bytecode[position + 4];
@@ -26,24 +26,24 @@
 ;;   |             var sequence_length: PcType = 5;
 ;;   | 
 ;;   |             switch (arith_op) {
-;;   |                 @intFromEnum(Opcode.ADD) => {
+;;   |                 @backingInt(Opcode.ADD) => {
 ;;   |                     folded_value = @as(u256, value1) +% @as(u256, value2);
 ;;   |                 },
-;;   |                 @intFromEnum(Opcode.SUB) => {
+;;   |                 @backingInt(Opcode.SUB) => {
 ;;   |                     // EVM SUB computes top - second. For `PUSH1 value1; PUSH1 value2; SUB`,
 ;;   |                     // value2 is on top, so the result is value2 - value1 (not value1 - value2).
 ;;   |                     folded_value = @as(u256, value2) -% @as(u256, value1);
 ;;   |                 },
-;;   |                 @intFromEnum(Opcode.MUL) => {
+;;   |                 @backingInt(Opcode.MUL) => {
 ;;   |                     folded_value = @as(u256, value1) *% @as(u256, value2);
 ;;   |                 },
-;;   |                 @intFromEnum(Opcode.PUSH1) => {
+;;   |                 @backingInt(Opcode.PUSH1) => {
 ;;   |                     // PUSH1 value1; PUSH1 value2; PUSH1 shift; SHL; SUB
 ;;   |                     // Stack before SHL: [value1, value2, shift (top)]. SHL computes value2 << shift.
 ;;   |                     // Stack before SUB: [value1, shifted (top)]. EVM SUB computes top - second = shifted - value1.
 ;;   |                     if (position + 7 < bytecode.len and
-;;   |                         bytecode[position + 6] == @intFromEnum(Opcode.SHL) and
-;;   |                         bytecode[position + 7] == @intFromEnum(Opcode.SUB))
+;;   |                         bytecode[position + 6] == @backingInt(Opcode.SHL) and
+;;   |                         bytecode[position + 7] == @backingInt(Opcode.SUB))
 ;;   |                     {
 ;;   |                         const shift_amount = bytecode[position + 5];
 ;;   |                         const shifted: u256 = @as(u256, value2) << shift_amount;

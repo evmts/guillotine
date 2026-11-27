@@ -17,7 +17,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:270 (sdivFromUnsignedQuotient)
+;; --- src/core/verified_ops.zig:290 (sdivFromUnsignedQuotient)
 ;;   | pub inline fn sdivFromUnsignedQuotient(top: u256, second: u256, unsigned_quotient: u256) u256 {
 ;;   |     const top_sign = top >> 255;
 ;;   |     const second_sign = second >> 255;
@@ -25,7 +25,7 @@
 ;;   |     const result_mask = @as(u256, 0) -% result_sign;
 ;;   |     return (unsigned_quotient ^ result_mask) -% result_mask;
 ;;   | }
-;; --- src/core/verified_ops.zig:279 (absTwoComp)
+;; --- src/core/verified_ops.zig:299 (absTwoComp)
 ;;   | pub inline fn absTwoComp(x: u256) u256 {
 ;;   |     const sign = x >> 255;
 ;;   |     const mask = @as(u256, 0) -% sign;

@@ -8,34 +8,52 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:102 (blockStackGuardRef)
+;; --- src/core/verified_ops.zig:114 (blockStackGuardRef)
 ;;   | pub inline fn blockStackGuardRef(
 ;;   |     size: u32,
 ;;   |     min_stack: u16,
 ;;   |     max_stack: u16,
 ;;   |     comptime stack_capacity: u32,
 ;;   | ) BlockStackResult {
-;;   |     if (size < @as(u32, min_stack)) return .underflow;
-;;   |     if (@as(u64, size) + @as(u64, max_stack) > @as(u64, stack_capacity)) return .overflow;
-;;   |     return .ok;
+;;   |     return @fromBackingInt(@intCast(blockStackGuardRefCode(size, min_stack, max_stack, stack_capacity)));
 ;;   | }
-;; --- src/core/verified_ops.zig:117 (blockStackGuardFast)
+;; --- src/core/verified_ops.zig:146 (blockStackGuardFast)
 ;;   | pub inline fn blockStackGuardFast(
 ;;   |     size: u32,
 ;;   |     min_stack: u16,
 ;;   |     max_stack: u16,
 ;;   |     comptime stack_capacity: u32,
 ;;   | ) BlockStackResult {
+;;   |     return @fromBackingInt(@intCast(blockStackGuardFastCode(size, min_stack, max_stack, stack_capacity)));
+;;   | }
+;; --- src/core/verified_ops.zig:102 (blockStackGuardRefCode)
+;;   | pub inline fn blockStackGuardRefCode(
+;;   |     size: u32,
+;;   |     min_stack: u16,
+;;   |     max_stack: u16,
+;;   |     comptime stack_capacity: u32,
+;;   | ) u8 {
+;;   |     if (size < @as(u32, min_stack)) return 1;
+;;   |     if (@as(u64, size) + @as(u64, max_stack) > @as(u64, stack_capacity)) return 2;
+;;   |     return 0;
+;;   | }
+;; --- src/core/verified_ops.zig:127 (blockStackGuardFastCode)
+;;   | pub inline fn blockStackGuardFastCode(
+;;   |     size: u32,
+;;   |     min_stack: u16,
+;;   |     max_stack: u16,
+;;   |     comptime stack_capacity: u32,
+;;   | ) u8 {
 ;;   |     const min_u: u32 = min_stack;
 ;;   |     const max_u: u32 = max_stack;
 ;;   |     const needed: u32 = min_u + max_u;
 ;;   |     if (needed <= stack_capacity) {
 ;;   |         if (size -% min_u <= stack_capacity - needed) {
 ;;   |             @branchHint(.likely);
-;;   |             return .ok;
+;;   |             return 0;
 ;;   |         }
 ;;   |     }
-;;   |     return if (size < min_u) .underflow else .overflow;
+;;   |     return if (size < min_u) 1 else 2;
 ;;   | }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

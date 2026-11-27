@@ -12,7 +12,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:173 (memoryGasCost)
+;; --- src/core/verified_ops.zig:193 (memoryGasCost)
 ;;   | pub inline fn memoryGasCost(words: u64) u64 {
 ;;   |     return (words * 3) + ((words * words) >> 9);
 ;;   | }

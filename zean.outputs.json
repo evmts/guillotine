@@ -1,0 +1,12 @@
+{
+  "schema": "zean.outputs.v1",
+  "outputs": [
+    "verify/lean/GuillotineZean/BytecodeJumpdest/Generated.lean",
+    "verify/lean/GuillotineZean/JumpBsearch/Generated.lean",
+    "verify/lean/GuillotineZean/MemoryCopy/Generated.lean",
+    "verify/lean/GuillotineZean/ScalarOps/Generated.lean",
+    "verify/lean/GuillotineZean/StackOps/Generated.lean",
+    "verify/lean/GuillotineZean/Word256Ops/Generated.lean"
+  ],
+  "retired": []
+}

@@ -7,7 +7,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:178 (expGasByteLenRef)
+;; --- src/core/verified_ops.zig:198 (expGasByteLenRef)
 ;;   | pub inline fn expGasByteLenRef(exp: u256) u32 {
 ;;   |     var byte_size: u32 = 0;
 ;;   |     var temp = exp;
@@ -16,7 +16,7 @@
 ;;   |     }
 ;;   |     return byte_size;
 ;;   | }
-;; --- src/core/verified_ops.zig:191 (expGasByteLenFast)
+;; --- src/core/verified_ops.zig:211 (expGasByteLenFast)
 ;;   | pub inline fn expGasByteLenFast(exp: u256) u32 {
 ;;   |     return (@as(u32, 263) - @as(u32, @clz(exp))) >> 3;
 ;;   | }

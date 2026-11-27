@@ -43,8 +43,10 @@ zig build test
 # Run official EEST state tests (66,652/66,652 Frontier -> Osaka; fetch fixtures first)
 ./scripts/fetch-eest-fixtures.sh && zig build state-tests -Doptimize=ReleaseSafe
 
-# Run formal verification (SMT, LLVM IR, Lean 4) & Lean differential fuzzer
+# Run formal verification (Zean direct Zig AIR→Lean 4, hand-authored Lean 4, SMT, LLVM IR) & Lean differential fuzzer
 zig build verify
+zig build verify-zean
+zig build verify-lean
 zig build test-lean-diff -Doptimize=ReleaseSafe
 
 # Run benchmarks (in-repo ReleaseFast runner or cross-EVM apples-to-apples suite)
@@ -191,7 +193,9 @@ docs/
 | `zig build test` | Run self-contained suites (unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz, jit) |
 | `zig build state-tests -Doptimize=ReleaseSafe` | Run official EEST state tests (`66,652 / 66,652` Frontier → Osaka) |
 | `zig build verify` | Run formal verification (`verify-ir`, `verify-smt`, `verify-lean`) |
-| `zig build test-lean-diff -Doptimize=ReleaseSafe` | Run Zig↔Lean 4.32.0 differential fuzzer (`116,384 / 116,384`) |
+| `zig build verify-zean` | Run Zean direct Zig `0.17.1` AIR → Lean `4.35.0` proofs (`24` kernels / `55` audited theorems) |
+| `zig build verify-lean` | Run hand-authored Lean `4.35.0` proofs & executable spec |
+| `zig build test-lean-diff -Doptimize=ReleaseSafe` | Run Zig↔Lean `4.35.0` differential fuzzer (`116,384 / 116,384`) |
 | `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8` | Run multi-threaded structure-aware + havoc fuzzer |
 | `zig build bench` | Run in-repo ReleaseFast benchmarks |
 | `node bench/compare/run.mjs` | Run cross-EVM apples-to-apples benchmarks (`evm2`, `revm`, `evmone`, `ethrex`, `gevm`, `geth`, JITs) |

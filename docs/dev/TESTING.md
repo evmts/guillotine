@@ -22,7 +22,7 @@ zig build test-unit -Dtest-filter='stack'
 
 ## Test Organization
 
-> For the full verification matrix — including official EEST state tests (`66,652/66,652`), formal verification (`verify-smt`, `verify-ir`, `verify-lean`, `test-lean-diff`), multi-layer fuzzing (`fuzz.yml`), SDK E2E suites, and cross-EVM benchmarks — see [Testing, fuzzing, and formal verification](../src/pages/guides/testing-and-verification.mdx) (live at [guillotine.tevm.sh/guides/testing-and-verification](https://guillotine.tevm.sh/guides/testing-and-verification)).
+> For the full verification matrix — including official EEST state tests (`66,652/66,652`), formal verification (`verify-zean` direct Zig `0.17.1` AIR → Lean `4.35.0`, `verify-lean` hand-authored Lean `4.35.0` proofs & spec, `verify-smt`, `verify-ir`, `test-lean-diff`), multi-layer fuzzing (`fuzz.yml`), SDK E2E suites, and cross-EVM benchmarks — see [Testing, fuzzing, and formal verification](../src/pages/guides/testing-and-verification.mdx) (live at [guillotine.tevm.sh/guides/testing-and-verification](https://guillotine.tevm.sh/guides/testing-and-verification)).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -30,7 +30,8 @@ zig build test-unit -Dtest-filter='stack'
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   zig build state-tests   Official EEST state tests (66,652/66,652)        │
-│   zig build verify        SMT (32/32) + LLVM IR + Lean 4.32.0 proofs       │
+│   zig build verify        Zean Zig AIR→Lean 4.35 (55 audited) + Lean 4     │
+│                           models + SMT (32/32) + LLVM IR proofs            │
 │   zig build test-lean-diff Zig↔Lean differential fuzzer (116,384/116,384)  │
 │   zig build fuzz-campaign Multi-threaded havoc fuzzer (.fuzz-crashes/)     │
 │                                                                             │
@@ -53,8 +54,10 @@ zig build test-unit -Dtest-filter='stack'
 |---------|--------------|----------|
 | `zig build test` | Self-contained suites (unit, opcodes, integration, layer2, precompiles, fusions, modexp, fuzz, jit) | CI, final check |
 | `zig build state-tests -Doptimize=ReleaseSafe` | Official EEST state tests (`66,652 / 66,652` Frontier → Osaka; fetch fixtures first) | Spec compliance |
-| `zig build verify` | Formal verification (`verify-ir`, `verify-smt`, `verify-lean`) | Fast-path & fusion changes |
-| `zig build test-lean-diff -Doptimize=ReleaseSafe` | Zig↔Lean `4.32.0` differential fuzzer (`116,384 / 116,384`) | Consensus & L2 changes |
+| `zig build verify` | Full formal verification (`verify-ir`, `verify-smt`, `verify-lean`, `verify-zean`) | Fast-path, fusion & kernel changes |
+| `zig build verify-zean` | Zean direct Zig `0.17.1` AIR → Lean `4.35.0` proofs (`24` kernels / `55` `#audit_proof` theorems) | Changes to `src/core/verified_ops.zig` |
+| `zig build verify-lean` | Hand-authored Lean `4.35.0` proofs (`GuillotineVerify`) & executable spec (`GuillotineSpec`) | Spec, fusion & dispatch model changes |
+| `zig build test-lean-diff -Doptimize=ReleaseSafe` | Zig↔Lean `4.35.0` differential fuzzer (`116,384 / 116,384`) | Consensus & L2 changes |
 | `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8` | Multi-threaded structure-aware + havoc fuzzer | Deep invariant testing |
 | `zig build test-integration` | Integration tests (`test/root.zig`) | Cross-module testing |
 | `zig build test-unit` | Unit tests in `src/` | Quick iteration |

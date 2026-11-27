@@ -11,22 +11,22 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:20 (push_add_inline)
-;;   |         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             N.before(self, .PUSH_ADD_INLINE, cursor, s.sp, gas);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:21 (push_add_inline)
+;;   |         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_ADD_INLINE, cursor, s, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
 ;;   |             s.set_top_unsafe(op_data.metadata.value +% s.peek_unsafe());
-;;   |             return N.next(self, .PUSH_ADD_INLINE, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_ADD_INLINE, cursor, s, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:30 (push_add_pointer)
-;;   |         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             N.before(self, .PUSH_ADD_POINTER, cursor, s.sp, gas);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:31 (push_add_pointer)
+;;   |         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_ADD_POINTER, cursor, s, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
 ;;   |             const top = s.peek_unsafe();
 ;;   |             s.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
-;;   |             return N.next(self, .PUSH_ADD_POINTER, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_ADD_POINTER, cursor, s, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

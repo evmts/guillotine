@@ -15,18 +15,18 @@
 ;;   |             s.push_unsafe(result);
 ;;   |         }
 ;; --- src/instructions/handlers_advanced_synthetic.zig:34 (push_add_dup1_inline)
-;;   |         pub fn push_add_dup1_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             N.before(self, .PUSH_ADD_DUP1_INLINE, cursor, sp, gas);
-;;   |             var s = N.StackView{ .sp = sp };
+;;   |         pub fn push_add_dup1_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_ADD_DUP1_INLINE, cursor, s, gas);
 ;;   |             push_add_dup1(&s, cursor[1].push_inline.value);
-;;   |             return N.next(self, .PUSH_ADD_DUP1_INLINE, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_ADD_DUP1_INLINE, cursor, s, gas);
 ;;   |         }
 ;; --- src/instructions/handlers_advanced_synthetic.zig:42 (push_add_dup1_pointer)
-;;   |         pub fn push_add_dup1_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             N.before(self, .PUSH_ADD_DUP1_POINTER, cursor, sp, gas);
-;;   |             var s = N.StackView{ .sp = sp };
+;;   |         pub fn push_add_dup1_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_ADD_DUP1_POINTER, cursor, s, gas);
 ;;   |             push_add_dup1(&s, cursor[1].push_pointer.value_ptr.*);
-;;   |             return N.next(self, .PUSH_ADD_DUP1_POINTER, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_ADD_DUP1_POINTER, cursor, s, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

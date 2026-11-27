@@ -1,0 +1,11 @@
+{
+  "schema": "zean.client.v1",
+  "source": "jump_bsearch.zig",
+  "sources": ["verified_ops.zig"],
+  "roots": ["jump_bsearch.bsearch_jump_table_u32"],
+  "profile": "loops",
+  "generatedModule": "GuillotineZean.JumpBsearch.Generated",
+  "libraries": ["Compiler.ZigAir.Verify.Words"],
+  "proofs": [],
+  "theorems": []
+}

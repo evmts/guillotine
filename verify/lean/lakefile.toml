@@ -1,11 +1,22 @@
 name = "GuillotineVerify"
-defaultTargets = ["GuillotineVerify", "GuillotineSpec", "guillotine-lean-ref"]
+defaultTargets = ["GuillotineVerify", "GuillotineSpec", "GuillotineZean", "guillotine-lean-ref"]
 
-# Machine-checked proofs about Guillotine's verified primitives. The library has no
-# root module; every `GuillotineVerify/*.lean` file is built.
+# Direct Zig 0.17.1 AIR -> Lean 4 formal verification framework (OKcontract Labs).
+[[require]]
+name = "zean"
+git = "https://github.com/okcontract/zean"
+rev = "9196cbbc1cdc39dee69a5dc02b8313fca43f6d0e"
+
+# Machine-checked proofs about Guillotine's verified primitives (hand-authored Lean models).
 [[lean_lib]]
 name = "GuillotineVerify"
 globs = ["GuillotineVerify.+"]
+
+# Direct Zig AIR -> Lean 4 models captured by Zean (`zean --check`) and machine-checked
+# proofs + `#audit_proof` axiom audits over Guillotine's actual compiled Zig code.
+[[lean_lib]]
+name = "GuillotineZean"
+globs = ["GuillotineZean.+"]
 
 # Executable reference specification of Guillotine (EVM, gas, bytecode analysis,
 # OP Stack / Base, RLP). `GuillotineSpec.Main` is the oracle executable's root.

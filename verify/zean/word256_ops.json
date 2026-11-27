@@ -1,0 +1,22 @@
+{
+  "schema": "zean.client.v1",
+  "source": "word256_ops.zig",
+  "sources": ["verified_ops.zig"],
+  "roots": [
+    "word256_ops.check_memory_bounds_fast",
+    "word256_ops.check_memory_bounds_word32_fast",
+    "word256_ops.check_memory_bounds_byte1_fast",
+    "word256_ops.dense_jump_bounds_fast",
+    "word256_ops.dense_jump_bounds_u16_ref",
+    "word256_ops.dense_jump_bounds_u32_ref",
+    "word256_ops.abs_two_comp",
+    "word256_ops.sdiv_sign_apply",
+    "word256_ops.smod_sign_apply",
+    "word256_ops.byte_ref"
+  ],
+  "profile": "memory",
+  "generatedModule": "GuillotineZean.Word256Ops.Generated",
+  "libraries": ["Compiler.ZigAir.Verify.Core"],
+  "proofs": [],
+  "theorems": []
+}

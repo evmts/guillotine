@@ -988,9 +988,22 @@ pub fn build(b: *std.Build) void {
         const verify_smt_step = b.step("verify-smt", "Run Bitwuzla/Z3 SMT-LIB2 formal proofs for EVM arithmetic, memory, stack, and fusions");
         verify_smt_step.dependOn(&run_verify_smt.step);
 
-        const run_verify_lean = b.addSystemCommand(&.{ "bash", "-c", "export PATH=\"$HOME/.elan/bin:$PATH\" && cd verify/lean && lake build" });
-        const verify_lean_step = b.step("verify-lean", "Build and kernel-check Lean 4 formal proofs in verify/lean/");
+        const run_verify_lean = b.addSystemCommand(&.{ "bash", "-c", "export PATH=\"$HOME/.elan/bin:$PATH\" && cd verify/lean && lake build GuillotineVerify GuillotineSpec" });
+        const verify_lean_step = b.step("verify-lean", "Build and kernel-check hand-authored Lean 4 proofs and executable spec in verify/lean/");
         verify_lean_step.dependOn(&run_verify_lean.step);
+
+        const run_verify_zean = b.addSystemCommand(&.{
+            "bash",
+            "-c",
+            "export PATH=\"$HOME/.elan/bin:$PATH\" && " ++
+                "if [ -n \"${ZEAN_BIN:-}\" ] && [ -n \"${ZEAN_TOOLCHAIN:-}\" ]; then " ++
+                "ev=$(mktemp -d) && rmdir \"$ev\" && trap 'rm -rf \"$ev\"' EXIT && " ++
+                "\"$ZEAN_BIN\" . --check --toolchain \"$ZEAN_TOOLCHAIN\" --evidence \"$ev\"; " ++
+                "fi && " ++
+                "cd verify/lean && lake build GuillotineZean",
+        });
+        const verify_zean_step = b.step("verify-zean", "Build and kernel-check Zean direct Zig 0.17.1 AIR -> Lean 4 proofs (and run zean --check when ZEAN_BIN/ZEAN_TOOLCHAIN are set)");
+        verify_zean_step.dependOn(&run_verify_zean.step);
 
         const verified_ops_unit = b.addTest(.{
             .name = "verified-ops-unit",
@@ -1003,11 +1016,12 @@ pub fn build(b: *std.Build) void {
         });
         const run_verified_ops_unit = b.addRunArtifact(verified_ops_unit);
 
-        const verify_all_step = b.step("verify", "Run full formal verification suite (LLVM 20 IR + SMT + Lean 4 + unit tests)");
+        const verify_all_step = b.step("verify", "Run full formal verification suite (LLVM 20 IR + SMT + Lean 4 + Zean direct Zig AIR + unit tests)");
         verify_all_step.dependOn(&run_verified_ops_unit.step);
         verify_all_step.dependOn(verify_ir_step);
         verify_all_step.dependOn(verify_smt_step);
         verify_all_step.dependOn(verify_lean_step);
+        verify_all_step.dependOn(verify_zean_step);
     }
 
     // `test` aggregates the self-contained suites. Each name is a step defined above.

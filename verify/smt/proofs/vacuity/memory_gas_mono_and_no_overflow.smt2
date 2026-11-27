@@ -12,7 +12,7 @@
 ;; This file asserts ONLY the hypotheses. Expected `sat`: the hypotheses
 ;; are consistent, so the companion `unsat` proof is not vacuous.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:173 (memoryGasCost)
+;; --- src/core/verified_ops.zig:193 (memoryGasCost)
 ;;   | pub inline fn memoryGasCost(words: u64) u64 {
 ;;   |     return (words * 3) + ((words * words) >> 9);
 ;;   | }

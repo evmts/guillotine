@@ -42,20 +42,36 @@ tag and SHA-256 in `scripts/fetch-eest-fixtures.sh`.
 Every case passed in both runs. `specs/README.md` explains how to fetch the
 fixtures and run a subset.
 
-### Lean 4 differential fuzzing: 116,384 / 116,384 (100.00%)
+### Zean direct Zig 0.17.1 AIR → Lean 4.35.0 proofs: 24 kernels / 55 audited theorems
 
-`zig build test-lean-diff` generates inputs, runs them through Guillotine and
-through a Lean 4.32.0 reference model (`verify/lean`), and compares the results. The
-recorded run (default seed, 2,000 iterations per campaign) matched on all
-116,384 cases, with zero mismatches and zero crashes, across word operations,
-gas and refunds, bytecode analysis, EVM execution, Base/OP Stack rules, and RLP.
+`zig build verify-zean` builds and `#audit_proof`-checks `verify/lean/GuillotineZean`,
+verifying 24 real Zig `0.17.1` functions captured directly from
+`src/core/verified_ops.zig` via [`okcontract/zean`](https://github.com/okcontract/zean)
+across `scalar`, `memory` (native `u256`), and `loops` profiles: 24 kernel-checked
+`Captured.decode` correspondence certificates plus 31 correctness, fast-vs-reference
+equivalence, memory-safety, and heap-framing theorems (0 `sorry`, standard Lean
+axioms only). Setting `ZEAN_BIN` and `ZEAN_TOOLCHAIN` also enforces zero AIR
+capture drift via `zean --check`.
 
-### SMT proofs: 32 / 32
+### Lean 4.35.0 proofs & differential fuzzing: 116,384 / 116,384 (100.00%)
+
+`zig build verify-lean` checks the hand-authored Lean `4.35.0` proof modules
+(`GuillotineVerify`) and executable EVM specification (`GuillotineSpec`) under
+`verify/lean/`. `zig build test-lean-diff` generates inputs, runs them through
+Guillotine and through the executable Lean 4 reference model, and compares the
+results. The recorded run (default seed, 2,000 iterations per campaign) matched
+on all 116,384 cases, with zero mismatches and zero crashes, across word
+operations, gas and refunds, bytecode analysis, EVM execution, Base/OP Stack
+rules, and RLP.
+
+### SMT proofs: 32 / 32 & LLVM IR equivalence: 19 / 19
 
 `zig build verify-smt` checks the SMT-LIB2 equivalence proofs under
 `verify/smt/proofs` (fast paths against reference definitions, for example
 `BYTE`, `CLZ`, `EXP` gas and dense jump-table bounds). All 32 theorems are
-proved. `zig build verify` runs the LLVM IR, SMT and Lean 4 suites together.
+proved. `zig build verify-ir` checks 19/19 compiled `ReleaseFast` LLVM SSA IR
+pairs for equivalence and poison/UB freedom. `zig build verify` runs LLVM IR,
+SMT, hand-authored Lean 4, and Zean direct Zig AIR suites together.
 
 ### Legacy filler specs
 

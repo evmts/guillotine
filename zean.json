@@ -1,0 +1,19 @@
+{
+  "schema": "zean.project.v1",
+  "clients": [
+    "verify/zean/scalar_ops.json",
+    "verify/zean/word256_ops.json",
+    "verify/zean/stack_ops.json",
+    "verify/zean/bytecode_jumpdest.json",
+    "verify/zean/jump_bsearch.json",
+    "verify/zean/memory_copy.json"
+  ],
+  "leanDir": "verify/lean",
+  "sourceMap": {
+    "verify/zean/verified_ops.zig": "src/core/verified_ops.zig"
+  },
+  "captureTarget": {
+    "triple": "aarch64-macos.15.0...15.0",
+    "cpu": "baseline"
+  }
+}

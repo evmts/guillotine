@@ -11,26 +11,26 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:109 (push_sub_inline)
-;;   |         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             N.before(self, .PUSH_SUB_INLINE, cursor, s.sp, gas);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:114 (push_sub_inline)
+;;   |         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_SUB_INLINE, cursor, s, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
 ;;   |             const push_value = op_data.metadata.value;
 ;;   |             const top = s.peek_unsafe();
 ;;   |             const result = push_value -% top;
 ;;   |             s.set_top_unsafe(result);
-;;   |             return N.next(self, .PUSH_SUB_INLINE, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_SUB_INLINE, cursor, s, gas);
 ;;   |         }
-;; --- src/instructions/handlers_arithmetic_synthetic.zig:121 (push_sub_pointer)
-;;   |         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             N.before(self, .PUSH_SUB_POINTER, cursor, s.sp, gas);
+;; --- src/instructions/handlers_arithmetic_synthetic.zig:126 (push_sub_pointer)
+;;   |         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_SUB_POINTER, cursor, s, gas);
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
 ;;   |             const top = s.peek_unsafe();
 ;;   |             const result = op_data.metadata.value_ptr.* -% top;
 ;;   |             s.set_top_unsafe(result);
-;;   |             return N.next(self, .PUSH_SUB_POINTER, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_SUB_POINTER, cursor, s, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

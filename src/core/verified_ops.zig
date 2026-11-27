@@ -98,6 +98,18 @@ pub const BlockAccumulator = struct {
     }
 };
 
+/// Reference basic-block stack guard status code (`0 = ok`, `1 = underflow`, `2 = overflow`).
+pub inline fn blockStackGuardRefCode(
+    size: u32,
+    min_stack: u16,
+    max_stack: u16,
+    comptime stack_capacity: u32,
+) u8 {
+    if (size < @as(u32, min_stack)) return 1;
+    if (@as(u64, size) + @as(u64, max_stack) > @as(u64, stack_capacity)) return 2;
+    return 0;
+}
+
 /// Reference basic-block stack guard (matches existing `handlers_jump.zig` & `frame.zig` semantics).
 pub inline fn blockStackGuardRef(
     size: u32,
@@ -105,31 +117,39 @@ pub inline fn blockStackGuardRef(
     max_stack: u16,
     comptime stack_capacity: u32,
 ) BlockStackResult {
-    if (size < @as(u32, min_stack)) return .underflow;
-    if (@as(u64, size) + @as(u64, max_stack) > @as(u64, stack_capacity)) return .overflow;
-    return .ok;
+    return @fromBackingInt(@intCast(blockStackGuardRefCode(size, min_stack, max_stack, stack_capacity)));
 }
 
-/// Fast single-branch basic-block stack guard.
+/// Fast single-branch basic-block stack guard status code (`0 = ok`, `1 = underflow`, `2 = overflow`).
 /// When `min_stack + max_stack <= stack_capacity`, the fast path is a single unsigned
 /// range check `(size -% min_stack) <= (stack_capacity - min_stack - max_stack)` on the
 /// hot path, only disambiguating underflow vs overflow on the cold error path.
-pub inline fn blockStackGuardFast(
+pub inline fn blockStackGuardFastCode(
     size: u32,
     min_stack: u16,
     max_stack: u16,
     comptime stack_capacity: u32,
-) BlockStackResult {
+) u8 {
     const min_u: u32 = min_stack;
     const max_u: u32 = max_stack;
     const needed: u32 = min_u + max_u;
     if (needed <= stack_capacity) {
         if (size -% min_u <= stack_capacity - needed) {
             @branchHint(.likely);
-            return .ok;
+            return 0;
         }
     }
-    return if (size < min_u) .underflow else .overflow;
+    return if (size < min_u) 1 else 2;
+}
+
+/// Fast single-branch basic-block stack guard.
+pub inline fn blockStackGuardFast(
+    size: u32,
+    min_stack: u16,
+    max_stack: u16,
+    comptime stack_capacity: u32,
+) BlockStackResult {
+    return @fromBackingInt(@intCast(blockStackGuardFastCode(size, min_stack, max_stack, stack_capacity)));
 }
 
 /// Reference memory bounds check (matches original 2-step + overflow check in `handlers_memory.zig`).
@@ -303,6 +323,85 @@ pub inline fn denseJumpInBoundsFast(dest: u256, dense_len: u32) bool {
     return dest < @as(u256, dense_len);
 }
 
+/// Pure, zero-allocation EVM JUMPDEST validator (Yellow Paper Section 9.4.3).
+/// Walks `code[0..len]`, skipping PUSH1 (0x60)..PUSH32 (0x7f) immediate bytes without
+/// ever reading past `len` even on truncated PUSH instructions at the end of bytecode.
+pub inline fn isValidJumpdestBytes(code: [*]const u8, len: usize, target: usize) bool {
+    if (target >= len) return false;
+    var pc: usize = 0;
+    while (pc < len) {
+        const op = code[pc];
+        if (pc == target) return op == 0x5b;
+        if (op >= 0x60 and op <= 0x7f) {
+            const push_len: usize = @as(usize, op - 0x60) + 1;
+            const step: usize = push_len + 1;
+            if (step > len - pc) return false;
+            pc += step;
+        } else {
+            pc += 1;
+        }
+    }
+    return false;
+}
+
+/// Pure, overflow-free binary search over a sorted jump-table PC array `pcs[0..len]`.
+pub inline fn bsearchJumpTableU32(pcs: [*]const u32, len: usize, target: u32) bool {
+    var lo: usize = 0;
+    var hi: usize = len;
+    while (lo < hi) {
+        const mid = lo + ((hi - lo) >> 1);
+        const entry = pcs[mid];
+        if (entry == target) return true;
+        if (entry < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return false;
+}
+
+/// Pure bounded EVM byte copy for non-overlapping slices `src[0..len] -> dst[0..len]`.
+pub inline fn copyEvmBytes(dst: [*]u8, src: [*]const u8, len: usize) void {
+    var i: usize = 0;
+    while (i < len) : (i += 1) {
+        dst[i] = src[i];
+    }
+}
+
+/// Pure in-place EVM fused PUSH + ADD on the live top stack slot `top[0]`.
+pub inline fn stackPushAddTop(top: *u256, imm: u256) void {
+    top.* = imm +% top.*;
+}
+
+/// Pure in-place EVM fused PUSH + SUB (`imm -% top`) on the live top stack slot `top[0]`.
+pub inline fn stackPushSubTop(top: *u256, imm: u256) void {
+    top.* = imm -% top.*;
+}
+
+/// Pure in-place EVM fused PUSH + MUL on the live top stack slot `top[0]`.
+pub inline fn stackPushMulTop(top: *u256, imm: u256) void {
+    top.* = imm *% top.*;
+}
+
+/// Pure in-place EVM fused PUSH + AND on the live top stack slot `top[0]`.
+pub inline fn stackPushAndTop(top: *u256, imm: u256) void {
+    top.* = imm & top.*;
+}
+
+/// Pure in-place EVM fused PUSH + XOR on the live top stack slot `top[0]`.
+pub inline fn stackPushXorTop(top: *u256, imm: u256) void {
+    top.* = imm ^ top.*;
+}
+
+/// Pure in-place EVM SWAP1 on the top two stack slots `top[0]` and `top[1]`.
+pub inline fn stackSwap1Top(top: [*]u256) void {
+    const a = top[0];
+    const b = top[1];
+    top[0] = b;
+    top[1] = a;
+}
+
 // ====== UNIT TESTS ======
 
 const testing = std.testing;
@@ -382,4 +481,40 @@ test "verified_ops: checkMemoryBoundsFast matches checkMemoryBoundsRef" {
             );
         }
     }
+}
+
+test "verified_ops: isValidJumpdestBytes skips PUSH immediates and truncated PUSH" {
+    // PUSH1 0x5b (fake JUMPDEST inside immediate), JUMPDEST (real at pc=2), PUSH32 truncated at pc=3
+    const code = [_]u8{ 0x60, 0x5b, 0x5b, 0x7f, 0x5b };
+    try testing.expect(!isValidJumpdestBytes(&code, code.len, 0));
+    try testing.expect(!isValidJumpdestBytes(&code, code.len, 1));
+    try testing.expect(isValidJumpdestBytes(&code, code.len, 2));
+    try testing.expect(!isValidJumpdestBytes(&code, code.len, 3));
+    try testing.expect(!isValidJumpdestBytes(&code, code.len, 4));
+    try testing.expect(!isValidJumpdestBytes(&code, code.len, 5));
+}
+
+test "verified_ops: bsearchJumpTableU32 finds present and rejects absent PCs" {
+    const pcs = [_]u32{ 2, 7, 19, 42, 100 };
+    try testing.expect(bsearchJumpTableU32(&pcs, pcs.len, 2));
+    try testing.expect(bsearchJumpTableU32(&pcs, pcs.len, 19));
+    try testing.expect(bsearchJumpTableU32(&pcs, pcs.len, 100));
+    try testing.expect(!bsearchJumpTableU32(&pcs, pcs.len, 0));
+    try testing.expect(!bsearchJumpTableU32(&pcs, pcs.len, 8));
+    try testing.expect(!bsearchJumpTableU32(&pcs, pcs.len, 101));
+    try testing.expect(!bsearchJumpTableU32(&pcs, 0, 2));
+}
+
+test "verified_ops: copyEvmBytes and stack fused top operations" {
+    const src = [_]u8{ 0xde, 0xad, 0xbe, 0xef };
+    var dst = [_]u8{ 0, 0, 0, 0 };
+    copyEvmBytes(&dst, &src, src.len);
+    try testing.expectEqualSlices(u8, &src, &dst);
+
+    var stack = [_]u256{ 10, 20 };
+    stackPushAddTop(&stack[0], 5);
+    try testing.expectEqual(@as(u256, 15), stack[0]);
+    stackSwap1Top(&stack);
+    try testing.expectEqual(@as(u256, 20), stack[0]);
+    try testing.expectEqual(@as(u256, 15), stack[1]);
 }

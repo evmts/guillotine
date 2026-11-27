@@ -7,7 +7,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:241 (byteRef)
+;; --- src/core/verified_ops.zig:261 (byteRef)
 ;;   | pub inline fn byteRef(index: u256, value: u256) u256 {
 ;;   |     if (index >= 32) return 0;
 ;;   |     const byte_index: u8 = @intCast(index);

@@ -8,13 +8,13 @@
 ;; This file asserts ONLY the hypotheses. Expected `sat`: the hypotheses
 ;; are consistent, so the companion `unsat` proof is not vacuous.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:295 (denseJumpInBoundsRef)
+;; --- src/core/verified_ops.zig:315 (denseJumpInBoundsRef)
 ;;   | pub inline fn denseJumpInBoundsRef(dest: u256, dense_len: u32, comptime PcType: type) bool {
 ;;   |     if (dest > std.math.maxInt(PcType)) return false;
 ;;   |     const dest_pc: u32 = @intCast(dest);
 ;;   |     return dest_pc < dense_len;
 ;;   | }
-;; --- src/core/verified_ops.zig:302 (denseJumpInBoundsFast)
+;; --- src/core/verified_ops.zig:322 (denseJumpInBoundsFast)
 ;;   | pub inline fn denseJumpInBoundsFast(dest: u256, dense_len: u32) bool {
 ;;   |     return dest < @as(u256, dense_len);
 ;;   | }

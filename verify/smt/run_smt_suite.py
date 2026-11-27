@@ -742,7 +742,7 @@ min_u + max_u cannot wrap u32.""",
         hyps=[],
         goal="""(and (= (blockStackGuardFast size min_stack max_stack CAP) (blockStackGuardRef size min_stack max_stack CAP))
      (bvuge (bvadd ((_ zero_extend 16) min_stack) ((_ zero_extend 16) max_stack)) ((_ zero_extend 16) min_stack)))""",
-        sources=src(VERIFIED_OPS, "blockStackGuardRef", "blockStackGuardFast"),
+        sources=src(VERIFIED_OPS, "blockStackGuardRef", "blockStackGuardFast", "blockStackGuardRefCode", "blockStackGuardFastCode"),
     )
 )
 
@@ -755,7 +755,7 @@ cap <= 2^31: blockStackGuardFast = blockStackGuardRef. Covers every FrameConfig.
         decls=GUARD_DEFS + "\n(declare-const cap (_ BitVec 32))",
         hyps=[("domain: cap <= 2^31", "(bvule cap #x80000000)")],
         goal="(= (blockStackGuardFast size min_stack max_stack cap) (blockStackGuardRef size min_stack max_stack cap))",
-        sources=src(VERIFIED_OPS, "blockStackGuardRef", "blockStackGuardFast"),
+        sources=src(VERIFIED_OPS, "blockStackGuardRef", "blockStackGuardFast", "blockStackGuardRefCode", "blockStackGuardFastCode"),
     )
 )
 
@@ -1159,7 +1159,7 @@ class Expr:
 
     def eval(self, text: str) -> int:
         text = re.sub(r"@as\(\s*u\d+\s*,\s*", "(", text)
-        text = re.sub(r"@intFromEnum\(\s*Opcode\.(\w+)\s*\)", r"OPCODE_\1", text)
+        text = re.sub(r"@(?:intFromEnum|backingInt)\(\s*Opcode\.(\w+)\s*\)", r"OPCODE_\1", text)
         text = text.replace("GasConstants.", "GC_")
         tree = ast.parse(text.strip(), mode="eval")
         return self._ev(tree.body)

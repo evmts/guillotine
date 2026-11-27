@@ -53,7 +53,7 @@ def parse_llvm_ir(ll_text: str) -> Dict[str, IRFunction]:
     i = 0
     n = len(lines)
     define_re = re.compile(
-        r"^define\b.*?\s+(i\d+|void|ptr)\s+@([A-Za-z0-9_$.]+)\(([^)]*)\)"
+        r"^define\b.*?\s+(i\d+|void|ptr)\s+@([A-Za-z0-9_$.]+)\(((?:[^()]|\([^)]*\))*)\)"
     )
 
     while i < n:
@@ -67,7 +67,25 @@ def parse_llvm_ir(ll_text: str) -> Dict[str, IRFunction]:
         params: List[Tuple[str, str]] = []
         if params_str:
             param_idx = 0
-            for raw_p in params_str.split(","):
+            # Split parameters on top-level commas (ignore commas inside attributes like captures(address, provenance))
+            raw_params: List[str] = []
+            depth = 0
+            cur: List[str] = []
+            for ch in params_str:
+                if ch == "(":
+                    depth += 1
+                    cur.append(ch)
+                elif ch == ")":
+                    depth -= 1
+                    cur.append(ch)
+                elif ch == "," and depth == 0:
+                    raw_params.append("".join(cur))
+                    cur = []
+                else:
+                    cur.append(ch)
+            if cur:
+                raw_params.append("".join(cur))
+            for raw_p in raw_params:
                 raw_p = raw_p.strip()
                 if not raw_p:
                     continue

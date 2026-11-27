@@ -13,13 +13,13 @@
 ;; This file asserts ONLY the hypotheses. Expected `sat`: the hypotheses
 ;; are consistent, so the companion `unsat` proof is not vacuous.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:288 (smodFromUnsignedRem)
+;; --- src/core/verified_ops.zig:308 (smodFromUnsignedRem)
 ;;   | pub inline fn smodFromUnsignedRem(top: u256, unsigned_rem: u256) u256 {
 ;;   |     const top_sign = top >> 255;
 ;;   |     const top_mask = @as(u256, 0) -% top_sign;
 ;;   |     return (unsigned_rem ^ top_mask) -% top_mask;
 ;;   | }
-;; --- src/core/verified_ops.zig:279 (absTwoComp)
+;; --- src/core/verified_ops.zig:299 (absTwoComp)
 ;;   | pub inline fn absTwoComp(x: u256) u256 {
 ;;   |     const sign = x >> 255;
 ;;   |     const mask = @as(u256, 0) -% sign;

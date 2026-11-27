@@ -7,11 +7,11 @@
 ;; This file asserts ONLY the hypotheses. Expected `sat`: the hypotheses
 ;; are consistent, so the companion `unsat` proof is not vacuous.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:155 (alignUp32)
+;; --- src/core/verified_ops.zig:175 (alignUp32)
 ;;   | pub inline fn alignUp32(n: u32) u32 {
 ;;   |     return (n + 31) & ~@as(u32, 31);
 ;;   | }
-;; --- src/core/verified_ops.zig:160 (memoryWordCountRef)
+;; --- src/core/verified_ops.zig:180 (memoryWordCountRef)
 ;;   | pub inline fn memoryWordCountRef(byte_size: u32) u64 {
 ;;   |     const b: u64 = byte_size;
 ;;   |     return if (b == 0) 0 else ((b - 1) / 32) + 1;

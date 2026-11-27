@@ -6,7 +6,7 @@
 
 An Ethereum Virtual Machine written in Zig, built around a register-passing tailcall dispatch engine.
 
-**Status**: `v0.1.0` (Beta). Passes 100% of official Ethereum Execution Spec Tests (`66,652 / 66,652`, Frontier through Osaka, fusions on and off), `116,384 / 116,384` Zig↔Lean 4 differential fuzz vectors, and `32 / 32` SMT proofs.
+**Status**: `v0.1.0` (Beta). Passes 100% of official Ethereum Execution Spec Tests (`66,652 / 66,652`, Frontier through Osaka, fusions on and off), `116,384 / 116,384` Zig↔Lean 4 differential fuzz vectors, `55` `#audit_proof`-audited Zean direct Zig `0.17.1` AIR → Lean `4.35.0` theorems (24 real Zig kernels), and `32 / 32` SMT proofs.
 
 ## How does it work?
 
@@ -19,7 +19,7 @@ Each opcode handler is a `preserve_none` tailcall (`@call(.always_tail, ...)`, n
 - **Full mainnet hardfork coverage**: Frontier through Prague/Pectra and Osaka/Fusaka (EIP-7702, EIP-7623, EIP-4844, EIP-2537 BLS12-381, EIP-2935, EIP-7951 P256VERIFY, EIP-7610, Osaka CLZ & ModExp).
 - **Base & OP Stack L2 execution**: Bedrock through Jovian (`src/layer2/`) running on fork-configured Guillotine `Evm` instances, including EIP-2930 access lists, EIP-7702 authorization lists on Isthmus/Jovian, L1 data fees, operator fees, and deposit transactions.
 - **Fast native precompiles**: Pure-Zig secp256k1 `ECRECOVER` (`0.171 ms`), adaptive Montgomery `MODEXP`, BN254 GLV/multi-Miller loop, BLS12-381 via `blst`, KZG 4844 via `c-kzg-4844`, and SIMD calldata token counting.
-- **Formal verification**: Executable Lean `4.32.0` reference spec (`verify/lean/`), 116,384-vector Zig↔Lean differential fuzzer, and 32 fail-closed SMT theorems (`verify/smt/`).
+- **Dual Lean `4.35.0` formal verification (Zean + Lean 4) + SMT + LLVM IR**: Direct Zig `0.17.1` AIR → Lean 4 proofs via **Zean** (`verify/zean/`, `verify/lean/GuillotineZean/`, 24 real functions / 55 `#audit_proof`-audited theorems), hand-authored Lean 4 models & executable spec (`verify/lean/GuillotineVerify/`, `GuillotineSpec/`), 116,384-vector Zig↔Lean differential fuzzer, 32 fail-closed SMT theorems (`verify/smt/`), and `ReleaseFast` LLVM IR equivalence & poison/UB checking (`verify/llvm/`).
 - **Three supported surfaces**: Native Zig package (`dep.module("evm")`), C ABI (`libguillotine_ffi` + `sdks/c/include/guillotine.h`), and TypeScript Bun FFI SDK (`@tevm/guillotine`).
 - **(Experimental) ARM64 direct JIT**: Opt-in zero-dependency ARM64 compiler (`src/jit/`, gated by `EvmConfig.enable_native_jit`).
 
@@ -86,9 +86,10 @@ $ ./bench/blocks/runners/revm/target/release/blocks-revm --iterations 5 --warmup
 | --- | --- | --- |
 | Official EEST state tests (`tests@v21.0.3`, fusions ON) | `66,652 / 66,652` (`100.00%`) | `zig build state-tests -Doptimize=ReleaseSafe` |
 | Official EEST state tests (`tests@v21.0.3`, fusions OFF) | `66,652 / 66,652` (`100.00%`) | `zig build state-tests -Doptimize=ReleaseSafe -Devm-enable-fusion=false` |
-| Zig↔Lean `4.32.0` differential fuzzer | `116,384 / 116,384` (`0` mismatches) | `FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe` |
+| Zean direct Zig `0.17.1` AIR → Lean `4.35.0` proofs | `24` captured kernels / `55` `#audit_proof` theorems (`0` `sorry`) | `zig build verify-zean` |
+| Hand-authored Lean `4.35.0` proofs & differential fuzzer | `5` proof modules + `116,384 / 116,384` (`0` mismatches) | `zig build verify-lean && FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe` |
 | SMT bitvector proofs (Bitwuzla + Z3) | `32 / 32` theorems proved (`unsat`) | `zig build verify-smt` |
-| LLVM IR equivalence & poison/UB + Lean 4 proofs | All exported pairs & 5 proof modules | `zig build verify` (`verify-ir`, `verify-smt`, `verify-lean`) |
+| Full formal verification suite (LLVM IR + SMT + Lean + Zean) | All exported IR pairs, 32 SMT, 5 Lean & 6 Zean modules | `zig build verify` (`verify-ir`, `verify-smt`, `verify-lean`, `verify-zean`) |
 | Core Zig suites (unit, opcodes, fusions, precompiles, L2, fuzz, JIT) | 100% passing (L2 `154 / 154`) | `zig build test` |
 | Multi-threaded havoc fuzz campaign | 0 open crashes (`.fuzz-crashes/`) | `zig build fuzz-campaign -Doptimize=ReleaseSafe -- --seconds=60 --threads=8` |
 | C SDK & Rust workspace E2E | 100% passing | `make -f sdks/c/Makefile -o build-core test && cargo test --locked` |
@@ -243,7 +244,7 @@ Prerequisites:
 - **Zig `0.17.1`** (stock toolchain; `preserve_none` tailcalls are built in, no compiler fork needed)
 - **Rust stable** (builds the BN254/BLS12-381 static crypto wrappers automatically via `build.zig`)
 - **Bun** (optional, for `sdks/typescript`)
-- **Lean `4.32.0`** and **Bitwuzla / Z3** (optional, for `verify/lean` and `verify/smt`)
+- **Lean `4.35.0`**, **Zean** (`okcontract/zean`), and **Bitwuzla / Z3** (optional, for `verify-zean`, `verify-lean`, `verify-ir`, and `verify-smt`)
 
 Common commands (run from repository root):
 

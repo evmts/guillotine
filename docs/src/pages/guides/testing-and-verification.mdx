@@ -1,24 +1,27 @@
 ---
 title: Testing, fuzzing, and formal verification
-description: How Guillotine is verified across official Ethereum spec tests, differential fuzzing, SMT and LLVM IR proofs, Lean 4 theorems, SDK E2E tests, and benchmarks.
+description: How Guillotine is verified across official Ethereum spec tests, differential fuzzing, Zean direct Zig AIR -> Lean 4 proofs, hand-authored Lean 4 theorems, SMT and LLVM IR proofs, SDK E2E tests, and benchmarks.
 ---
 
 # Testing, fuzzing, and formal verification
 
 Guillotine is mission-critical execution infrastructure: a silent arithmetic,
 gas, or state-transition bug causes consensus splits or fund loss. Correctness
-is therefore enforced through **seven independent verification layers** rather
-than relying on any single test suite.
+is therefore enforced through **eight independent verification layers** —
+including **two complementary Lean `4.35.0` formal verification paths** (direct
+Zig `0.17.1` AIR proofs via **Zean** alongside hand-authored Lean 4 models and
+an executable Lean 4 EVM specification) — rather than relying on any single test
+suite.
 
 ## Verification matrix at a glance
 
 | Layer | What it verifies | Recorded result (`v0.1.0`) | Command | CI / schedule |
 | --- | --- | --- | --- | --- |
 | **Official EEST state tests** | Full Ethereum mainnet compliance (Frontier → Osaka), post-state MPT root & RLP logs hash, fusions ON & OFF | **66,652 / 66,652** (100.00%, 0 crashes) | `zig build state-tests -Doptimize=ReleaseSafe` | Every push & PR (`ci.yml`) |
-| **Lean 4 differential fuzzer** | Guillotine vs. executable Lean `4.32.0` spec across words, gas, bytecode, EVM, OP Stack/Base, RLP | **116,384 / 116,384** (0 mismatches) | `FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe` | On-demand & release gate |
+| **Zean direct Zig AIR → Lean `4.35.0`** | Machine-checked Lean 4 proofs directly over compiler-captured Zig `0.17.1` AIR (`src/core/verified_ops.zig`), with kernel-checked `Captured.decode` certificates & `#audit_proof` axiom audits | **24 functions / 55 audited theorems** (0 `sorry`) | `zig build verify-zean` | On-demand (`zig build verify`) |
+| **Lean `4.35.0` models & differential fuzzer** | Hand-authored Lean 4 proofs (`GuillotineVerify`) + Guillotine vs. executable Lean `4.35.0` spec (`GuillotineSpec`) across words, gas, bytecode, EVM, OP Stack/Base, RLP | **5 proof modules** + **116,384 / 116,384** (0 mismatches) | `zig build verify-lean` / `FUZZ_ITERS=2000 zig build test-lean-diff -Doptimize=ReleaseSafe` | On-demand (`zig build verify`) & release gate |
 | **SMT bitvector proofs** | Bit-precise equivalence & overflow-freedom of fast paths and fusions via Bitwuzla + Z3 | **32 / 32** theorems (`unsat`) + vacuity (`sat`) | `zig build verify-smt` | On-demand (`zig build verify`) |
 | **LLVM IR equivalence & UB** | Direct `ReleaseFast` LLVM SSA IR equivalence & poison/UB-freedom for `<op>_ref` vs `<op>_fast` | All exported pairs proved | `zig build verify-ir` | On-demand (`zig build verify`) |
-| **Lean 4 kernel proofs** | Machine-checked theorems over arithmetic, basic blocks, fusions, jump tables, and memory | All 5 proof modules build | `zig build verify-lean` | On-demand (`zig build verify`) |
 | **Core Zig test suites** | Unit, opcode differential (vs `MinimalEvm`), fusions, ModExp, precompiles, Layer 2 (`154/154`), integration, JIT, bench harness | 100% passing | `zig build test` | Every push & PR (`ci.yml`) |
 | **Multi-layer fuzzing** | 10 Zig fuzz targets, multi-threaded havoc campaign, Linux LLVM `--fuzz`, Rust FFI fuzz, TS SDK shrinking fuzzer | 0 open crashes | `zig build test-fuzz` / `zig build fuzz-campaign` | Every push, PR & nightly (`fuzz.yml`) |
 | **SDK & binding E2E** | C ABI (`libguillotine_ffi`), C SDK tests, Rust workspace tests, TypeScript Bun SDK (`340/340`, `30,290` assertions) | 100% passing | `make -f sdks/c/Makefile test`, `cd sdks/typescript && bun test` | Every push & PR (`ci.yml`) |
@@ -84,16 +87,75 @@ not a CI gate and has been superseded by `zig build state-tests`.
 
 ## 2. Formal verification (`zig build verify`)
 
-Guillotine combines **three complementary formal methods** under `verify/`. Run
-all of them together with:
+Guillotine combines **four complementary formal verification layers** under
+`verify/`, including **two distinct Lean `4.35.0` approaches** — direct Zig
+`0.17.1` AIR verification via **Zean** (`verify-zean`) and hand-authored Lean 4
+proofs & executable EVM specification (`verify-lean`) — alongside SMT-LIB2
+bitvector proofs (`verify-smt`) and compiled LLVM IR equivalence/UB checking
+(`verify-ir`). Run all four layers together with:
 
 ```bash
 zig build verify
 ```
 
-Or run each layer independently:
+### Why both Zean and hand-authored Lean 4?
 
-### 2.1 SMT-LIB2 bitvector proofs (`zig build verify-smt`)
+| Dimension | **Zean direct Zig AIR → Lean `4.35.0`** (`verify-zean`) | **Hand-authored Lean `4.35.0`** (`verify-lean`) |
+| --- | --- | --- |
+| **What is verified** | Actual compiler-lowered Zig `0.17.1` AIR (`after-sema-before-legalize`) captured directly from `src/core/verified_ops.zig` | Whole-EVM semantics, opcode fusions, basic-block batching, jump-table models, and an executable spec oracle |
+| **Semantic gap** | Eliminates manual Zig→Lean transcription drift via kernel-checked `Captured.decode` / `CapturedScalar.decode` correspondence theorems and SHA-256 capture pins (`zean --check`) | Models higher-level interpreter structure (dispatch schedules, fusion chains, full EVM + L2 execution) beyond single-function AIR capture; cross-checked via 116,384 differential fuzz vectors (`test-lean-diff`) |
+| **Memory & loops** | Proves explicit pointer validity, bounds safety, overflow-freedom, and heap framing (`StackFrame` / `ByteArray.HeapFrame`) over Zig memory & loop AIR | Pure mathematical specifications over `BitVec 256`, `Nat`, lists, and executable reference transitions |
+| **Location** | `zean.json`, `verify/zean/`, `verify/lean/GuillotineZean/` | `verify/lean/GuillotineVerify/`, `verify/lean/GuillotineSpec/` |
+
+Running both gives Guillotine **end-to-end depth**: Zean proves that the real
+Zig `0.17.1` kernels compiled into Guillotine satisfy their functional,
+arithmetic, memory-safety, and framing contracts with zero manual translation,
+while `GuillotineVerify` and `GuillotineSpec` prove whole-machine invariants
+and provide an executable Lean 4 differential oracle.
+
+---
+
+### 2.1 Direct Zig `0.17.1` AIR → Lean `4.35.0` proofs via Zean (`zig build verify-zean`)
+
+Powered by [`okcontract/zean`](https://github.com/okcontract/zean) (pinned by
+git revision in `verify/lean/lakefile.toml` and configured at repo root in
+`zean.json`), Zean captures compiler-emitted Zig `0.17.1` AIR directly from
+real Guillotine kernels in `src/core/verified_ops.zig` across all three Zean
+profiles (`scalar`, `memory` with native `u256`, and `loops`), emits Lean 4
+definitions + raw AIR correspondence certificates under
+`verify/lean/GuillotineZean/`, and audits every theorem in
+`verify/lean/GuillotineZean.lean` with `#audit_proof` (verifying zero `sorryAx`
+and only Lean's standard logical axioms `propext`, `Classical.choice`,
+`Quot.sound`).
+
+All **24 captured Zig `0.17.1` functions** (**55 `#audit_proof`-audited
+theorems**: 24 kernel-checked `*_correspondence` certificates + 31 correctness,
+equivalence, memory-safety, and heap-framing theorems):
+
+- **`GuillotineZean.ScalarOps`** (5 functions, 7 proofs — `scalar` profile):
+  - `alignUp32` (`align_up_32_correct`), `memoryWordCountFast` (`memory_word_count_fast_correct`), `memoryGasCost` (`memory_gas_cost_correct`, `memory_gas_cost_monotone`), `blockStackGuardRefCode` & `blockStackGuardFastCode` (`block_stack_guard_ref_correct`, `block_stack_guard_fast_correct`, direct AIR equivalence `block_stack_guard_fast_eq_ref`).
+- **`GuillotineZean.Word256Ops`** (10 functions, 12 proofs — `memory` profile, native `u256`):
+  - Dynamic/32-byte/1-byte memory bounds fast paths (`check_memory_bounds_fast_correct`, `check_memory_bounds_word32_fast_correct`, `check_memory_bounds_byte1_fast_correct`).
+  - Dense jump-table bounds fast vs. reference equivalence (`dense_jump_bounds_fast_correct`, `dense_jump_bounds_u16_ref_correct`, `dense_jump_bounds_fast_eq_u16_ref`, `dense_jump_bounds_u32_ref_correct`, `dense_jump_bounds_fast_eq_u32_ref`).
+  - 256-bit signed/bitwise primitives (`abs_two_comp_correct`, `sdiv_sign_apply_correct`, `smod_sign_apply_correct`, `byte_ref_correct`).
+- **`GuillotineZean.StackOps`** (6 functions, 6 proofs — `memory` profile, in-place `u256` stack ops):
+  - In-place fused stack arithmetic/bitwise kernels and `SWAP1` (`stack_push_add_top_correct`, `stack_push_sub_top_correct`, `stack_push_mul_top_correct`, `stack_push_and_top_correct`, `stack_push_xor_top_correct`, `stack_swap1_top_correct`).
+- **`GuillotineZean.JumpBsearch`** (1 loop kernel, 2 proofs — `loops` profile):
+  - `bsearchJumpTableU32`: memory safety, overflow-free midpoint `lo + ((hi - lo) >> 1)`, exact binary-search soundness & completeness (`result = true ↔ ∃ k < len, pcs k = target`) on strictly sorted `u32` jump tables, read-only heap framing, and `Verify.Observes` soundness across all fuel budgets (`bsearch_jump_table_u32_contract`, `bsearch_jump_table_u32_safe`).
+- **`GuillotineZean.BytecodeJumpdest`** (1 loop kernel, 2 proofs — `loops` profile):
+  - `isValidJumpdestBytes`: exact equivalence to the Yellow Paper Section 9.4.3 `validJumpdestSpec` across arbitrary bytecodes (including truncated trailing `PUSH1`–`PUSH32` opcodes with zero buffer over-read and zero `pc + step` overflow), read-only heap framing, and `Verify.Observes` soundness (`is_valid_jumpdest_bytes_contract`, `is_valid_jumpdest_bytes_safe`).
+- **`GuillotineZean.MemoryCopy`** (1 loop kernel, 2 proofs — `loops` profile):
+  - `copyEvmBytes`: memory safety across disjoint byte slices, exact byte-for-byte postcondition (`ByteArray.Represents`), source preservation, non-overlapping heap framing (`ByteArray.HeapFrame`), and `Verify.Observes` soundness (`copy_evm_bytes_contract`, `copy_evm_bytes_safe`).
+
+```bash
+# Build and #audit_proof-check all 55 Zean direct Zig AIR -> Lean 4.35.0 theorems
+zig build verify-zean
+
+# Also verify zero AIR capture drift against src/core/verified_ops.zig using a Zean toolchain:
+ZEAN_BIN=/path/to/zean ZEAN_TOOLCHAIN=/path/to/report.json zig build verify-zean
+```
+
+### 2.2 SMT-LIB2 bitvector proofs (`zig build verify-smt`)
 
 `verify/smt/run_smt_suite.py` generates **32 self-contained `.smt2` theorems**
 into `verify/smt/proofs/` and discharges them using **Bitwuzla** (primary)
@@ -116,7 +178,7 @@ zig build verify-smt
 bitwuzla verify/smt/proofs/sdiv_branchless_equiv.smt2
 ```
 
-### 2.2 Compiled LLVM IR equivalence & poison/UB verifier (`zig build verify-ir`)
+### 2.3 Compiled LLVM IR equivalence & poison/UB verifier (`zig build verify-ir`)
 
 Source-level models alone do not prove that compiler lowering preserves
 semantics or avoids undefined behavior. `verify/llvm/llvm_ir_verify.py` verifies
@@ -131,11 +193,12 @@ the **actual `ReleaseFast` LLVM SSA IR** emitted by
 zig build verify-ir
 ```
 
-### 2.3 Machine-checked Lean `4.32.0` proofs & differential oracle
+### 2.4 Hand-authored Lean `4.35.0` proofs & differential oracle (`zig build verify-lean`)
 
-Under `verify/lean/` (pinned to `leanprover/lean4:v4.32.0`):
+Under `verify/lean/` (pinned to `leanprover/lean4:v4.35.0`), complementing the
+direct Zig AIR proofs in `GuillotineZean`:
 
-1. **Kernel-checked proofs (`verify/lean/GuillotineVerify/`):**
+1. **Kernel-checked specification & interpreter proofs (`verify/lean/GuillotineVerify/`):**
    - `Arithmetic.lean` — `expGasByteLenFast_eq_ref`, `signextendFast_eq_ref`, `sarFast_eq_ref`, `byteFast_eq_ref`, `clzFast_eq_ref`, `absTwoComp_eq_abs`, `sdivFast_eq_ref`, `smodFast_eq_ref`, plus edge-case theorems (`sdivFast_min_neg_one`, `smodFast_min_neg_one`, division by zero).
    - `BasicBlock.lean` — `block_sound`, `block_sound_of_unsaturated_gas`, `blockStackGuardFast_eq_ref`, `clampedMinMax_sound`, and explicit `saturated_gas_counterexample`.
    - `Fusions.lean` — `execFused_eq_execSeq` and per-fusion soundness theorems (`push_add_sound`, `push_sub_sound`, `push_mul_sound`, `push_and_sound`, `push_or_sound`, `push_xor_sound`, `iszero_push_jumpi_sound`, `push_add_dup1_sound`, `swap1_dup2_add_sound`, `const_fold_*_sound`).

@@ -6,14 +6,14 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/core/verified_ops.zig:241 (byteRef)
+;; --- src/core/verified_ops.zig:261 (byteRef)
 ;;   | pub inline fn byteRef(index: u256, value: u256) u256 {
 ;;   |     if (index >= 32) return 0;
 ;;   |     const byte_index: u8 = @intCast(index);
 ;;   |     const shift_bits: u8 = (31 - byte_index) * 8;
 ;;   |     return (value >> shift_bits) & 0xFF;
 ;;   | }
-;; --- src/core/verified_ops.zig:249 (byteFast)
+;; --- src/core/verified_ops.zig:269 (byteFast)
 ;;   | pub inline fn byteFast(index: u256, value: u256) u256 {
 ;;   |     if (index >= 32) return 0;
 ;;   |     const byte_index: u8 = @truncate(index);

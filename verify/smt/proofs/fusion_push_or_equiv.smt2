@@ -12,9 +12,9 @@
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
 ;; --- src/instructions/handlers_bitwise_synthetic.zig:52 (push_or_inline)
-;;   |         pub fn push_or_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             N.before(self, .PUSH_OR_INLINE, cursor, s.sp, gas);
+;;   |         pub fn push_or_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_OR_INLINE, cursor, s, gas);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_OR_INLINE, Dispatch, Dispatch.Item, cursor);
 ;;   | 
@@ -25,12 +25,12 @@
 ;;   |             const result = top | push_value;
 ;;   |             s.set_top_unsafe(result);
 ;;   | 
-;;   |             return N.next(self, .PUSH_OR_INLINE, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_OR_INLINE, cursor, s, gas);
 ;;   |         }
 ;; --- src/instructions/handlers_bitwise_synthetic.zig:69 (push_or_pointer)
-;;   |         pub fn push_or_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             N.before(self, .PUSH_OR_POINTER, cursor, s.sp, gas);
+;;   |         pub fn push_or_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             var s = N.StackView.init(sp, t0, t1, t2, t3);
+;;   |             N.before(self, .PUSH_OR_POINTER, cursor, s, gas);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
 ;;   |             const op_data = dispatch_opcode_data.getOpData(.PUSH_OR_POINTER, Dispatch, Dispatch.Item, cursor);
 ;;   | 
@@ -41,7 +41,7 @@
 ;;   |             const result = top | push_value;
 ;;   |             s.set_top_unsafe(result);
 ;;   | 
-;;   |             return N.next(self, .PUSH_OR_POINTER, cursor, s.sp, gas);
+;;   |             return N.next(self, .PUSH_OR_POINTER, cursor, s, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

@@ -1,0 +1,17 @@
+{
+  "schema": "zean.client.v1",
+  "source": "scalar_ops.zig",
+  "sources": ["verified_ops.zig"],
+  "roots": [
+    "scalar_ops.align_up_32",
+    "scalar_ops.memory_word_count_fast",
+    "scalar_ops.memory_gas_cost",
+    "scalar_ops.block_stack_guard_fast",
+    "scalar_ops.block_stack_guard_ref"
+  ],
+  "profile": "scalar",
+  "generatedModule": "GuillotineZean.ScalarOps.Generated",
+  "libraries": ["Compiler.ZigAir.Scalar"],
+  "proofs": [],
+  "theorems": []
+}
