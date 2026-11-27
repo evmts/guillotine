@@ -22,34 +22,29 @@ pub fn Handlers(FrameType: type) type {
         const MEMORY_LIMIT: u64 = @min(FrameType.Memory.MEMORY_LIMIT, std.math.maxInt(u32));
 
         /// Generate a log handler for LOG0-LOG4
-        pub fn generateLogHandler(topic_count: u8) FrameType.OpcodeHandler {
+        pub fn generateLogHandler(comptime topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
             return handler_abi.wrap(FrameType, struct {
                 pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
                     const dispatch = Dispatch{ .cursor = cursor };
 
                     // Add debug logging for the specific LOG opcode
-                    const unified_opcode = switch (topic_count) {
+                    const unified_opcode = comptime switch (topic_count) {
                         0 => .LOG0,
                         1 => .LOG1,
                         2 => .LOG2,
                         3 => .LOG3,
                         4 => .LOG4,
-                        else => {
-                            {
-                                (&self.getEvm().tracer).assert(false, "Invalid topic count for LOG opcode");
-                            }
-                            unreachable;
-                        },
+                        else => @compileError("Only LOG0 to LOG4 is supported"),
                     };
                     self.beforeInstruction(unified_opcode, cursor);
 
                     // EIP-214: WriteProtection is handled by host interface for static calls
 
                     // LOG0 requires 2 items, LOG1 requires 3, LOG2 requires 4, LOG3 requires 5, LOG4 requires 6
-                {
-                    (&self.getEvm().tracer).assert(self.stack.size() >= 2 + topic_count, "LOG requires sufficient stack items");
-                }
+                    {
+                        (&self.getEvm().tracer).assert(self.stack.size() >= 2 + topic_count, "LOG requires sufficient stack items");
+                    }
 
                     // Pop offset and length first (they're on top of stack)
                     const offset = self.stack.pop_unsafe();
@@ -157,12 +152,7 @@ pub fn Handlers(FrameType: type) type {
                             self.afterInstruction(.LOG4, dispatch.getOpData(.LOG4).next_handler, dispatch.getOpData(.LOG4).next_cursor.cursor);
                             return dispatch.getOpData(.LOG4).next_cursor.cursor;
                         },
-                        else => {
-                            {
-                                (&self.getEvm().tracer).assert(false, "Invalid topic count for LOG dispatch");
-                            }
-                            unreachable;
-                        },
+                        else => @compileError("Only LOG0 to LOG4 is supported"),
                     }
                 }
             }.logHandler);

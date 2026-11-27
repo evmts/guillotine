@@ -64,11 +64,78 @@ pub fn Handlers(FrameType: type) type {
             return existing.get_effective_code_address();
         }
 
-        /// CALL, CALLCODE, DELEGATECALL and STATICCALL (execution-specs
-        /// `vm/instructions/system.py`). The flat price of the opcode (40, 700 or the
-        /// warm access cost, by fork) is static gas already charged with the basic
-        /// block; this charges memory expansion, the cold surcharge, the value-transfer
-        /// and new-account costs and the gas forwarded to the callee.
+        inline fn computeCallExtraGas(
+            self: *FrameType,
+            comptime kind: CallKind,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            addr: Address,
+            value: WordType,
+        ) Error!u64 {
+            const evm = self.getEvm();
+            const access_cost = evm.access_address(addr) catch {
+                @branchHint(.cold);
+                self.afterComplete(opcode);
+                return Error.AllocationError;
+            };
+            var extra_gas: u64 = access_cost -| fork_gas.warm_access_cost;
+
+            if (comptime hardfork.isAtLeast(.PRAGUE)) {
+                if (try delegateOf(self, addr)) |delegate| {
+                    extra_gas += evm.access_address(delegate) catch {
+                        @branchHint(.cold);
+                        self.afterComplete(opcode);
+                        return Error.AllocationError;
+                    };
+                }
+            }
+            if (value != 0) extra_gas += GasConstants.CallValueTransferGas;
+
+            if (comptime kind == .call) {
+                const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork))
+                    value != 0 and try isDeadAccount(self, addr)
+                else
+                    !evm.database.account_exists(addr.bytes);
+                if (charge_new_account) extra_gas += fork_gas.new_account_gas;
+            }
+            return extra_gas;
+        }
+
+        inline fn computeForwardedGas(
+            self: *FrameType,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            gas_param: WordType,
+        ) Error!u64 {
+            const available: u64 = @intCast(self.gas_remaining);
+            if (comptime fork_gas.hasAllButOne64th(hardfork)) {
+                const requested: u64 = if (gas_param > std.math.maxInt(u64)) std.math.maxInt(u64) else @intCast(gas_param);
+                return @min(requested, available - available / 64);
+            }
+            if (gas_param > available) {
+                @branchHint(.cold);
+                self.afterComplete(opcode);
+                return Error.OutOfGas;
+            }
+            return @intCast(gas_param);
+        }
+
+        inline fn buildCallParams(
+            self: *FrameType,
+            comptime kind: CallKind,
+            addr: Address,
+            value: WordType,
+            input: []const u8,
+            forwarded: u64,
+        ) CallParams {
+            const stipend: u64 = if (value != 0) GasConstants.CallStipend else 0;
+            return switch (kind) {
+                .call => .{ .call = .{ .caller = self.contract_address, .to = addr, .value = value, .input = input, .gas = forwarded + stipend } },
+                .callcode => .{ .callcode = .{ .caller = self.contract_address, .to = addr, .value = value, .input = input, .gas = forwarded + stipend } },
+                .delegatecall => .{ .delegatecall = .{ .caller = self.caller, .to = addr, .input = input, .gas = forwarded, .context_address = self.contract_address } },
+                .staticcall => .{ .staticcall = .{ .caller = self.contract_address, .to = addr, .input = input, .gas = forwarded } },
+            };
+        }
+
+        /// CALL, CALLCODE, DELEGATECALL and STATICCALL (execution-specs `vm/instructions/system.py`).
         fn callFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime kind: CallKind) Error![*]const FrameType.Dispatch.Item {
             const opcode: Dispatch.UnifiedOpcode = comptime switch (kind) {
                 .call => .CALL,
@@ -82,157 +149,74 @@ pub fn Handlers(FrameType: type) type {
             (&self.getEvm().tracer).assert(self.stack.size() >= (if (has_value_argument) 7 else 6), "CALL-family opcode requires its stack arguments");
 
             const gas_param = self.stack.pop_unsafe();
-            const address_word = self.stack.pop_unsafe();
+            const addr = address_utils.fromWord(WordType, self.stack.pop_unsafe());
             const value: WordType = if (has_value_argument) self.stack.pop_unsafe() else 0;
             const input_offset = self.stack.pop_unsafe();
             const input_size = self.stack.pop_unsafe();
             const output_offset = self.stack.pop_unsafe();
             const output_size = self.stack.pop_unsafe();
 
-            const addr = address_utils.fromWord(WordType, address_word);
             const evm = self.getEvm();
-
-            // Memory expansion covers the input and the output range. A range that no gas
-            // limit can pay for is an out-of-gas halt, never a failed call.
             const input_end = memoryEnd(input_offset, input_size) orelse {
+                @branchHint(.cold);
                 self.afterComplete(opcode);
                 return Error.OutOfGas;
             };
             const output_end = memoryEnd(output_offset, output_size) orelse {
+                @branchHint(.cold);
                 self.afterComplete(opcode);
                 return Error.OutOfGas;
             };
             const memory_end = @max(input_end, output_end);
             const memory_cost: u64 = if (memory_end > 0) self.memory.get_expansion_cost(memory_end) else 0;
-
-            // EIP-2929 (Berlin+): cold surcharge on top of the warm cost charged statically.
-            // Earlier forks report the warm cost for every access, so the surcharge is 0.
-            const access_cost = evm.access_address(addr) catch {
-                self.afterComplete(opcode);
-                return Error.AllocationError;
-            };
-            var extra_gas: u64 = access_cost -| fork_gas.warm_access_cost;
-
-            // EIP-7702 (Prague+), execution-specs `access_delegation`: a call to a delegated
-            // EOA also pays the full warm or cold access cost of the delegate, which
-            // becomes warm.
-            if (comptime hardfork.isAtLeast(.PRAGUE)) {
-                if (try delegateOf(self, addr)) |delegate| {
-                    extra_gas += evm.access_address(delegate) catch {
-                        self.afterComplete(opcode);
-                        return Error.AllocationError;
-                    };
-                }
-            }
-
-            if (value != 0) extra_gas += GasConstants.CallValueTransferGas;
-
-            if (comptime kind == .call) {
-                // New-account surcharge. Spurious Dragon+ (EIP-161): only when value goes to
-                // a dead account. Earlier forks: whenever the target does not exist.
-                const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork))
-                    value != 0 and try isDeadAccount(self, addr)
-                else
-                    !evm.database.account_exists(addr.bytes);
-                if (charge_new_account) extra_gas += fork_gas.new_account_gas;
-            }
+            const extra_gas = try computeCallExtraGas(self, kind, opcode, addr, value);
 
             if (!chargeGas(self, memory_cost + extra_gas)) {
+                @branchHint(.cold);
                 self.afterComplete(opcode);
                 return Error.OutOfGas;
             }
-
-            // EIP-214: sending value from a static context is an exceptional halt.
             if (comptime kind == .call) {
                 if (value != 0 and evm.is_static_context()) {
+                    @branchHint(.cold);
                     self.afterComplete(opcode);
                     return Error.WriteProtection;
                 }
             }
-
             if (memory_end > 0) {
                 self.memory.ensure_capacity(evm.getCallArenaAllocator(), memory_end) catch {
+                    @branchHint(.cold);
                     self.afterComplete(opcode);
                     return Error.AllocationError;
                 };
             }
 
-            // Gas forwarded to the callee, taken from what is left after the costs above.
-            // EIP-150 (Tangerine Whistle+): at most all but one 64th. Earlier forks forward
-            // exactly the requested amount and halt when it is not available.
-            const available: u64 = @intCast(self.gas_remaining);
-            const forwarded: u64 = if (comptime fork_gas.hasAllButOne64th(hardfork)) blk: {
-                const requested: u64 = if (gas_param > std.math.maxInt(u64)) std.math.maxInt(u64) else @intCast(gas_param);
-                break :blk @min(requested, available - available / 64);
-            } else blk: {
-                if (gas_param > available) {
-                    self.afterComplete(opcode);
-                    return Error.OutOfGas;
-                }
-                break :blk @intCast(gas_param);
-            };
+            const forwarded = try computeForwardedGas(self, opcode, gas_param);
             self.gas_remaining -= @intCast(forwarded);
-
-            // A value transfer adds the 2300 stipend to the callee's gas at no cost to
-            // the caller; what the callee does not use comes back with its leftover gas.
-            const stipend: u64 = if (value != 0) GasConstants.CallStipend else 0;
 
             const input: []const u8 = if (input_size != 0)
                 self.memory.get_slice(@intCast(input_offset), @intCast(input_size)) catch {
+                    @branchHint(.cold);
                     self.afterComplete(opcode);
                     return Error.OutOfBounds;
                 }
             else
                 &.{};
 
-            const params: CallParams = switch (kind) {
-                .call => .{ .call = .{
-                    .caller = self.contract_address,
-                    .to = addr,
-                    .value = value,
-                    .input = input,
-                    .gas = forwarded + stipend,
-                } },
-                .callcode => .{ .callcode = .{
-                    .caller = self.contract_address,
-                    .to = addr,
-                    .value = value,
-                    .input = input,
-                    .gas = forwarded + stipend,
-                } },
-                // DELEGATECALL keeps this frame's sender and runs with this contract's
-                // address and storage.
-                .delegatecall => .{ .delegatecall = .{
-                    .caller = self.caller,
-                    .to = addr,
-                    .input = input,
-                    .gas = forwarded,
-                    .context_address = self.contract_address,
-                } },
-                .staticcall => .{ .staticcall = .{
-                    .caller = self.contract_address,
-                    .to = addr,
-                    .input = input,
-                    .gas = forwarded,
-                } },
-            };
-
-            // The result's output lives in the call arena; only the trace owns memory.
-            var result = evm.inner_call(params);
+            var result = evm.inner_call(buildCallParams(self, kind, addr, value, input, forwarded));
             defer if (result.trace) |*trace| trace.deinit();
 
-            // Unused callee gas (including unused stipend, and all of it when the call
-            // was refused for depth or balance) returns to this frame.
             const returned = std.math.cast(FrameType.GasType, result.gas_left) orelse {
+                @branchHint(.cold);
                 self.afterComplete(opcode);
                 return Error.GasOverflow;
             };
             self.gas_remaining += returned;
 
-            // RETURN data and REVERT data are both copied to the output range.
             const copy_len: usize = @min(@as(usize, @intCast(output_size)), result.output.len);
             if (copy_len > 0) {
                 self.memory.set_data(evm.getCallArenaAllocator(), @intCast(output_offset), result.output[0..copy_len]) catch {
+                    @branchHint(.cold);
                     self.afterComplete(opcode);
                     return Error.AllocationError;
                 };
@@ -562,6 +546,11 @@ pub fn Handlers(FrameType: type) type {
                 error.StaticCallViolation => {
                     self.afterComplete(.SELFDESTRUCT);
                     return Error.WriteProtection;
+                },
+                error.BalanceOverflow => {
+                    @branchHint(.cold);
+                    self.afterComplete(.SELFDESTRUCT);
+                    return Error.InvalidAmount;
                 },
                 else => {
                     @branchHint(.unlikely);

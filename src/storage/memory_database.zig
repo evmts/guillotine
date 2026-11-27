@@ -95,21 +95,21 @@ pub const MemoryDatabase = struct {
         self.accounts.deinit();
         self.storage.deinit();
         self.transient_storage.deinit();
-        
+
         // Free all stored code
         var code_iter = self.codes.iterator();
         while (code_iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.*);
         }
         self.codes.deinit();
-        
+
         // Free all snapshots
         for (self.snapshots.items) |*snapshot| {
             snapshot.accounts.deinit();
             snapshot.storage.deinit();
         }
         self.snapshots.deinit(self.allocator);
-        
+
         // Free batch changes if any
         if (self.batch_changes) |*batch| {
             batch.accounts.deinit();
@@ -236,13 +236,13 @@ pub const MemoryDatabase = struct {
         // Calculate keccak256 hash of the code
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
-        
+
         // Store the code
         const code_copy = try self.allocator.dupe(u8, code);
         errdefer self.allocator.free(code_copy);
-        
+
         try self.codes.put(hash, code_copy);
-        
+
         return hash;
     }
 
@@ -273,30 +273,30 @@ pub const MemoryDatabase = struct {
     pub fn create_snapshot(self: *Self) Database.Error!u64 {
         const snapshot_id = self.next_snapshot_id;
         self.next_snapshot_id += 1;
-        
+
         // Clone current state
         var snapshot_accounts = std.hash_map.HashMap([20]u8, Account, AccountContext, 80).init(self.allocator);
         errdefer snapshot_accounts.deinit();
-        
+
         var accounts_iter = self.accounts.iterator();
         while (accounts_iter.next()) |entry| {
             try snapshot_accounts.put(entry.key_ptr.*, entry.value_ptr.*);
         }
-        
+
         var snapshot_storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(self.allocator);
         errdefer snapshot_storage.deinit();
-        
+
         var storage_iter = self.storage.iterator();
         while (storage_iter.next()) |entry| {
             try snapshot_storage.put(entry.key_ptr.*, entry.value_ptr.*);
         }
-        
+
         try self.snapshots.append(self.allocator, Snapshot{
             .id = snapshot_id,
             .accounts = snapshot_accounts,
             .storage = snapshot_storage,
         });
-        
+
         return snapshot_id;
     }
 
@@ -309,27 +309,27 @@ pub const MemoryDatabase = struct {
                 break;
             }
         }
-        
+
         const index = snapshot_index orelse return Database.Error.SnapshotNotFound;
-        
+
         // Revert to the snapshot state
         const snapshot = self.snapshots.items[index];
-        
+
         // Clear current state
         self.accounts.clearAndFree();
         self.storage.clearAndFree();
-        
+
         // Copy snapshot state
         var accounts_iter = snapshot.accounts.iterator();
         while (accounts_iter.next()) |entry| {
             try self.accounts.put(entry.key_ptr.*, entry.value_ptr.*);
         }
-        
+
         var storage_iter = snapshot.storage.iterator();
         while (storage_iter.next()) |entry| {
             try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
         }
-        
+
         // Remove this and all later snapshots
         while (self.snapshots.items.len > index) {
             if (self.snapshots.items.len > 0) {
@@ -350,9 +350,9 @@ pub const MemoryDatabase = struct {
                 break;
             }
         }
-        
+
         const index = snapshot_index orelse return Database.Error.SnapshotNotFound;
-        
+
         var removed = self.snapshots.orderedRemove(index);
         removed.accounts.deinit();
         removed.storage.deinit();
@@ -362,7 +362,7 @@ pub const MemoryDatabase = struct {
 
     pub fn begin_batch(self: *Self) Database.Error!void {
         if (self.batch_in_progress) return Database.Error.NoBatchInProgress;
-        
+
         self.batch_in_progress = true;
         self.batch_changes = BatchChanges{
             .accounts = std.hash_map.HashMap([20]u8, ?Account, AccountContext, 80).init(self.allocator),
@@ -372,7 +372,7 @@ pub const MemoryDatabase = struct {
 
     pub fn commit_batch(self: *Self) Database.Error!void {
         if (!self.batch_in_progress) return Database.Error.NoBatchInProgress;
-        
+
         if (self.batch_changes) |*batch| {
             // Apply account changes
             var accounts_iter = batch.accounts.iterator();
@@ -383,7 +383,7 @@ pub const MemoryDatabase = struct {
                     _ = self.accounts.remove(entry.key_ptr.*);
                 }
             }
-            
+
             // Apply storage changes
             var storage_iter = batch.storage.iterator();
             while (storage_iter.next()) |entry| {
@@ -393,11 +393,11 @@ pub const MemoryDatabase = struct {
                     try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
                 }
             }
-            
+
             batch.accounts.deinit();
             batch.storage.deinit();
         }
-        
+
         self.batch_in_progress = false;
         self.batch_changes = null;
     }
@@ -406,23 +406,23 @@ pub const MemoryDatabase = struct {
     pub fn getAllAccounts(self: *Self, allocator: std.mem.Allocator) ![]const primitives.Address {
         var addresses = std.ArrayList(primitives.Address).init(allocator);
         errdefer addresses.deinit();
-        
+
         var iter = self.accounts.iterator();
         while (iter.next()) |entry| {
             try addresses.append(primitives.Address{ .bytes = entry.key_ptr.* });
         }
-        
+
         return addresses.toOwnedSlice(allocator);
     }
 
     pub fn rollback_batch(self: *Self) Database.Error!void {
         if (!self.batch_in_progress) return Database.Error.NoBatchInProgress;
-        
+
         if (self.batch_changes) |*batch| {
             batch.accounts.deinit();
             batch.storage.deinit();
         }
-        
+
         self.batch_in_progress = false;
         self.batch_changes = null;
     }
@@ -430,12 +430,12 @@ pub const MemoryDatabase = struct {
 
 test "MemoryDatabase basic operations" {
     const allocator = std.testing.allocator;
-    
+
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Database is now used directly
-    
+
     // Test account operations
     const address = @as([20]u8, @splat(1));
     const account = Account{
@@ -444,18 +444,18 @@ test "MemoryDatabase basic operations" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     };
-    
+
     try db.set_account(address, account);
-    
+
     const retrieved = try db.get_account(address);
     try std.testing.expect(retrieved != null);
     try std.testing.expectEqual(account.balance, retrieved.?.balance);
     try std.testing.expectEqual(account.nonce, retrieved.?.nonce);
-    
+
     // Test storage operations
     const key: u256 = 42;
     const value: u256 = 123456;
-    
+
     try db.set_storage(address, key, value);
     const stored_value = try db.get_storage(address, key);
     try std.testing.expectEqual(value, stored_value);
@@ -463,12 +463,12 @@ test "MemoryDatabase basic operations" {
 
 test "MemoryDatabase snapshot operations" {
     const allocator = std.testing.allocator;
-    
+
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Database is now used directly
-    
+
     // Set initial state
     const address = @as([20]u8, @splat(1));
     const account1 = Account{
@@ -477,12 +477,12 @@ test "MemoryDatabase snapshot operations" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     };
-    
+
     try db.set_account(address, account1);
-    
+
     // Create snapshot
     const snapshot_id = try db.create_snapshot();
-    
+
     // Modify state
     const account2 = Account{
         .balance = 2000,
@@ -490,16 +490,16 @@ test "MemoryDatabase snapshot operations" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     };
-    
+
     try db.set_account(address, account2);
-    
+
     // Verify modified state
     const modified = try db.get_account(address);
     try std.testing.expectEqual(@as(u256, 2000), modified.?.balance);
-    
+
     // Revert to snapshot
     try db.revert_to_snapshot(snapshot_id);
-    
+
     // Verify reverted state
     const reverted = try db.get_account(address);
     try std.testing.expectEqual(@as(u256, 1000), reverted.?.balance);
@@ -538,27 +538,27 @@ fn createTestEvm(allocator: std.mem.Allocator) !TestEvm {
         .chain_id = 1,
     };
     evm_ptr.* = try @import("../root.zig").DefaultEvm.init(allocator, memory_db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .CANCUN);
-    
+
     return TestEvm{ .evm = evm_ptr, .memory_db = memory_db };
 }
 
 // Simple contract that returns its own code
 const RETURN_OWN_CODE_CONTRACT = [_]u8{
     // Get code size
-    0x38,       // CODESIZE
+    0x38, // CODESIZE
     0x60, 0x00, // PUSH1 0 (offset)
-    0x52,       // MSTORE
-    
+    0x52, // MSTORE
+
     // Copy code to memory
-    0x38,       // CODESIZE
+    0x38, // CODESIZE
     0x60, 0x00, // PUSH1 0 (dest offset)
     0x60, 0x00, // PUSH1 0 (src offset)
-    0x39,       // CODECOPY
-    
+    0x39, // CODECOPY
+
     // Return the code
-    0x38,       // CODESIZE
+    0x38, // CODESIZE
     0x60, 0x00, // PUSH1 0 (memory offset)
-    0xF3,       // RETURN
+    0xF3, // RETURN
 };
 
 // Simple contract constructor that deploys a minimal contract
@@ -568,18 +568,18 @@ const CONSTRUCTOR_CONTRACT = [_]u8{
     0x60, 0x0A, // PUSH1 10 (size of runtime code)
     0x60, 0x0C, // PUSH1 12 (offset to runtime code)
     0x60, 0x00, // PUSH1 0 (memory dest)
-    0x39,       // CODECOPY
+    0x39, // CODECOPY
     0x60, 0x0A, // PUSH1 10 (size)
     0x60, 0x00, // PUSH1 0 (offset)
-    0xF3,       // RETURN
-    
+    0xF3, // RETURN
+
     // Runtime code starts here (offset 12):
     0x60, 0x42, // PUSH1 0x42 ("hello" value)
     0x60, 0x00, // PUSH1 0
-    0x52,       // MSTORE
+    0x52, // MSTORE
     0x60, 0x20, // PUSH1 32
     0x60, 0x00, // PUSH1 0
-    0xF3,       // RETURN
+    0xF3, // RETURN
 };
 
 test "CREATE stores code and retrieves via get_code_by_address" {
@@ -592,7 +592,7 @@ test "CREATE2 stores code with deterministic address" {
 
 test "get_code_by_address returns empty for non-existent contracts" {
     const allocator = std.testing.allocator;
-    
+
     const result = try createTestEvm(allocator);
     var evm = result.evm;
     var memory_db = result.memory_db;
@@ -602,9 +602,9 @@ test "get_code_by_address returns empty for non-existent contracts" {
         memory_db.deinit();
         allocator.destroy(memory_db);
     }
-    
+
     const non_existent_address = to_address(0x9999);
-    
+
     // Should return empty slice for non-existent contract
     const code = try evm.database.get_code_by_address(non_existent_address);
     try std.testing.expectEqual(@as(usize, 0), code.len);
@@ -612,7 +612,7 @@ test "get_code_by_address returns empty for non-existent contracts" {
 
 test "get_code_by_address returns empty for EOA (externally owned account)" {
     const allocator = std.testing.allocator;
-    
+
     const result = try createTestEvm(allocator);
     var evm = result.evm;
     var memory_db = result.memory_db;
@@ -622,14 +622,14 @@ test "get_code_by_address returns empty for EOA (externally owned account)" {
         memory_db.deinit();
         allocator.destroy(memory_db);
     }
-    
+
     const eoa_address = to_address(0x4000);
-    
+
     // Create an EOA (account with balance but no code)
     var eoa_account = Account.zero();
     eoa_account.balance = 1000;
     try evm.database.set_account(eoa_address, eoa_account);
-    
+
     // Should return empty code for EOA
     const code = try evm.database.get_code_by_address(eoa_address);
     try std.testing.expectEqual(@as(usize, 0), code.len);
@@ -637,7 +637,7 @@ test "get_code_by_address returns empty for EOA (externally owned account)" {
 
 test "Code storage persistence across multiple operations" {
     const allocator = std.testing.allocator;
-    
+
     const result = try createTestEvm(allocator);
     var evm = result.evm;
     var memory_db = result.memory_db;
@@ -647,29 +647,29 @@ test "Code storage persistence across multiple operations" {
         memory_db.deinit();
         allocator.destroy(memory_db);
     }
-    
+
     const test_code = [_]u8{ 0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xF3 };
     const contract_address = to_address(0x5000);
-    
+
     // Manually set contract code
     const code_hash = try evm.database.set_code(&test_code);
     var account = Account.zero();
     account.code_hash = code_hash;
     try evm.database.set_account(contract_address, account);
-    
+
     // Retrieve code multiple times to ensure persistence
     for (0..5) |_| {
         const retrieved_code = try evm.database.get_code_by_address(contract_address);
         try std.testing.expectEqualSlices(u8, &test_code, retrieved_code);
-        
+
         const retrieved_code_by_hash = try evm.database.get_code(code_hash);
         try std.testing.expectEqualSlices(u8, &test_code, retrieved_code_by_hash);
     }
-    
+
     // Modify account but keep same code hash
     account.balance = 9999;
     try evm.database.set_account(contract_address, account);
-    
+
     // Code should still be the same
     const code_after_balance_change = try evm.database.get_code_by_address(contract_address);
     try std.testing.expectEqualSlices(u8, &test_code, code_after_balance_change);
@@ -681,22 +681,22 @@ fn calculateCreate2Address(creator: [20]u8, salt: u256, init_code: []const u8) !
     // Calculate init_code hash
     var init_code_hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(init_code, &init_code_hash, .{});
-    
+
     // Prepare data for CREATE2 address calculation
     var data: [85]u8 = undefined;
     data[0] = 0xFF;
     @memcpy(data[1..21], &creator);
-    
+
     // Convert salt to big-endian bytes
     var salt_bytes: [32]u8 = @bitCast(salt);
     std.mem.reverse(u8, &salt_bytes);
     @memcpy(data[21..53], &salt_bytes);
     @memcpy(data[53..85], &init_code_hash);
-    
+
     // Hash the data
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(&data, &hash, .{});
-    
+
     // Take last 20 bytes as address
     var address: [20]u8 = undefined;
     @memcpy(&address, hash[12..32]);

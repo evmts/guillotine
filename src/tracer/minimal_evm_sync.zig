@@ -69,7 +69,7 @@ fn getMaxStepsForOpcode(opcode: UnifiedOpcode) u32 {
 
 /// Check if an opcode is synthetic (value > 0xFF)
 fn isSyntheticOpcode(opcode: UnifiedOpcode) bool {
-    return @intFromEnum(opcode) > 0xFF;
+    return @backingInt(opcode) > 0xFF;
 }
 
 pub fn executeMinimalEvmForOpcode(
@@ -82,7 +82,7 @@ pub fn executeMinimalEvmForOpcode(
     _ = cursor;
     const max_steps = getMaxStepsForOpcode(opcode);
     _ = evm.getPC(); // initial_pc for debugging
-    
+
     // Log for debugging
 
     // For regular opcodes (< 0x100), execute exactly once
@@ -121,11 +121,11 @@ pub fn executeMinimalEvmForOpcode(
     while (steps_executed < max_steps) : (steps_executed += 1) {
         // Get current state before step
         _ = evm.getPC(); // Get PC before step for debugging
-        
+
         evm.step() catch |e| {
             // Log the error but don't panic - this is expected for some cases
             last_error = e;
-            
+
             // Special handling for JUMPI failures - need to skip the JUMPI instruction
             if ((opcode == .JUMP_TO_STATIC_LOCATION or opcode == .JUMPI_TO_STATIC_LOCATION) and steps_executed == 1) {
                 // Step 1 (PUSH) succeeded, step 2 (JUMP/JUMPI) failed
@@ -139,12 +139,12 @@ pub fn executeMinimalEvmForOpcode(
                     }
                 }
             }
-            
+
             // For synthetics, we might have partially executed - that's ok
             if (steps_executed > 0) {
                 return;
             }
-            
+
             // If this is the first step and it failed, that might be ok too
             // (e.g., the synthetic doesn't match the current bytecode position)
             return;
@@ -156,7 +156,6 @@ pub fn executeMinimalEvmForOpcode(
         // For most synthetics, we're done after the expected number of steps
         const expected_steps = getMaxStepsForOpcode(opcode);
         if (steps_executed + 1 >= expected_steps and expected_steps < SyntheticOpcodeSteps.DEFAULT_MAX) {
-            
             return;
         }
     }
@@ -168,4 +167,3 @@ pub fn executeMinimalEvmForOpcode(
         tracer.debug("Synthetic {s} stopped after {d} steps with error: {any}", .{ @tagName(opcode), steps_executed, err });
     }
 }
-

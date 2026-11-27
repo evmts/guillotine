@@ -28,11 +28,11 @@ pub const Reg = enum(u4) {
     r15 = 15,
 
     fn low(self: Reg) u8 {
-        return @intFromEnum(self) & 7;
+        return @backingInt(self) & 7;
     }
 
     fn ext(self: Reg) u8 {
-        return @intFromEnum(self) >> 3;
+        return @backingInt(self) >> 3;
     }
 };
 
@@ -69,7 +69,7 @@ pub const Alu = enum(u8) {
     cmp = 7,
 
     fn rmFromReg(self: Alu) u8 {
-        return @intFromEnum(self) * 8 + 1;
+        return @backingInt(self) * 8 + 1;
     }
 };
 
@@ -198,12 +198,12 @@ pub const Emitter = struct {
         try self.rex(true, 0, 0, dst.ext());
         if (value >= -128 and value <= 127) {
             try self.byte(0x83);
-            try self.modrmReg(@intFromEnum(op), dst.low());
+            try self.modrmReg(@backingInt(op), dst.low());
             try self.byte(@bitCast(@as(i8, @intCast(value))));
             return;
         }
         try self.byte(0x81);
-        try self.modrmReg(@intFromEnum(op), dst.low());
+        try self.modrmReg(@backingInt(op), dst.low());
         try self.imm32(value);
     }
 
@@ -233,7 +233,7 @@ pub const Emitter = struct {
     pub fn setcc(self: *Emitter, cond: Cond, dst: Reg) Error!void {
         try self.rex(false, 0, 0, dst.ext());
         try self.byte(0x0F);
-        try self.byte(0x90 | @as(u8, @intFromEnum(cond)));
+        try self.byte(0x90 | @as(u8, @backingInt(cond)));
         try self.modrmReg(0, dst.low());
     }
 
@@ -284,7 +284,7 @@ pub const Emitter = struct {
     /// Jcc rel32 placeholder; returns the offset of the rel32 field.
     pub fn jccPlaceholder(self: *Emitter, cond: Cond) Error!u32 {
         try self.byte(0x0F);
-        try self.byte(0x80 | @as(u8, @intFromEnum(cond)));
+        try self.byte(0x80 | @as(u8, @backingInt(cond)));
         const at = self.offset();
         try self.imm32(0);
         return at;

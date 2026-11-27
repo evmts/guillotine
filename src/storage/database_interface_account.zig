@@ -29,6 +29,16 @@ pub const Account = struct {
     /// Only valid for EOAs (accounts with no code_hash)
     delegated_address: ?Address = null,
 
+    comptime {
+        // Pin Account size so adding cold fields does not silently blow cache lines.
+        if (@sizeOf(Account) > 144) {
+            @compileError(std.fmt.comptimePrint(
+                "Account exceeded 144-byte layout budget, found {d}",
+                .{@sizeOf(Account)},
+            ));
+        }
+    }
+
     /// Creates a new account with zero values
     pub fn zero() Account {
         return Account{
@@ -131,18 +141,18 @@ test "Account.is_empty detects empty accounts" {
 
 test "EIP-7702: Account delegation" {
     var account = Account.zero();
-    
+
     // Initially no delegation
     try testing.expect(!account.has_delegation());
     try testing.expect(account.get_effective_code_address() == null);
-    
+
     // Set delegation
     const delegate_address = Address.fromU256(0x1234);
     account.set_delegation(delegate_address);
     try testing.expect(account.has_delegation());
     try testing.expect(account.get_effective_code_address() != null);
     try testing.expectEqual(delegate_address, account.get_effective_code_address().?);
-    
+
     // Clear delegation
     account.clear_delegation();
     try testing.expect(!account.has_delegation());

@@ -14,8 +14,13 @@
 //! - Assertion-based validation in unsafe operations (*_unsafe variants)
 //! - Proper ownership of aligned memory allocation
 const std = @import("std");
+const builtin = @import("builtin");
+const root = @import("root");
 
 const StackConfig = @import("stack_config.zig").StackConfig;
+
+/// True when compiled as a shared library embedded in a host process (never abort).
+const embedded_build = @hasDecl(root, "guillotine_embedded") and root.guillotine_embedded;
 
 /// Creates a configured stack type.
 ///
@@ -55,8 +60,14 @@ pub fn Stack(config: StackConfig) type {
         // Pop: stack_ptr += 1; return *stack_ptr;
         stack_ptr: [*]WordType,
 
-        // Tracer for assertions (optional for initialization compatibility)
-        tracer: ?*anyopaque,
+        comptime {
+            if (@sizeOf(Self) != 2 * @sizeOf(usize)) {
+                @compileError(std.fmt.comptimePrint(
+                    "Stack must hold only buf_ptr and stack_ptr ({d} bytes), found {d}",
+                    .{ 2 * @sizeOf(usize), @sizeOf(Self) },
+                ));
+            }
+        }
 
         /// Initialize a new stack with allocated memory.
         ///
@@ -66,9 +77,10 @@ pub fn Stack(config: StackConfig) type {
             return initWithTracer(allocator, tracer);
         }
 
-        /// Initialize a new stack with a tracer for assertions.
+        /// Initialize a new stack (tracer parameter retained for API compatibility).
         pub fn initWithTracer(allocator: std.mem.Allocator, tracer: anytype) Error!Self {
-            const memory = allocator.alignedAlloc(WordType, @enumFromInt(6), buffer_len) catch return Error.AllocationError;
+            _ = tracer;
+            const memory = allocator.alignedAlloc(WordType, @fromBackingInt(@intCast(6)), buffer_len) catch return Error.AllocationError;
             errdefer allocator.free(memory);
             // Buffers can be recycled, so give the sentinel a defined value: an empty
             // stack's spill slot is read when a frame enters the handler chain.
@@ -79,7 +91,6 @@ pub fn Stack(config: StackConfig) type {
             return Self{
                 .buf_ptr = base_ptr,
                 .stack_ptr = base_ptr + stack_capacity,
-                .tracer = tracer,
             };
         }
 
@@ -98,11 +109,15 @@ pub fn Stack(config: StackConfig) type {
             return self.buf_ptr;
         }
 
-        /// Assert helper that calls tracer.assert if tracer is available
+        /// Assert helper active in Debug and ReleaseSafe (non-embedded) builds.
+        /// Compiles to nothing in ReleaseFast, ReleaseSmall, and embedded FFI builds.
         inline fn assert(self: *const Self, condition: bool, comptime message: []const u8) void {
-            if (self.tracer) |tracer_ptr| {
-                const tracer: *@import("../tracer/tracer.zig").Tracer = @ptrCast(@alignCast(tracer_ptr));
-                tracer.assert(condition, message);
+            _ = self;
+            if (comptime (builtin.mode == .debug or builtin.mode == .safe) and !embedded_build) {
+                if (!condition) {
+                    @branchHint(.cold);
+                    @panic(message);
+                }
             }
         }
 

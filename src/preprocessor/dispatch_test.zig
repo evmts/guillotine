@@ -51,11 +51,11 @@ fn mockInvalid(frame: *TestFrame, cursor: [*]const TestDispatch.Item) TestFrame.
 fn createTestHandlers() [256]TestFrame.OpcodeHandler {
     var handlers: [256]TestFrame.OpcodeHandler = undefined;
     for (&handlers) |*handler| handler.* = &mockInvalid;
-    handlers[@intFromEnum(Opcode.STOP)] = &mockStop;
-    handlers[@intFromEnum(Opcode.ADD)] = &mockAdd;
-    handlers[@intFromEnum(Opcode.PUSH1)] = &mockPush1;
-    handlers[@intFromEnum(Opcode.JUMPDEST)] = &mockJumpdest;
-    handlers[@intFromEnum(Opcode.PC)] = &mockPc;
+    handlers[@backingInt(Opcode.STOP)] = &mockStop;
+    handlers[@backingInt(Opcode.ADD)] = &mockAdd;
+    handlers[@backingInt(Opcode.PUSH1)] = &mockPush1;
+    handlers[@backingInt(Opcode.JUMPDEST)] = &mockJumpdest;
+    handlers[@backingInt(Opcode.PC)] = &mockPc;
     return handlers;
 }
 
@@ -98,7 +98,7 @@ test "Dispatch - simple bytecode with ADD" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.ADD)});
+    var bytecode = try Bytecode.init(allocator, &[_]u8{@backingInt(Opcode.ADD)});
     defer bytecode.deinit();
 
     // Create dispatch
@@ -121,7 +121,7 @@ test "Dispatch - PUSH1 with inline metadata" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(allocator, &[_]u8{ @intFromEnum(Opcode.PUSH1), 42 });
+    var bytecode = try Bytecode.init(allocator, &[_]u8{ @backingInt(Opcode.PUSH1), 42 });
     defer bytecode.deinit();
 
     // Create dispatch
@@ -145,7 +145,7 @@ test "Dispatch - PC opcode with metadata" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.PC)});
+    var bytecode = try Bytecode.init(allocator, &[_]u8{@backingInt(Opcode.PC)});
     defer bytecode.deinit();
 
     // Create dispatch
@@ -198,9 +198,9 @@ test "Dispatch - complex bytecode sequence" {
         .fusions_enabled = true,
     });
     var bytecode = try Bytecode.init(allocator, &[_]u8{
-        @intFromEnum(Opcode.PUSH1), 10,
-        @intFromEnum(Opcode.PUSH1), 20,
-        @intFromEnum(Opcode.ADD),   @intFromEnum(Opcode.STOP),
+        @backingInt(Opcode.PUSH1), 10,
+        @backingInt(Opcode.PUSH1), 20,
+        @backingInt(Opcode.ADD),   @backingInt(Opcode.STOP),
     });
     defer bytecode.deinit();
 
@@ -269,7 +269,7 @@ test "Dispatch - JUMPDEST with gas metadata" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.JUMPDEST)});
+    var bytecode = try Bytecode.init(allocator, &[_]u8{@backingInt(Opcode.JUMPDEST)});
     defer bytecode.deinit();
 
     // Note: In real usage, the bytecode analyzer would set gas costs
@@ -292,7 +292,7 @@ test "Dispatch - PUSH32 with pointer metadata" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH32 (large value requiring pointer storage)
-    var push32_data = [_]u8{@intFromEnum(Opcode.PUSH32)} ++ @as([32]u8, @splat(0xFF));
+    var push32_data = [_]u8{@backingInt(Opcode.PUSH32)} ++ @as([32]u8, @splat(0xFF));
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -319,7 +319,7 @@ test "Dispatch - PUSH9 boundary test (first pointer type)" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH9 (first PUSH that uses pointer storage)
-    var push9_data = [_]u8{@intFromEnum(Opcode.PUSH9)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11 };
+    var push9_data = [_]u8{@backingInt(Opcode.PUSH9)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11 };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -346,7 +346,7 @@ test "Dispatch - PUSH8 boundary test (last inline type)" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH8 (last PUSH that uses inline storage)
-    var push8_data = [_]u8{@intFromEnum(Opcode.PUSH8)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
+    var push8_data = [_]u8{@backingInt(Opcode.PUSH8)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -373,7 +373,7 @@ test "Dispatch - large value no longer truncated" {
     const handlers = createTestHandlers();
 
     // Test a PUSH4 with value that fits in u64 - should use inline storage
-    var push4_small_data = [_]u8{@intFromEnum(Opcode.PUSH4)} ++ [_]u8{ 0x00, 0x00, 0xFF, 0xFF };
+    var push4_small_data = [_]u8{@backingInt(Opcode.PUSH4)} ++ [_]u8{ 0x00, 0x00, 0xFF, 0xFF };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -389,7 +389,7 @@ test "Dispatch - large value no longer truncated" {
     try testing.expect(dispatch_items_small.items[1].push_inline.value == 0x0000FFFF);
 
     // Test a PUSH8 with maximum u64 value - should still use inline storage
-    var push8_max_data = [_]u8{@intFromEnum(Opcode.PUSH8)} ++ [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    var push8_max_data = [_]u8{@backingInt(Opcode.PUSH8)} ++ [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
     var bytecode_max = try Bytecode.init(allocator, &push8_max_data);
     defer bytecode_max.deinit();
 
@@ -433,11 +433,11 @@ test "JumpTable - single entry" {
 
     // Create bytecode with single JUMPDEST at PC 5
     const bytecode_data = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 10, // PC 0-1
-        @intFromEnum(Opcode.PUSH1), 20, // PC 2-3
-        @intFromEnum(Opcode.ADD), // PC 4
-        @intFromEnum(Opcode.JUMPDEST), // PC 5 <- target
-        @intFromEnum(Opcode.STOP), // PC 6
+        @backingInt(Opcode.PUSH1), 10, // PC 0-1
+        @backingInt(Opcode.PUSH1), 20, // PC 2-3
+        @backingInt(Opcode.ADD), // PC 4
+        @backingInt(Opcode.JUMPDEST), // PC 5 <- target
+        @backingInt(Opcode.STOP), // PC 6
     };
 
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
@@ -473,12 +473,12 @@ test "JumpTable - multiple entries sorted order" {
 
     // Create bytecode with multiple JUMPDESTs
     const bytecode_data = [_]u8{
-        @intFromEnum(Opcode.JUMPDEST), // PC 0
-        @intFromEnum(Opcode.PUSH1), 10, // PC 1-2
-        @intFromEnum(Opcode.JUMPDEST), // PC 3
-        @intFromEnum(Opcode.ADD), // PC 4
-        @intFromEnum(Opcode.JUMPDEST), // PC 5
-        @intFromEnum(Opcode.STOP), // PC 6
+        @backingInt(Opcode.JUMPDEST), // PC 0
+        @backingInt(Opcode.PUSH1), 10, // PC 1-2
+        @backingInt(Opcode.JUMPDEST), // PC 3
+        @backingInt(Opcode.ADD), // PC 4
+        @backingInt(Opcode.JUMPDEST), // PC 5
+        @backingInt(Opcode.STOP), // PC 6
     };
 
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
@@ -595,11 +595,11 @@ fn createTestHandlersWithSynthetic() [256]TestFrame.OpcodeHandler {
     }
 
     // Set specific handlers
-    handlers[@intFromEnum(Opcode.STOP)] = &mockStop;
-    handlers[@intFromEnum(Opcode.ADD)] = &mockAdd;
-    handlers[@intFromEnum(Opcode.PUSH1)] = &mockPush1;
-    handlers[@intFromEnum(Opcode.JUMPDEST)] = &mockJumpdest;
-    handlers[@intFromEnum(Opcode.PC)] = &mockPc;
+    handlers[@backingInt(Opcode.STOP)] = &mockStop;
+    handlers[@backingInt(Opcode.ADD)] = &mockAdd;
+    handlers[@backingInt(Opcode.PUSH1)] = &mockPush1;
+    handlers[@backingInt(Opcode.JUMPDEST)] = &mockJumpdest;
+    handlers[@backingInt(Opcode.PC)] = &mockPc;
 
     return handlers;
 }
@@ -612,8 +612,8 @@ test "Dispatch - fusion operations now use correct synthetic handlers" {
     // We would need to test this through the actual dispatch creation process
 
     // Verify synthetic opcodes are in expected range (0xB0-0xC7)
-    try testing.expect(@intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) == 0xB0);
-    try testing.expect(@intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER) == 0xC5);
+    try testing.expect(@backingInt(OpcodeSynthetic.PUSH_ADD_INLINE) == 0xB0);
+    try testing.expect(@backingInt(OpcodeSynthetic.PUSH_XOR_POINTER) == 0xC5);
 }
 
 test "Dispatch - memory cleanup for pointer metadata" {
@@ -621,7 +621,7 @@ test "Dispatch - memory cleanup for pointer metadata" {
     const handlers = createTestHandlers();
 
     // Create bytecode with large PUSH that requires pointer allocation
-    var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ @as([16]u8, @splat(0xFF));
+    var push16_data = [_]u8{@backingInt(Opcode.PUSH16)} ++ @as([16]u8, @splat(0xFF));
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -670,7 +670,7 @@ test "Dispatch - allocation failure handling" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(testing.allocator, &[_]u8{@intFromEnum(Opcode.ADD)});
+    var bytecode = try Bytecode.init(testing.allocator, &[_]u8{@backingInt(Opcode.ADD)});
     defer bytecode.deinit();
 
     // Should fail allocation
@@ -763,24 +763,24 @@ test "Dispatch - createJumpTable with arithmetic bytecode" {
     // Create bytecode similar to our differential test
     const bytecode_data = [_]u8{
         // ADD: 5 + 3
-        @intFromEnum(Opcode.PUSH1),  0x05,
-        @intFromEnum(Opcode.PUSH1),  0x03,
-        @intFromEnum(Opcode.ADD),
+        @backingInt(Opcode.PUSH1),  0x05,
+        @backingInt(Opcode.PUSH1),  0x03,
+        @backingInt(Opcode.ADD),
 
         // SUB: 10 - 4
-           @intFromEnum(Opcode.PUSH1),
-        0x0a,                        @intFromEnum(Opcode.PUSH1),
-        0x04,                        @intFromEnum(Opcode.SUB),
+           @backingInt(Opcode.PUSH1),
+        0x0a,                       @backingInt(Opcode.PUSH1),
+        0x04,                       @backingInt(Opcode.SUB),
 
         // MUL
-        @intFromEnum(Opcode.MUL),
+        @backingInt(Opcode.MUL),
 
         // Store and return
-           @intFromEnum(Opcode.PUSH1),
-        0x00,                        @intFromEnum(Opcode.MSTORE),
-        @intFromEnum(Opcode.PUSH1),  0x20,
-        @intFromEnum(Opcode.PUSH1),  0x00,
-        @intFromEnum(Opcode.RETURN),
+           @backingInt(Opcode.PUSH1),
+        0x00,                       @backingInt(Opcode.MSTORE),
+        @backingInt(Opcode.PUSH1),  0x20,
+        @backingInt(Opcode.PUSH1),  0x00,
+        @backingInt(Opcode.RETURN),
     };
 
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
@@ -858,7 +858,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.STOP)});
+        const bytecode = try Bytecode.init(allocator, &[_]u8{@backingInt(Opcode.STOP)});
         // Bytecode doesn't need deinit as it's value-based now
 
         const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
@@ -873,9 +873,9 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .fusions_enabled = true,
         });
         const bytecode = try Bytecode.init(allocator, &[_]u8{
-            @intFromEnum(Opcode.PUSH1), 42, // 3 gas
-            @intFromEnum(Opcode.ADD), // 3 gas
-            @intFromEnum(Opcode.JUMPDEST), // 1 gas (but terminates block)
+            @backingInt(Opcode.PUSH1), 42, // 3 gas
+            @backingInt(Opcode.ADD), // 3 gas
+            @backingInt(Opcode.JUMPDEST), // 1 gas (but terminates block)
         });
         // Bytecode doesn't need deinit as it's value-based now
 
@@ -891,10 +891,10 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .fusions_enabled = true,
         });
         const bytecode = try Bytecode.init(allocator, &[_]u8{
-            @intFromEnum(Opcode.PUSH1), 10, // 3 gas
-            @intFromEnum(Opcode.PUSH1), 20, // 3 gas
-            @intFromEnum(Opcode.MUL), // 5 gas
-            @intFromEnum(Opcode.JUMP), // 8 gas
+            @backingInt(Opcode.PUSH1), 10, // 3 gas
+            @backingInt(Opcode.PUSH1), 20, // 3 gas
+            @backingInt(Opcode.MUL), // 5 gas
+            @backingInt(Opcode.JUMP), // 8 gas
         });
         // Bytecode doesn't need deinit as it's value-based now
 
@@ -910,7 +910,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
 
         // Add many expensive operations that would overflow
         for (0..10000) |_| {
-            try large_bytecode.append(allocator, @intFromEnum(Opcode.SSTORE)); // Very expensive operation
+            try large_bytecode.append(allocator, @backingInt(Opcode.SSTORE)); // Very expensive operation
         }
 
         const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
@@ -936,7 +936,7 @@ test "JumpTable dispatch pointers reference provided schedule buffer" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(allocator, &[_]u8{ @intFromEnum(Opcode.JUMPDEST) });
+    var bytecode = try Bytecode.init(allocator, &[_]u8{@backingInt(Opcode.JUMPDEST)});
     defer bytecode.deinit();
 
     // Build initial schedule
@@ -977,7 +977,7 @@ test "Aligned bytes can be safely reinterpreted as schedule" {
         .max_initcode_size = TestFrame.config.max_initcode_size,
         .fusions_enabled = true,
     });
-    var bytecode = try Bytecode.init(allocator, &[_]u8{ @intFromEnum(Opcode.STOP) });
+    var bytecode = try Bytecode.init(allocator, &[_]u8{@backingInt(Opcode.STOP)});
     defer bytecode.deinit();
 
     var sched = try TestDispatch.init(allocator, &bytecode, &handlers, null);
@@ -985,7 +985,7 @@ test "Aligned bytes can be safely reinterpreted as schedule" {
 
     // Slice as bytes, allocate an aligned u8 buffer, copy, then reinterpret
     const bytes = std.mem.sliceAsBytes(sched.items);
-    const item_alignment: std.mem.Alignment = @as(std.mem.Alignment, @enumFromInt(std.math.log2_int(usize, @alignOf(TestDispatch.Item))));
+    const item_alignment: std.mem.Alignment = @as(std.mem.Alignment, @fromBackingInt(@intCast(std.math.log2_int(usize, @alignOf(TestDispatch.Item)))));
     const buf = try allocator.alignedAlloc(u8, item_alignment, bytes.len);
     defer allocator.free(buf);
     @memcpy(buf, bytes);
@@ -1005,7 +1005,7 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
     // Test basic RAII with pointer cleanup
     {
         // Create bytecode with PUSH that requires pointer allocation
-        var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ @as([16]u8, @splat(0xFF));
+        var push16_data = [_]u8{@backingInt(Opcode.PUSH16)} ++ @as([16]u8, @splat(0xFF));
         const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
             .max_bytecode_size = TestFrame.config.max_bytecode_size,
             .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -1015,8 +1015,8 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
         // Bytecode doesn't need deinit as it's value-based now
 
         // Create RAII dispatch schedule
-    var schedule = try TestDispatch.DispatchSchedule.init(allocator, bytecode, &handlers, null);
-    defer schedule.deinit();
+        var schedule = try TestDispatch.DispatchSchedule.init(allocator, bytecode, &handlers, null);
+        defer schedule.deinit();
 
         // Verify schedule was created
         try testing.expect(schedule.items.len >= 4); // Handler + metadata + 2 STOP handlers
@@ -1049,13 +1049,13 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
             .fusions_enabled = true,
         });
         const bytecode = try Bytecode.init(allocator, &[_]u8{
-            @intFromEnum(Opcode.PUSH32), 0xFF, 0xFF, 0xFF, 0xFF, // Will need pointer
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF, 0xFF,
+            @backingInt(Opcode.PUSH32), 0xFF, 0xFF, 0xFF, 0xFF, // Will need pointer
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF, 0xFF,
         });
         // Bytecode doesn't need deinit as it's value-based now
 
@@ -1072,12 +1072,12 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
             .fusions_enabled = true,
         });
         const bytecode = try Bytecode.init(allocator, &[_]u8{
-            @intFromEnum(Opcode.PUSH1), 42, // Inline
-            @intFromEnum(Opcode.PUSH8), 1, 2, 3, 4, 5, 6, 7, 8, // Inline
-            @intFromEnum(Opcode.PUSH16), 0xFF, 0xFF, 0xFF, 0xFF, // Pointer
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF,                        0xFF,
+            @backingInt(Opcode.PUSH1), 42, // Inline
+            @backingInt(Opcode.PUSH8), 1, 2, 3, 4, 5, 6, 7, 8, // Inline
+            @backingInt(Opcode.PUSH16), 0xFF, 0xFF, 0xFF, 0xFF, // Pointer
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF,                       0xFF,
         });
         // Bytecode doesn't need deinit as it's value-based now
 
@@ -1100,13 +1100,12 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
     }
 }
 
-
 test "Dispatch - pretty_print basic functionality" {
     const allocator = testing.allocator;
     const handlers = createTestHandlers();
 
     // Create simple bytecode: PUSH1 0x42, ADD, STOP
-    const code = [_]u8{ @intFromEnum(Opcode.PUSH1), 0x42, @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.STOP) };
+    const code = [_]u8{ @backingInt(Opcode.PUSH1), 0x42, @backingInt(Opcode.ADD), @backingInt(Opcode.STOP) };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,

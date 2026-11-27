@@ -20,41 +20,31 @@ pub const ProofError = error{
 /// Proof nodes collection for Merkle proofs
 pub const ProofNodes = struct {
     allocator: Allocator,
-    nodes: std.StringHashMap([]const u8), // Hash (hex) -> RLP encoded node
+    nodes: std.AutoHashMap([32]u8, []const u8), // Hash -> RLP encoded node
 
     pub fn init(allocator: Allocator) ProofNodes {
         return ProofNodes{
             .allocator = allocator,
-            .nodes = std.StringHashMap([]const u8).init(allocator),
+            .nodes = std.AutoHashMap([32]u8, []const u8).init(allocator),
         };
     }
 
     pub fn deinit(self: *ProofNodes) void {
-        var it = self.nodes.iterator();
-        while (it.next()) |entry| {
-            self.allocator.free(entry.key_ptr.*);
-            self.allocator.free(entry.value_ptr.*);
+        var it = self.nodes.valueIterator();
+        while (it.next()) |value| {
+            self.allocator.free(value.*);
         }
         self.nodes.deinit();
     }
 
     /// Add a node to the proof
     pub fn add_node(self: *ProofNodes, hash: [32]u8, node_data: []const u8) !void {
-        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-        errdefer self.allocator.free(hash_str);
+        if (self.nodes.contains(hash)) return;
 
-        // Check if already exists
-        if (self.nodes.contains(hash_str)) {
-            self.allocator.free(hash_str);
-            return;
-        }
-
-        // Copy the node data
         const data_copy = try self.allocator.dupe(u8, node_data);
         errdefer self.allocator.free(data_copy);
 
-        // Store the node
-        try self.nodes.put(hash_str, data_copy);
+        try self.nodes.put(hash, data_copy);
     }
 
     /// Convert to a list of RLP-encoded nodes for external use
@@ -78,15 +68,10 @@ pub const ProofNodes = struct {
 
     /// Verify a key against the proof with expected root hash
     pub fn verify(self: *const ProofNodes, allocator: Allocator, root_hash: [32]u8, key: []const u8, expected_value: ?[]const u8) !bool {
-        // Convert key to nibbles
         const nibbles = try trie.key_to_nibbles(allocator, key);
         defer allocator.free(nibbles);
 
-        // Get root node
-        const root_hash_str = try bytes_to_hex_string(allocator, &root_hash);
-        defer allocator.free(root_hash_str);
-
-        const root_node_data = self.nodes.get(root_hash_str) orelse {
+        const root_node_data = self.nodes.get(root_hash) orelse {
             return ProofError.InvalidRootHash;
         };
 
@@ -97,71 +82,83 @@ pub const ProofNodes = struct {
             return ProofError.InvalidRootHash;
         }
 
-        // Begin verification with the root node
         const decoded = try primitives.Rlp.decode(allocator, root_node_data, false);
-        defer decoded.data.deinit(allocator);
-
-        return try self.verify_path(allocator, decoded.data, nibbles, expected_value);
+        return try self.verify_path(allocator, decoded, nibbles, expected_value);
     }
 
-    /// Verify a path in the proof
-    /// Verifies `expected_value` (null: absent) under `remaining_path` starting at
-    /// a decoded node. Node items are single-encoded RLP strings: a leaf or
-    /// extension is `[hex_prefix_path, value_or_child_hash]`, a branch is 16 child
-    /// hashes (empty when absent) and a value.
-    fn verify_path(self: *const ProofNodes, allocator: Allocator, node_data: primitives.Rlp.Data, remaining_path: []const u8, expected_value: ?[]const u8) !bool {
-        const items = switch (node_data) {
-            // An empty node holds no keys.
-            .String => return expected_value == null,
-            .List => |list| list,
-        };
-        if (items.len == 0) return expected_value == null;
+    /// Iteratively verifies `expected_value` (null: absent) under `nibbles` starting at
+    /// a decoded root node. Takes ownership of `initial_node` and frees every decoded node.
+    fn verify_path(
+        self: *const ProofNodes,
+        allocator: Allocator,
+        initial_node: primitives.Rlp.Decoded,
+        nibbles: []const u8,
+        expected_value: ?[]const u8,
+    ) !bool {
+        var current = initial_node;
+        defer current.data.deinit(allocator);
 
-        if (items.len == 2) {
-            const path_bytes = switch (items[0]) {
-                .String => |bytes| bytes,
-                .List => return ProofError.CorruptedNode,
+        var remaining = nibbles;
+        const max_steps: usize = nibbles.len + 2;
+        var steps: usize = 0;
+
+        while (steps < max_steps) : (steps += 1) {
+            const items = switch (current.data) {
+                .String => return expected_value == null,
+                .List => |list| list,
             };
-            if (path_bytes.len == 0) return ProofError.CorruptedNode;
-            const decoded_path = try trie.decode_path(allocator, path_bytes);
-            defer allocator.free(decoded_path.nibbles);
-            const nibbles = decoded_path.nibbles;
+            if (items.len == 0) return expected_value == null;
 
-            if (decoded_path.is_leaf) {
-                if (!std.mem.eql(u8, nibbles, remaining_path)) return expected_value == null;
-                const actual = switch (items[1]) {
+            if (items.len == 2) {
+                const path_bytes = switch (items[0]) {
                     .String => |bytes| bytes,
                     .List => return ProofError.CorruptedNode,
                 };
-                const expected = expected_value orelse return false;
-                return std.mem.eql(u8, actual, expected);
+                if (path_bytes.len == 0) return ProofError.CorruptedNode;
+                const decoded_path = try trie.decode_path(allocator, path_bytes);
+                defer allocator.free(decoded_path.nibbles);
+                const node_nibbles = decoded_path.nibbles;
+
+                if (decoded_path.is_leaf) {
+                    if (!std.mem.eql(u8, node_nibbles, remaining)) return expected_value == null;
+                    const actual = switch (items[1]) {
+                        .String => |bytes| bytes,
+                        .List => return ProofError.CorruptedNode,
+                    };
+                    const expected = expected_value orelse return false;
+                    return std.mem.eql(u8, actual, expected);
+                }
+
+                if (remaining.len < node_nibbles.len) return expected_value == null;
+                if (!std.mem.eql(u8, node_nibbles, remaining[0..node_nibbles.len])) return expected_value == null;
+                const next = (try self.resolve_child(allocator, items[1])) orelse return ProofError.CorruptedNode;
+                current.data.deinit(allocator);
+                current = next;
+                remaining = remaining[node_nibbles.len..];
+                continue;
             }
 
-            // Extension: its path must prefix the remaining path.
-            if (remaining_path.len < nibbles.len) return expected_value == null;
-            if (!std.mem.eql(u8, nibbles, remaining_path[0..nibbles.len])) return expected_value == null;
-            var next = (try self.resolve_child(allocator, items[1])) orelse return ProofError.CorruptedNode;
-            defer next.data.deinit(allocator);
-            return try self.verify_path(allocator, next.data, remaining_path[nibbles.len..], expected_value);
-        }
-
-        if (items.len == 17) {
-            if (remaining_path.len == 0) {
-                const value = switch (items[16]) {
-                    .String => |bytes| bytes,
-                    .List => return ProofError.CorruptedNode,
-                };
-                if (value.len == 0) return expected_value == null;
-                const expected = expected_value orelse return false;
-                return std.mem.eql(u8, value, expected);
+            if (items.len == 17) {
+                if (remaining.len == 0) {
+                    const value = switch (items[16]) {
+                        .String => |bytes| bytes,
+                        .List => return ProofError.CorruptedNode,
+                    };
+                    if (value.len == 0) return expected_value == null;
+                    const expected = expected_value orelse return false;
+                    return std.mem.eql(u8, value, expected);
+                }
+                const nibble = remaining[0];
+                if (nibble >= 16) return ProofError.InvalidKey;
+                const next = (try self.resolve_child(allocator, items[nibble])) orelse return expected_value == null;
+                current.data.deinit(allocator);
+                current = next;
+                remaining = remaining[1..];
+                continue;
             }
-            const nibble = remaining_path[0];
-            if (nibble >= 16) return ProofError.InvalidKey;
-            var next = (try self.resolve_child(allocator, items[nibble])) orelse return expected_value == null;
-            defer next.data.deinit(allocator);
-            return try self.verify_path(allocator, next.data, remaining_path[1..], expected_value);
-        }
 
+            return ProofError.CorruptedNode;
+        }
         return ProofError.CorruptedNode;
     }
 
@@ -175,9 +172,8 @@ pub const ProofNodes = struct {
         if (reference.len == 0) return null;
         if (reference.len != 32) return ProofError.CorruptedNode;
 
-        const hash_str = try bytes_to_hex_string(allocator, reference);
-        defer allocator.free(hash_str);
-        const node_data = self.nodes.get(hash_str) orelse return ProofError.MissingNode;
+        const key: [32]u8 = reference[0..32].*;
+        const node_data = self.nodes.get(key) orelse return ProofError.MissingNode;
 
         var digest: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(node_data, &digest, .{});
@@ -235,20 +231,6 @@ pub const ProofRetainer = struct {
         return &self.proof;
     }
 };
-
-// Helper function - Duplicated from hash_builder.zig for modularity
-fn bytes_to_hex_string(allocator: Allocator, bytes: []const u8) ![]u8 {
-    const hex_chars = "0123456789abcdef";
-    const hex = try allocator.alloc(u8, bytes.len * 2);
-    errdefer allocator.free(hex);
-
-    for (bytes, 0..) |byte, i| {
-        hex[i * 2] = hex_chars[byte >> 4];
-        hex[i * 2 + 1] = hex_chars[byte & 0x0F];
-    }
-
-    return hex;
-}
 
 // Tests
 
@@ -742,7 +724,7 @@ test "ProofNodes - verify empty node" {
     try proof_nodes.add_node(root_hash, encoded);
 
     // Verify with any key and null value
-    const key = [_]u8{ 0x12 };
+    const key = [_]u8{0x12};
     const valid = try proof_nodes.verify(allocator, root_hash, &key, null);
     try testing.expect(valid);
 }
@@ -775,7 +757,7 @@ test "ProofRetainer - collect branch node" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const key = [_]u8{ 0x12 }; // Nibbles: [1,2]
+    const key = [_]u8{0x12}; // Nibbles: [1,2]
     var retainer = try ProofRetainer.init(allocator, &key);
     defer retainer.deinit();
 

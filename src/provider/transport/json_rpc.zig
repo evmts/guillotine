@@ -30,7 +30,7 @@ pub const JsonRpcError = struct {
 
     pub fn create(allocator: Allocator, error_code: ErrorCode) !JsonRpcError {
         return JsonRpcError{
-            .code = @intFromEnum(error_code),
+            .code = @backingInt(error_code),
             .message = try allocator.dupe(u8, error_code.message()),
         };
     }

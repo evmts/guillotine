@@ -13,17 +13,17 @@ const journal_entry = @import("journal_entry.zig");
 /// Creates a configured journal type for state tracking.
 pub fn Journal(comptime config: JournalConfig) type {
     config.validate();
-    
+
     const Entry = journal_entry.JournalEntry(config);
-    
+
     return struct {
         const Self = @This();
-        
+
         pub const SnapshotIdType = config.SnapshotIdType;
         pub const WordType = config.WordType;
         pub const NonceType = config.NonceType;
         pub const EntryType = Entry;
-        
+
         entries: std.ArrayList(Entry),
         /// `prefix_max.items[i]` is the highest snapshot ID among `entries.items[0..i + 1]`.
         /// It tells a revert in O(1) whether removing the tail of `entries` is enough.
@@ -41,7 +41,7 @@ pub fn Journal(comptime config: JournalConfig) type {
 
         const OriginalValue = struct {
             value: WordType,
-            entry_index: usize,
+            entry_index: u32,
         };
 
         /// Initialize a new journal with pre-allocated capacity
@@ -152,7 +152,7 @@ pub fn Journal(comptime config: JournalConfig) type {
                 switch (entry.data) {
                     .storage_change => |sc| {
                         const slot = self.original_storage.getOrPutAssumeCapacity(.{ .address = sc.address.bytes, .slot = sc.key });
-                        if (!slot.found_existing) slot.value_ptr.* = .{ .value = sc.original_value, .entry_index = index };
+                        if (!slot.found_existing) slot.value_ptr.* = .{ .value = sc.original_value, .entry_index = @intCast(index) };
                     },
                     else => {},
                 }
@@ -179,7 +179,10 @@ pub fn Journal(comptime config: JournalConfig) type {
             try self.entries.ensureUnusedCapacity(self.allocator, 1);
             try self.prefix_max.ensureUnusedCapacity(self.allocator, 1);
             const slot = try self.original_storage.getOrPut(self.allocator, .{ .address = address.bytes, .slot = key });
-            if (!slot.found_existing) slot.value_ptr.* = .{ .value = original_value, .entry_index = self.entries.items.len };
+            if (!slot.found_existing) {
+                const entry_index = std.math.cast(u32, self.entries.items.len) orelse return error.OutOfMemory;
+                slot.value_ptr.* = .{ .value = original_value, .entry_index = entry_index };
+            }
             self.appendAssumeCapacity(Entry.storage_change(snapshot_id, address, key, original_value));
         }
 
@@ -257,7 +260,7 @@ pub fn Journal(comptime config: JournalConfig) type {
             }
             return null;
         }
-        
+
         /// Get entries for a specific snapshot
         pub fn get_snapshot_entries(self: *const Self, snapshot_id: SnapshotIdType, allocator: std.mem.Allocator) ![]Entry {
             var result = std.ArrayList(Entry).empty;
@@ -304,15 +307,15 @@ test "Journal - storage change recording" {
     const snapshot_id = try journal.create_snapshot();
     const key = 42;
     const original_value = 100;
-    
+
     // Record storage change
     try journal.record_storage_change(snapshot_id, zero_addr, key, original_value);
-    
+
     // Verify entry was recorded
     try testing.expectEqual(@as(usize, 1), journal.entry_count());
     const entry = journal.entries.items[0];
     try testing.expectEqual(snapshot_id, entry.snapshot_id);
-    
+
     switch (entry.data) {
         .storage_change => |sc| {
             try testing.expectEqual(zero_addr, sc.address);
@@ -321,12 +324,12 @@ test "Journal - storage change recording" {
         },
         else => try testing.expect(false),
     }
-    
+
     // Test get_original_storage
     const retrieved = journal.get_original_storage(zero_addr, key);
     try testing.expect(retrieved != null);
     try testing.expectEqual(original_value, retrieved.?);
-    
+
     // Test non-existent storage
     const not_found = journal.get_original_storage(zero_addr, 999);
     try testing.expect(not_found == null);
@@ -342,18 +345,18 @@ test "Journal - revert to snapshot" {
     const snapshot1 = try journal.create_snapshot();
     const snapshot2 = try journal.create_snapshot();
     const snapshot3 = try journal.create_snapshot();
-    
+
     // Add entries with different snapshot IDs
     try journal.record_storage_change(snapshot1, zero_addr, 1, 10);
     try journal.record_storage_change(snapshot1, zero_addr, 2, 20);
     try journal.record_storage_change(snapshot2, zero_addr, 3, 30);
     try journal.record_storage_change(snapshot3, zero_addr, 4, 40);
-    
+
     try testing.expectEqual(@as(usize, 4), journal.entry_count());
-    
+
     // Revert to snapshot2 - should remove entries with snapshot_id >= 2
     journal.revert_to_snapshot(snapshot2);
-    
+
     try testing.expectEqual(@as(usize, 2), journal.entry_count());
     // Verify remaining entries are from snapshot1
     for (journal.entries.items) |entry| {
@@ -371,7 +374,7 @@ test "Journal - all entry types" {
     defer journal.deinit();
 
     const snapshot_id = try journal.create_snapshot();
-    
+
     // Record different types of changes
     try journal.record_storage_change(snapshot_id, addr1, 1, 100);
     try journal.record_balance_change(snapshot_id, addr1, 1000);
@@ -379,9 +382,9 @@ test "Journal - all entry types" {
     try journal.record_code_change(snapshot_id, addr1, code_hash);
     try journal.record_account_created(snapshot_id, addr2);
     try journal.record_account_destroyed(snapshot_id, addr1, addr2, 500);
-    
+
     try testing.expectEqual(@as(usize, 6), journal.entry_count());
-    
+
     // Verify each entry type
     var storage_found = false;
     var balance_found = false;
@@ -389,7 +392,7 @@ test "Journal - all entry types" {
     var code_found = false;
     var created_found = false;
     var destroyed_found = false;
-    
+
     for (journal.entries.items) |entry| {
         switch (entry.data) {
             .storage_change => storage_found = true,
@@ -400,7 +403,7 @@ test "Journal - all entry types" {
             .account_destroyed => destroyed_found = true,
         }
     }
-    
+
     try testing.expect(storage_found);
     try testing.expect(balance_found);
     try testing.expect(nonce_found);
@@ -418,26 +421,26 @@ test "Journal - get_snapshot_entries" {
 
     const snapshot1 = try journal.create_snapshot();
     const snapshot2 = try journal.create_snapshot();
-    
+
     // Add entries for different snapshots
     try journal.record_storage_change(snapshot1, addr, 1, 10);
     try journal.record_storage_change(snapshot2, addr, 2, 20);
     try journal.record_storage_change(snapshot1, addr, 3, 30);
     try journal.record_storage_change(snapshot2, addr, 4, 40);
-    
+
     // Get entries for snapshot1
     const snapshot1_entries = try journal.get_snapshot_entries(snapshot1, testing.allocator);
     defer testing.allocator.free(snapshot1_entries);
-    
+
     try testing.expectEqual(@as(usize, 2), snapshot1_entries.len);
     for (snapshot1_entries) |entry| {
         try testing.expectEqual(snapshot1, entry.snapshot_id);
     }
-    
+
     // Get entries for snapshot2
     const snapshot2_entries = try journal.get_snapshot_entries(snapshot2, testing.allocator);
     defer testing.allocator.free(snapshot2_entries);
-    
+
     try testing.expectEqual(@as(usize, 2), snapshot2_entries.len);
     for (snapshot2_entries) |entry| {
         try testing.expectEqual(snapshot2, entry.snapshot_id);
@@ -509,20 +512,20 @@ test "Journal - get_original_balance" {
     defer journal.deinit();
 
     const snapshot = try journal.create_snapshot();
-    
+
     // Record balance changes
     try journal.record_balance_change(snapshot, addr1, 1000);
     try journal.record_balance_change(snapshot, addr2, 2000);
-    
+
     // Test retrieval
     const balance1 = journal.get_original_balance(addr1);
     try testing.expect(balance1 != null);
     try testing.expectEqual(@as(u256, 1000), balance1.?);
-    
+
     const balance2 = journal.get_original_balance(addr2);
     try testing.expect(balance2 != null);
     try testing.expectEqual(@as(u256, 2000), balance2.?);
-    
+
     // Test non-existent address
     const addr3: Address = .{ .bytes = @as([20]u8, @splat(3)) };
     const balance3 = journal.get_original_balance(addr3);
@@ -542,12 +545,12 @@ test "Journal - memory efficiency" {
     // Add entries up to initial capacity
     const addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     const snapshot = try journal.create_snapshot();
-    
+
     var i: usize = 0;
     while (i < initial_capacity) : (i += 1) {
         try journal.record_storage_change(snapshot, addr, i, i * 10);
     }
-    
+
     // Should not have reallocated yet
     try testing.expectEqual(initial_capacity, journal.entries.capacity);
 }
@@ -570,22 +573,22 @@ test "Journal - complex revert scenario" {
     const snapshot3 = try journal.create_snapshot(); // Inner call 2
     try journal.record_storage_change(snapshot3, addr, 3, 300);
     try journal.record_nonce_change(snapshot3, addr, 5);
-    
+
     try testing.expectEqual(@as(usize, 5), journal.entry_count());
-    
+
     // Revert inner call 2
     journal.revert_to_snapshot(snapshot3);
     try testing.expectEqual(@as(usize, 3), journal.entry_count());
-    
+
     // Check that snapshot1 and snapshot2 entries remain
     const storage1 = journal.get_original_storage(addr, 1);
     try testing.expect(storage1 != null);
     try testing.expectEqual(@as(u256, 100), storage1.?);
-    
+
     const storage2 = journal.get_original_storage(addr, 2);
     try testing.expect(storage2 != null);
     try testing.expectEqual(@as(u256, 200), storage2.?);
-    
+
     // Snapshot3 entries should be gone
     const storage3 = journal.get_original_storage(addr, 3);
     try testing.expect(storage3 == null);
@@ -600,14 +603,14 @@ test "Journal - duplicate storage changes" {
 
     const snapshot = try journal.create_snapshot();
     const slot = 42;
-    
+
     // Record multiple changes to same storage slot
     try journal.record_storage_change(snapshot, addr, slot, 100);
     try journal.record_storage_change(snapshot, addr, slot, 200);
     try journal.record_storage_change(snapshot, addr, slot, 300);
-    
+
     try testing.expectEqual(@as(usize, 3), journal.entry_count());
-    
+
     // get_original_storage should return the FIRST (oldest) value
     const original = journal.get_original_storage(addr, slot);
     try testing.expect(original != null);
@@ -625,17 +628,17 @@ test "Journal - multiple addresses same slot" {
 
     const snapshot = try journal.create_snapshot();
     const slot = 1;
-    
+
     // Same slot, different addresses
     try journal.record_storage_change(snapshot, addr1, slot, 111);
     try journal.record_storage_change(snapshot, addr2, slot, 222);
     try journal.record_storage_change(snapshot, addr3, slot, 333);
-    
+
     // Should return different values for each address
     const val1 = journal.get_original_storage(addr1, slot);
     const val2 = journal.get_original_storage(addr2, slot);
     const val3 = journal.get_original_storage(addr3, slot);
-    
+
     try testing.expectEqual(@as(u256, 111), val1.?);
     try testing.expectEqual(@as(u256, 222), val2.?);
     try testing.expectEqual(@as(u256, 333), val3.?);
@@ -687,26 +690,26 @@ test "Journal - snapshot ID uniqueness guaranteed" {
 test "Journal - empty journal operations" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     // Operations on empty journal
     try testing.expectEqual(@as(usize, 0), journal.entry_count());
-    
+
     // Should return null for non-existent data
     try testing.expect(journal.get_original_storage(addr, 1) == null);
     try testing.expect(journal.get_original_balance(addr) == null);
-    
+
     // Revert to non-existent snapshot should be no-op
     journal.revert_to_snapshot(999);
     try testing.expectEqual(@as(usize, 0), journal.entry_count());
-    
+
     // Get entries for non-existent snapshot
     const entries = try journal.get_snapshot_entries(999, testing.allocator);
     defer testing.allocator.free(entries);
     try testing.expectEqual(@as(usize, 0), entries.len);
-    
+
     // Clear empty journal
     journal.clear();
     try testing.expectEqual(@as(usize, 0), journal.entry_count());
@@ -720,25 +723,25 @@ test "Journal - boundary value testing" {
     defer journal.deinit();
 
     const snapshot = try journal.create_snapshot();
-    
+
     // Test boundary values
     const max_u256 = std.math.maxInt(u256);
     const max_u64 = std.math.maxInt(u64);
-    
+
     try journal.record_storage_change(snapshot, addr, max_u256, 0);
     try journal.record_storage_change(snapshot, addr, 0, max_u256);
     try journal.record_balance_change(snapshot, addr, max_u256);
     try journal.record_nonce_change(snapshot, addr, max_u64);
-    
+
     try testing.expectEqual(@as(usize, 4), journal.entry_count());
-    
+
     // Verify boundary values
     const storage_max_key = journal.get_original_storage(addr, max_u256);
     try testing.expectEqual(@as(u256, 0), storage_max_key.?);
-    
+
     const storage_max_val = journal.get_original_storage(addr, 0);
     try testing.expectEqual(max_u256, storage_max_val.?);
-    
+
     const balance = journal.get_original_balance(addr);
     try testing.expectEqual(max_u256, balance.?);
 }
@@ -754,26 +757,26 @@ test "Journal - account lifecycle tracking" {
     defer journal.deinit();
 
     const snapshot = try journal.create_snapshot();
-    
+
     // Complete account lifecycle
     try journal.record_account_created(snapshot, addr1);
     try journal.record_balance_change(snapshot, addr1, 0); // Initial balance
     try journal.record_nonce_change(snapshot, addr1, 0); // Initial nonce
-    
+
     // Modify account
     try journal.record_balance_change(snapshot, addr1, 1000);
     try journal.record_nonce_change(snapshot, addr1, 5);
     try journal.record_storage_change(snapshot, addr1, 1, 100);
-    
+
     // Destroy account
     try journal.record_account_destroyed(snapshot, addr1, beneficiary, 1500);
-    
+
     try testing.expectEqual(@as(usize, 7), journal.entry_count());
-    
+
     // Verify we can find the original values (first occurrence)
     const original_balance = journal.get_original_balance(addr1);
     try testing.expectEqual(@as(u256, 0), original_balance.?); // First balance change
-    
+
     const original_storage = journal.get_original_storage(addr1, 1);
     try testing.expectEqual(@as(u256, 100), original_storage.?);
 }
@@ -789,22 +792,22 @@ test "Journal - interleaved snapshots" {
     const snap_a = try journal.create_snapshot(); // 0
     const snap_b = try journal.create_snapshot(); // 1
     const snap_c = try journal.create_snapshot(); // 2
-    
+
     // Add entries in mixed order
     try journal.record_storage_change(snap_c, addr, 3, 300);
     try journal.record_storage_change(snap_a, addr, 1, 100);
     try journal.record_storage_change(snap_b, addr, 2, 200);
     try journal.record_storage_change(snap_c, addr, 4, 400);
     try journal.record_storage_change(snap_a, addr, 5, 500);
-    
+
     try testing.expectEqual(@as(usize, 5), journal.entry_count());
-    
+
     // Revert to snap_b (should remove entries with snapshot_id >= 1)
     journal.revert_to_snapshot(snap_b);
-    
+
     // Should only have snap_a entries
     try testing.expectEqual(@as(usize, 2), journal.entry_count());
-    
+
     for (journal.entries.items) |entry| {
         try testing.expect(entry.snapshot_id < snap_b);
     }
@@ -822,39 +825,39 @@ test "Journal - large scale operations" {
     // Create multiple snapshots
     const snapshot1 = try journal.create_snapshot();
     const snapshot2 = try journal.create_snapshot();
-    
+
     // Record many changes
     for (0..num_addresses) |addr_idx| {
         var addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
         addr.bytes[19] = @intCast(addr_idx);
-        
+
         const snapshot = if (addr_idx % 2 == 0) snapshot1 else snapshot2;
-        
+
         try journal.record_balance_change(snapshot, addr, addr_idx * 1000);
         try journal.record_nonce_change(snapshot, addr, @intCast(addr_idx));
-        
+
         for (0..num_storage_slots) |slot| {
             try journal.record_storage_change(snapshot, addr, slot, addr_idx * 100 + slot);
         }
     }
-    
+
     const expected_entries = num_addresses * (2 + num_storage_slots); // balance + nonce + storage
     try testing.expectEqual(expected_entries, journal.entry_count());
-    
+
     // Test retrieval of some values
     const addr_0: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     var addr_99: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     addr_99.bytes[19] = 99;
-    
+
     const balance_0 = journal.get_original_balance(addr_0);
     try testing.expectEqual(@as(u256, 0), balance_0.?);
-    
+
     const storage_99_10 = journal.get_original_storage(addr_99, 10);
     try testing.expectEqual(@as(u256, 99 * 100 + 10), storage_99_10.?);
-    
+
     // Revert to snapshot2 (remove snapshot1 entries)
     journal.revert_to_snapshot(snapshot2);
-    
+
     // Should have roughly half the entries
     const remaining = journal.entry_count();
     try testing.expect(remaining < expected_entries);
@@ -869,19 +872,19 @@ test "Journal - zero value storage" {
     defer journal.deinit();
 
     const snapshot = try journal.create_snapshot();
-    
+
     // Record storage changes with zero values
     try journal.record_storage_change(snapshot, addr, 1, 0);
     try journal.record_storage_change(snapshot, addr, 0, 42); // Zero key
     try journal.record_balance_change(snapshot, addr, 0); // Zero balance
-    
+
     // Should still be able to retrieve zero values
     const storage_1 = journal.get_original_storage(addr, 1);
     try testing.expectEqual(@as(u256, 0), storage_1.?);
-    
+
     const storage_0 = journal.get_original_storage(addr, 0);
     try testing.expectEqual(@as(u256, 42), storage_0.?);
-    
+
     const balance = journal.get_original_balance(addr);
     try testing.expectEqual(@as(u256, 0), balance.?);
 }
@@ -893,30 +896,30 @@ test "Journal - address comparison edge cases" {
     defer journal.deinit();
 
     const snapshot = try journal.create_snapshot();
-    
+
     // Very similar addresses
     var addr1: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     var addr2: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     addr1.bytes[0] = 1;
     addr2.bytes[0] = 2;
-    
+
     // Another pair differing in last byte
     var addr3: Address = .{ .bytes = @as([20]u8, @splat(0xFF)) };
     var addr4: Address = .{ .bytes = @as([20]u8, @splat(0xFF)) };
     addr3.bytes[19] = 0xFE;
     addr4.bytes[19] = 0xFF;
-    
+
     try journal.record_storage_change(snapshot, addr1, 1, 11);
     try journal.record_storage_change(snapshot, addr2, 1, 22);
     try journal.record_balance_change(snapshot, addr3, 33);
     try journal.record_balance_change(snapshot, addr4, 44);
-    
+
     // Should correctly distinguish between addresses
     try testing.expectEqual(@as(u256, 11), journal.get_original_storage(addr1, 1).?);
     try testing.expectEqual(@as(u256, 22), journal.get_original_storage(addr2, 1).?);
     try testing.expect(journal.get_original_storage(addr3, 1) == null);
     try testing.expect(journal.get_original_storage(addr4, 1) == null);
-    
+
     try testing.expectEqual(@as(u256, 33), journal.get_original_balance(addr3).?);
     try testing.expectEqual(@as(u256, 44), journal.get_original_balance(addr4).?);
     try testing.expect(journal.get_original_balance(addr1) == null);
@@ -943,14 +946,14 @@ test "Journal - custom configuration comprehensive" {
     try journal.record_storage_change(snapshot, addr, std.math.maxInt(u128), 0);
     try journal.record_nonce_change(snapshot, addr, std.math.maxInt(u32));
     try journal.record_balance_change(snapshot, addr, std.math.maxInt(u128));
-    
+
     // Verify types work correctly
     const storage = journal.get_original_storage(addr, std.math.maxInt(u128));
     try testing.expectEqual(@as(u128, 0), storage.?);
-    
+
     const balance = journal.get_original_balance(addr);
     try testing.expectEqual(std.math.maxInt(u128), balance.?);
-    
+
     // Test custom snapshot ID type
     try testing.expectEqual(@as(u16, 1), journal.next_snapshot_id);
 }
@@ -972,26 +975,26 @@ test "Journal - memory management stress" {
     for (0..num_cycles) |cycle| {
         const snapshot = try journal.create_snapshot();
         try snapshots.append(snapshot);
-        
+
         var addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
         addr.bytes[19] = @intCast(cycle);
-        
+
         for (0..entries_per_cycle) |entry_idx| {
             try journal.record_storage_change(snapshot, addr, entry_idx, cycle * 1000 + entry_idx);
         }
     }
-    
+
     const peak_entries = journal.entry_count();
     try testing.expectEqual(num_cycles * entries_per_cycle, peak_entries);
-    
+
     // Revert half the snapshots
     const mid_snapshot = snapshots.items[num_cycles / 2];
     journal.revert_to_snapshot(mid_snapshot);
-    
+
     const remaining_entries = journal.entry_count();
     try testing.expect(remaining_entries < peak_entries);
     try testing.expect(remaining_entries > 0);
-    
+
     // Memory should be efficiently managed
     const capacity_after_revert = journal.entries.capacity;
     try testing.expect(capacity_after_revert >= remaining_entries);
@@ -1006,7 +1009,7 @@ test "Journal - entry ordering preservation" {
 
     // Create single snapshot but add entries over time
     const snapshot = try journal.create_snapshot();
-    
+
     const operations = [_]struct { key: u256, value: u256 }{
         .{ .key = 1, .value = 100 },
         .{ .key = 2, .value = 200 },
@@ -1014,20 +1017,20 @@ test "Journal - entry ordering preservation" {
         .{ .key = 1, .value = 150 }, // Update to slot 1
         .{ .key = 4, .value = 400 },
     };
-    
+
     for (operations) |op| {
         try journal.record_storage_change(snapshot, addr, op.key, op.value);
     }
-    
+
     // First occurrence should be returned for get_original_storage
     try testing.expectEqual(@as(u256, 100), journal.get_original_storage(addr, 1).?); // First value
     try testing.expectEqual(@as(u256, 200), journal.get_original_storage(addr, 2).?);
     try testing.expectEqual(@as(u256, 300), journal.get_original_storage(addr, 3).?);
     try testing.expectEqual(@as(u256, 400), journal.get_original_storage(addr, 4).?);
-    
+
     // Verify entries maintain insertion order
     try testing.expectEqual(@as(usize, 5), journal.entry_count());
-    
+
     const expected_values = [_]u256{ 100, 200, 300, 150, 400 };
     for (journal.entries.items, 0..) |entry, i| {
         switch (entry.data) {

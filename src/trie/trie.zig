@@ -437,7 +437,6 @@ test "key_to_nibbles and nibbles_to_key" {
 }
 
 test "encode_path and decode_path - basic even extension" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 1, 2, 3, 4 };
@@ -457,7 +456,6 @@ test "encode_path and decode_path - basic even extension" {
 }
 
 test "encode_path and decode_path - basic odd leaf" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 1, 2, 3, 4, 5 };
@@ -477,7 +475,6 @@ test "encode_path and decode_path - basic odd leaf" {
 }
 
 test "encode_path - empty path extension" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{};
@@ -495,7 +492,6 @@ test "encode_path - empty path extension" {
 }
 
 test "encode_path - empty path leaf" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{};
@@ -513,7 +509,6 @@ test "encode_path - empty path leaf" {
 }
 
 test "encode_path - single nibble extension" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{7};
@@ -531,7 +526,6 @@ test "encode_path - single nibble extension" {
 }
 
 test "encode_path - single nibble leaf" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{9};
@@ -549,7 +543,6 @@ test "encode_path - single nibble leaf" {
 }
 
 test "encode_path - even length leaf" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 0, 1, 2, 3, 4, 5 };
@@ -570,7 +563,6 @@ test "encode_path - even length leaf" {
 }
 
 test "encode_path - odd length extension" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 1, 2, 3 };
@@ -589,7 +581,6 @@ test "encode_path - odd length extension" {
 }
 
 test "encode_path - all zeros even extension" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 0, 0, 0, 0 };
@@ -609,7 +600,6 @@ test "encode_path - all zeros even extension" {
 }
 
 test "encode_path - all 0xF even leaf" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 0xF, 0xF, 0xF, 0xF };
@@ -629,7 +619,6 @@ test "encode_path - all 0xF even leaf" {
 }
 
 test "encode_path - all 0xF odd leaf" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 0xF, 0xF, 0xF };
@@ -648,7 +637,6 @@ test "encode_path - all 0xF odd leaf" {
 }
 
 test "encode_path - prefix flags verification" {
-
     const allocator = testing.allocator;
 
     // Test all four prefix types
@@ -686,7 +674,6 @@ test "encode_path - prefix flags verification" {
 }
 
 test "encode_path - round trip even extension with various lengths" {
-
     const allocator = testing.allocator;
 
     const test_cases = [_][]const u8{
@@ -712,7 +699,6 @@ test "encode_path - round trip even extension with various lengths" {
 }
 
 test "encode_path - round trip odd leaf with various lengths" {
-
     const allocator = testing.allocator;
 
     const test_cases = [_][]const u8{
@@ -737,7 +723,6 @@ test "encode_path - round trip odd leaf with various lengths" {
 }
 
 test "encode_path - nibble with first nibble 0 in odd path" {
-
     const allocator = testing.allocator;
 
     const nibbles = [_]u8{ 0, 1, 2 };
@@ -756,7 +741,6 @@ test "encode_path - nibble with first nibble 0 in odd path" {
 }
 
 test "encode_path - long path even extension" {
-
     const allocator = testing.allocator;
 
     var nibbles: [64]u8 = undefined;
@@ -778,7 +762,6 @@ test "encode_path - long path even extension" {
 }
 
 test "encode_path - long path odd leaf" {
-
     const allocator = testing.allocator;
 
     var nibbles: [63]u8 = undefined;
@@ -800,7 +783,6 @@ test "encode_path - long path odd leaf" {
 }
 
 test "decode_path - error on empty input" {
-
     const allocator = testing.allocator;
 
     const empty = [_]u8{};
@@ -809,7 +791,6 @@ test "decode_path - error on empty input" {
 }
 
 test "BranchNode encoding" {
-
     const allocator = testing.allocator;
 
     var branch = BranchNode.init();
@@ -842,7 +823,6 @@ test "BranchNode encoding" {
 }
 
 test "LeafNode encoding" {
-
     const allocator = testing.allocator;
 
     const path = [_]u8{ 1, 2, 3, 4 };
@@ -869,7 +849,6 @@ test "LeafNode encoding" {
 }
 
 test "ExtensionNode encoding" {
-
     const allocator = testing.allocator;
 
     const path = [_]u8{ 1, 2, 3, 4 };
@@ -896,7 +875,6 @@ test "ExtensionNode encoding" {
 }
 
 test "TrieNode hash" {
-
     const allocator = testing.allocator;
 
     // Create a leaf node

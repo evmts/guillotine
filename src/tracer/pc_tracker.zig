@@ -175,7 +175,7 @@ pub const PcTracker = struct {
                     if (next_opcode == 0x56 or next_opcode == 0x57) {
                         // This is a static jump - validate the pushed value
                         const push_data_start = self.pc + 1;
-                        const push_data = self.bytecode[push_data_start..push_data_start + push_size];
+                        const push_data = self.bytecode[push_data_start .. push_data_start + push_size];
 
                         // Convert push data to destination
                         var dest: u256 = 0;
@@ -200,10 +200,7 @@ pub const PcTracker = struct {
 
             // STOP, RETURN, REVERT, SELFDESTRUCT - execution terminates
             0x00, 0xf3, 0xfd, 0xff => {
-                log.debug("PcTracker: Execution terminating at PC={} with {s}", .{
-                    self.pc,
-                    getOpcodeName(opcode)
-                });
+                log.debug("PcTracker: Execution terminating at PC={} with {s}", .{ self.pc, getOpcodeName(opcode) });
                 // Don't advance PC as execution stops
             },
 

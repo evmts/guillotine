@@ -59,13 +59,10 @@ pub const MerkleTrie = struct {
         const root = self.builder.root_hash orelse return &[_][]const u8{};
 
         // Get the root node
-        const root_hash_str = try bytes_to_hex_string(self.allocator, &root);
-        defer self.allocator.free(root_hash_str);
-
-        const root_node = self.builder.nodes.get(root_hash_str) orelse return TrieError.NonExistentNode;
+        const root_node = self.builder.nodes.get(root) orelse return TrieError.NonExistentNode;
 
         // Generate the proof by collecting nodes along the path
-        _ = try self.collect_proof_nodes(&retainer, root_node, &[_]u8{});
+        _ = try self.collect_proof_nodes(&retainer, root_node);
 
         // Get the proof as a list of RLP-encoded nodes
         return try retainer.get_proof().to_node_list(self.allocator);
@@ -95,95 +92,54 @@ pub const MerkleTrie = struct {
 
     // Internal methods
 
-    /// Recursively collect nodes for a proof
-    fn collect_proof_nodes(self: *const MerkleTrie, retainer: *ProofRetainer, node: TrieNode, path_prefix: []const u8) !bool {
-        // Add this node to the proof if it's on the key path
-        const on_path = try retainer.collect_node(node, path_prefix);
-        if (!on_path) return false; // Not on path, stop recursion
+    /// Iteratively collect nodes along the key path for a Merkle proof.
+    fn collect_proof_nodes(self: *const MerkleTrie, retainer: *ProofRetainer, start_node: TrieNode) !bool {
+        var path_prefix = std.ArrayList(u8).empty;
+        defer path_prefix.deinit(self.allocator);
+        try path_prefix.ensureTotalCapacity(self.allocator, retainer.key_nibbles.len);
 
-        // Continue recursion based on node type
-        switch (node) {
-            .Empty => return true, // End of path
-            .Leaf => {
-                // Leaf node is terminal, no further recursion needed
-                return true;
-            },
-            .Extension => |extension| {
-                // Follow the extension
-                const new_prefix = try self.allocator.alloc(u8, path_prefix.len + extension.nibbles.len);
-                defer self.allocator.free(new_prefix);
+        var current_node = start_node;
+        const max_steps: usize = retainer.key_nibbles.len + 2;
+        var steps: usize = 0;
 
-                @memcpy(new_prefix[0..path_prefix.len], path_prefix);
-                @memcpy(new_prefix[path_prefix.len..], extension.nibbles);
+        while (steps < max_steps) : (steps += 1) {
+            const on_path = try retainer.collect_node(current_node, path_prefix.items);
+            if (!on_path) return false;
 
-                // Get the next node
-                switch (extension.next) {
-                    .Raw => {
-                        // Should not happen in a well-formed trie
-                        return TrieError.InvalidNode;
-                    },
-                    .Hash => |hash| {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
+            switch (current_node) {
+                .Empty, .Leaf => return true,
+                .Extension => |extension| {
+                    try path_prefix.appendSlice(self.allocator, extension.nibbles);
+                    switch (extension.next) {
+                        .Raw => return TrieError.InvalidNode,
+                        .Hash => |hash| {
+                            current_node = self.builder.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                        },
+                    }
+                },
+                .Branch => |branch| {
+                    const key_nibbles = retainer.key_nibbles;
+                    if (path_prefix.items.len >= key_nibbles.len) return true;
 
-                        const next_node = self.builder.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                        return try self.collect_proof_nodes(retainer, next_node, new_prefix);
-                    },
-                }
-            },
-            .Branch => |branch| {
-                // Find which branch matches the key path
-                const key_nibbles = retainer.key_nibbles;
-                if (path_prefix.len >= key_nibbles.len) {
-                    // We've reached the end of the key path
-                    return true;
-                }
+                    const next_nibble = key_nibbles[path_prefix.items.len];
+                    if (next_nibble >= 16) return TrieError.InvalidKey;
+                    if (!branch.children_mask.is_set(@intCast(next_nibble))) return true;
 
-                const next_nibble = key_nibbles[path_prefix.len];
-                if (next_nibble >= 16) return TrieError.InvalidKey; // Invalid nibble
+                    const child = branch.children[next_nibble].?;
+                    try path_prefix.append(self.allocator, next_nibble);
 
-                // Check if there's a child at this position
-                if (!branch.children_mask.is_set(@intCast(next_nibble))) return true; // No child, end of path
-
-                // Follow the child
-                const child = branch.children[next_nibble].?;
-                const new_prefix = try self.allocator.alloc(u8, path_prefix.len + 1);
-                defer self.allocator.free(new_prefix);
-
-                @memcpy(new_prefix[0..path_prefix.len], path_prefix);
-                new_prefix[path_prefix.len] = next_nibble;
-
-                switch (child) {
-                    .Raw => {
-                        // Direct value, no further recursion
-                        return true;
-                    },
-                    .Hash => |hash| {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
-
-                        const next_node = self.builder.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                        return try self.collect_proof_nodes(retainer, next_node, new_prefix);
-                    },
-                }
-            },
+                    switch (child) {
+                        .Raw => return true,
+                        .Hash => |hash| {
+                            current_node = self.builder.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                        },
+                    }
+                },
+            }
         }
+        return TrieError.InvalidNode;
     }
 };
-
-// Helper function - Duplicated from hash_builder.zig for modularity
-fn bytes_to_hex_string(allocator: Allocator, bytes: []const u8) ![]u8 {
-    const hex_chars = "0123456789abcdef";
-    const hex = try allocator.alloc(u8, bytes.len * 2);
-    errdefer allocator.free(hex);
-
-    for (bytes, 0..) |byte, i| {
-        hex[i * 2] = hex_chars[byte >> 4];
-        hex[i * 2 + 1] = hex_chars[byte & 0x0F];
-    }
-
-    return hex;
-}
 
 // Tests
 
@@ -523,11 +479,11 @@ test "MerkleTrie - single node trie proof" {
     defer trie_instance.deinit();
 
     // Single key-value pair
-    try trie_instance.put(&[_]u8{ 0xFF }, "singleton");
+    try trie_instance.put(&[_]u8{0xFF}, "singleton");
 
     const root = trie_instance.root_hash().?;
 
-    const proof = try trie_instance.prove(&[_]u8{ 0xFF });
+    const proof = try trie_instance.prove(&[_]u8{0xFF});
     defer {
         for (proof) |node| {
             allocator.free(node);
@@ -535,7 +491,7 @@ test "MerkleTrie - single node trie proof" {
         allocator.free(proof);
     }
 
-    const valid = try trie_instance.verify_proof(root, &[_]u8{ 0xFF }, proof, "singleton");
+    const valid = try trie_instance.verify_proof(root, &[_]u8{0xFF}, proof, "singleton");
     try testing.expect(valid);
 }
 

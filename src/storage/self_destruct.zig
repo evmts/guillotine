@@ -75,7 +75,7 @@ pub const SelfDestruct = struct {
         // Use ArrayList for efficient single-pass collection (idiomatic Zig pattern)
         var list = std.ArrayList(SelfDestructRecord).empty;
         errdefer list.deinit(allocator); // Clean up on error
-        
+
         // Single iteration through HashMap
         var iter = self.iterator();
         while (iter.next()) |entry| {
@@ -84,7 +84,7 @@ pub const SelfDestruct = struct {
                 .beneficiary = entry.value_ptr.*,
             });
         }
-        
+
         // Transfer ownership to caller
         return try list.toOwnedSlice(allocator);
     }
@@ -135,7 +135,6 @@ pub const SelfDestruct = struct {
         self.destructions.clearRetainingCapacity();
         self.replaced.clearRetainingCapacity();
     }
-
 };
 
 test "SelfDestruct - basic marking and checking" {

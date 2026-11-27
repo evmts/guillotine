@@ -42,7 +42,7 @@ pub fn Handlers(FrameType: type) type {
             // the basic block. Only the EIP-2929 cold surcharge (2100 - 100) is charged
             // here, and only on forks that have access lists.
             const surcharge: u64 = if (comptime fork_gas.hasAccessLists(FrameType.config.hardfork))
-                access_cost -| OPCODE_INFO[@intFromEnum(Opcode.SLOAD)].gas_cost
+                access_cost -| OPCODE_INFO[@backingInt(Opcode.SLOAD)].gas_cost
             else
                 0;
             self.gas_remaining -= @intCast(surcharge);
@@ -126,7 +126,12 @@ pub fn Handlers(FrameType: type) type {
             const original_value: WordType = original_opt orelse current_value;
 
             // SSTORE gas and refund for this fork (includes the EIP-2929 cold surcharge).
-            const cost = fork_gas.sstoreCost(hardfork, original_value, current_value, value, is_cold);
+            const cost = fork_gas.sstoreCostFor(hardfork, .{
+                .original = original_value,
+                .current = current_value,
+                .new = value,
+                .is_cold = is_cold,
+            });
 
             log.debug(
                 "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, gas={}, refund={}",

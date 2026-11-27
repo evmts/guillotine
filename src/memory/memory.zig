@@ -62,6 +62,15 @@ pub fn Memory(config: MemoryConfig) type {
         checkpoint: u32,
         buffer_ptr: *std.ArrayList(u8),
 
+        comptime {
+            if (@sizeOf(Self) != 2 * @sizeOf(usize)) {
+                @compileError(std.fmt.comptimePrint(
+                    "Memory must remain compact ({d} bytes), found {d}",
+                    .{ 2 * @sizeOf(usize), @sizeOf(Self) },
+                ));
+            }
+        }
+
         pub fn init(allocator: std.mem.Allocator) !Self {
             if (is_owned) {
                 const buffer_ptr = try allocator.create(std.ArrayList(u8));
@@ -110,7 +119,7 @@ pub fn Memory(config: MemoryConfig) type {
             if (total <= checkpoint_usize) return 0;
             return total - checkpoint_usize;
         }
-        
+
         // Common methods that work on the inner Self type
         pub fn size(self: *Self) usize {
             return self.size_internal();
@@ -147,18 +156,18 @@ pub fn Memory(config: MemoryConfig) type {
                     // We have capacity, just extend length and zero
                     const old_len = current_len;
                     self.buffer_ptr.*.items.len = required_total;
-                    
+
                     // Use SIMD for zeroing if vector_length > 1 and data is large enough
                     if (config.vector_length > 1) {
                         const slice = self.buffer_ptr.*.items[old_len..required_total];
                         // Only use SIMD if we have enough data AND proper alignment
                         const ptr_addr = @intFromPtr(slice.ptr);
                         const alignment_ok = (ptr_addr % @alignOf(@Vector(config.vector_length, u8))) == 0;
-                        
+
                         if (slice.len >= config.vector_length and alignment_ok and config.vector_length > 1) {
                             const VectorType = @Vector(config.vector_length, u8);
                             const zero_vec: VectorType = @splat(0);
-                            
+
                             // SIMD-aligned chunks
                             var i: usize = 0;
                             while (i + config.vector_length <= slice.len) : (i += config.vector_length) {
@@ -232,7 +241,7 @@ pub fn Memory(config: MemoryConfig) type {
             try self.ensure_capacity(allocator, end);
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
-            
+
             // Use SIMD for copying if vector_length > 1 and data is large enough
             if (config.vector_length > 1) {
                 if (data.len >= config.vector_length * 4) { // Only use SIMD for larger copies
@@ -241,7 +250,7 @@ pub fn Memory(config: MemoryConfig) type {
                     const dst_addr = @intFromPtr(dst.ptr);
                     const src_addr = @intFromPtr(data.ptr);
                     const alignment_ok = (dst_addr % @alignOf(@Vector(config.vector_length, u8))) == 0 and
-                                        (src_addr % @alignOf(@Vector(config.vector_length, u8))) == 0;
+                        (src_addr % @alignOf(@Vector(config.vector_length, u8))) == 0;
 
                     if (alignment_ok) {
                         const VectorType = @Vector(config.vector_length, u8);
@@ -371,7 +380,7 @@ pub fn Memory(config: MemoryConfig) type {
             const slice = try self.get_slice_internal(offset, 32);
             return bytes_to_u256(slice);
         }
-        
+
         // Internal get_slice without locking
         inline fn get_slice_internal(self: *const Self, offset: usize, len: usize) MemoryError![]const u8 {
             const offset_usize = offset;

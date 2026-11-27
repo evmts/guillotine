@@ -1,11 +1,11 @@
 /// Opcode metadata and gas cost information for EVM operations
-/// 
+///
 /// Provides structured data about each EVM opcode including:
 /// - Gas costs (base costs, some opcodes have dynamic costs calculated at runtime)
 /// - Stack requirements (inputs consumed and outputs produced)
 /// - Opcode categories and properties
 /// - Hard fork compatibility information
-/// 
+///
 /// This data drives the jump table dispatch system and bytecode validation.
 const std = @import("std");
 const primitives = @import("voltaire");
@@ -24,10 +24,10 @@ pub const OPCODE_INFO = blk: {
     var info: [256]OpcodeInfo = @as([256]OpcodeInfo, @splat(.{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 }));
 
     // 0x00s: Stop and Arithmetic Operations
-    info[@intFromEnum(Opcode.STOP)] = .{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 };
-    info[@intFromEnum(Opcode.ADD)] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1 };
-    info[@intFromEnum(Opcode.MUL)] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1 };
-    info[@intFromEnum(Opcode.SUB)] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1 };
+    info[@backingInt(Opcode.STOP)] = .{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 };
+    info[@backingInt(Opcode.ADD)] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1 };
+    info[@backingInt(Opcode.MUL)] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1 };
+    info[@backingInt(Opcode.SUB)] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1 };
     info[0x04] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1 }; // DIV
     info[0x05] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1 }; // SDIV
     info[0x06] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1 }; // MOD
@@ -90,7 +90,7 @@ pub const OPCODE_INFO = blk: {
     info[0x4a] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // BLOBBASEFEE
 
     // 0x50s: Stack, Memory, Storage and Flow Operations
-    info[@intFromEnum(Opcode.POP)] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 1, .stack_outputs = 0 };
+    info[@backingInt(Opcode.POP)] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 1, .stack_outputs = 0 };
     info[0x51] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 1, .stack_outputs = 1 }; // MLOAD (dynamic)
     info[0x52] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 0 }; // MSTORE (dynamic)
     info[0x53] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 0 }; // MSTORE8 (dynamic)
@@ -107,7 +107,7 @@ pub const OPCODE_INFO = blk: {
     info[0x5c] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // TLOAD (warm access)
     info[0x5d] = .{ .gas_cost = 100, .stack_inputs = 2, .stack_outputs = 0 }; // TSTORE (warm access)
     info[0x5e] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 3, .stack_outputs = 0 }; // MCOPY (dynamic, base cost)
-    info[@intFromEnum(Opcode.PUSH0)] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 };
+    info[@backingInt(Opcode.PUSH0)] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 };
 
     // 0x60-0x7f: PUSH1-PUSH32
     var i: u8 = 0;
@@ -215,20 +215,19 @@ pub fn getMaxStackAfter(opcode: u8) u16 {
     return 1024; // Full stack size
 }
 
-
 test "opcode info array has correct size" {
     try std.testing.expectEqual(@as(usize, 256), OPCODE_INFO.len);
 }
 
 test "common opcodes have expected values" {
     // Test ADD
-    const add_info = OPCODE_INFO[@intFromEnum(Opcode.ADD)];
+    const add_info = OPCODE_INFO[@backingInt(Opcode.ADD)];
     try std.testing.expectEqual(@as(u64, GasConstants.GasFastestStep), add_info.gas_cost);
     try std.testing.expectEqual(@as(u8, 2), add_info.stack_inputs);
     try std.testing.expectEqual(@as(u8, 1), add_info.stack_outputs);
 
     // Test PUSH1
-    const push1_info = OPCODE_INFO[@intFromEnum(Opcode.PUSH1)];
+    const push1_info = OPCODE_INFO[@backingInt(Opcode.PUSH1)];
     try std.testing.expectEqual(@as(u64, GasConstants.GasFastestStep), push1_info.gas_cost);
     try std.testing.expectEqual(@as(u8, 0), push1_info.stack_inputs);
     try std.testing.expectEqual(@as(u8, 1), push1_info.stack_outputs);
@@ -245,17 +244,16 @@ test "min stack calculation" {
     try std.testing.expectEqual(@as(u16, 2), getMinStackRequired(0x01));
 }
 
-
 test "opcode enum values" {
     // Test some key opcodes have correct hex values
-    try std.testing.expectEqual(@as(u8, 0x00), @intFromEnum(Opcode.STOP));
-    try std.testing.expectEqual(@as(u8, 0x01), @intFromEnum(Opcode.ADD));
-    try std.testing.expectEqual(@as(u8, 0x20), @intFromEnum(Opcode.KECCAK256));
-    try std.testing.expectEqual(@as(u8, 0x60), @intFromEnum(Opcode.PUSH1));
-    try std.testing.expectEqual(@as(u8, 0x7f), @intFromEnum(Opcode.PUSH32));
-    try std.testing.expectEqual(@as(u8, 0x80), @intFromEnum(Opcode.DUP1));
-    try std.testing.expectEqual(@as(u8, 0x8f), @intFromEnum(Opcode.DUP16));
-    try std.testing.expectEqual(@as(u8, 0x90), @intFromEnum(Opcode.SWAP1));
-    try std.testing.expectEqual(@as(u8, 0x9f), @intFromEnum(Opcode.SWAP16));
-    try std.testing.expectEqual(@as(u8, 0xff), @intFromEnum(Opcode.SELFDESTRUCT));
+    try std.testing.expectEqual(@as(u8, 0x00), @backingInt(Opcode.STOP));
+    try std.testing.expectEqual(@as(u8, 0x01), @backingInt(Opcode.ADD));
+    try std.testing.expectEqual(@as(u8, 0x20), @backingInt(Opcode.KECCAK256));
+    try std.testing.expectEqual(@as(u8, 0x60), @backingInt(Opcode.PUSH1));
+    try std.testing.expectEqual(@as(u8, 0x7f), @backingInt(Opcode.PUSH32));
+    try std.testing.expectEqual(@as(u8, 0x80), @backingInt(Opcode.DUP1));
+    try std.testing.expectEqual(@as(u8, 0x8f), @backingInt(Opcode.DUP16));
+    try std.testing.expectEqual(@as(u8, 0x90), @backingInt(Opcode.SWAP1));
+    try std.testing.expectEqual(@as(u8, 0x9f), @backingInt(Opcode.SWAP16));
+    try std.testing.expectEqual(@as(u8, 0xff), @backingInt(Opcode.SELFDESTRUCT));
 }

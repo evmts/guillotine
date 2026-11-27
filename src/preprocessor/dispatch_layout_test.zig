@@ -104,8 +104,8 @@ test "PUSH+ADD+DUP1 selects the inline or the pointer handler by operand width" 
     defer schedule.deinit();
     try testing.expect(schedule.validate());
 
-    const inline_handler = frame_handlers.getSyntheticHandler(TestFrame, @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1_INLINE));
-    const pointer_handler = frame_handlers.getSyntheticHandler(TestFrame, @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1_POINTER));
+    const inline_handler = frame_handlers.getSyntheticHandler(TestFrame, .PUSH_ADD_DUP1_INLINE);
+    const pointer_handler = frame_handlers.getSyntheticHandler(TestFrame, .PUSH_ADD_DUP1_POINTER);
 
     // [0] first block, [1..2] PUSH1 7, [3..4] PUSH_ADD_DUP1_INLINE 1, [5..6] PUSH_ADD_DUP1_POINTER.
     try testing.expect(schedule.items[1].opcode_handler == TestFrame.opcode_handlers[0x60]);

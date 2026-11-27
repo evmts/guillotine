@@ -64,6 +64,7 @@ The public documentation site is live at **[guillotine.tevm.sh](https://guilloti
 | Browse the full docs site | [guillotine.tevm.sh](https://guillotine.tevm.sh) (`docs/src/pages/`) |
 | Read testing, fuzzing, E2E & formal verification docs | [src/pages/guides/testing-and-verification.mdx](./src/pages/guides/testing-and-verification.mdx) |
 | Read in-repo & cross-EVM benchmarks + JIT docs | [src/pages/guides/benchmarks-and-jit.mdx](./src/pages/guides/benchmarks-and-jit.mdx) · [bench/compare/RESULTS.md](../bench/compare/RESULTS.md) |
+| Read TigerStyle safety, pooling & build-mode guarantees | [dev/TIGERSTYLE.md](./dev/TIGERSTYLE.md) · [src/pages/guides/tigerstyle.mdx](./src/pages/guides/tigerstyle.mdx) |
 | Understand the architecture | [dev/ARCHITECTURE.md](./dev/ARCHITECTURE.md) |
 | Compare MinimalEvm vs Performance | [dev/EXECUTION-MODELS.md](./dev/EXECUTION-MODELS.md) |
 | Learn about storage/state | [dev/STATE-MANAGEMENT.md](./dev/STATE-MANAGEMENT.md) |

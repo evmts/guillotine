@@ -9,7 +9,7 @@ const Address = primitives.Address.Address;
 fn benchDatabaseGetAccount(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
-    
+
     // Pre-populate with some accounts
     var i: u8 = 0;
     while (i < 100) : (i += 1) {
@@ -22,7 +22,7 @@ fn benchDatabaseGetAccount(allocator: std.mem.Allocator) void {
         };
         db.set_account(addr, account) catch break;
     }
-    
+
     // Benchmark account retrieval
     i = 0;
     while (i < 1000) : (i += 1) {
@@ -34,7 +34,7 @@ fn benchDatabaseGetAccount(allocator: std.mem.Allocator) void {
 fn benchDatabaseSetAccount(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
-    
+
     var i: u8 = 0;
     while (i < 200) : (i += 1) {
         const addr = [_]u8{i} ++ @as([19]u8, @splat(0));
@@ -51,9 +51,9 @@ fn benchDatabaseSetAccount(allocator: std.mem.Allocator) void {
 fn benchDatabaseStorage(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
-    
+
     const addr = [_]u8{0x42} ++ @as([19]u8, @splat(0));
-    
+
     // Set storage values
     var i: u32 = 0;
     while (i < 100) : (i += 1) {
@@ -61,7 +61,7 @@ fn benchDatabaseStorage(allocator: std.mem.Allocator) void {
         const value: u256 = i * 1000;
         db.set_storage(addr, key, value) catch break;
     }
-    
+
     // Get storage values
     i = 0;
     while (i < 200) : (i += 1) {
@@ -73,15 +73,15 @@ fn benchDatabaseStorage(allocator: std.mem.Allocator) void {
 fn benchDatabaseTransientStorage(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
-    
+
     const addr = [_]u8{0x43} ++ @as([19]u8, @splat(0));
-    
+
     // Set and get transient storage values
     var i: u32 = 0;
     while (i < 150) : (i += 1) {
         const key: u256 = i;
         const value: u256 = i * 2000;
-        
+
         db.set_transient_storage(addr, key, value) catch break;
         _ = db.get_transient_storage(addr, key) catch break;
     }
@@ -90,8 +90,7 @@ fn benchDatabaseTransientStorage(allocator: std.mem.Allocator) void {
 fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
-    
-    
+
     // Sample contract bytecode
     const bytecode = [_]u8{
         0x60, 0x80, 0x60, 0x40, 0x52, 0x34, 0x80, 0x15,
@@ -99,12 +98,12 @@ fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
         0x5b, 0x50, 0x60, 0x40, 0x51, 0x61, 0x02, 0x8f,
         0x38, 0x03, 0x80, 0x61, 0x02, 0x8f, 0x83, 0x39,
     };
-    
+
     // Set and get code multiple times
     var i: u32 = 0;
     while (i < 50) : (i += 1) {
         const test_addr = [_]u8{@as(u8, @intCast(i % 256))} ++ @as([19]u8, @splat(0));
-        
+
         _ = db.set_code(&bytecode) catch break;
         _ = db.get_code(test_addr) catch break;
         _ = db.get_code_hash(test_addr) catch break;
@@ -115,11 +114,11 @@ fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
 fn benchDatabaseMixedOperations(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
-    
+
     var i: u32 = 0;
     while (i < 100) : (i += 1) {
         const addr = [_]u8{@as(u8, @intCast(i % 256))} ++ @as([19]u8, @splat(0));
-        
+
         // Mix of operations simulating real EVM usage
         const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000,
@@ -127,15 +126,15 @@ fn benchDatabaseMixedOperations(allocator: std.mem.Allocator) void {
             .code_hash = @as([32]u8, @splat(0)),
             .storage_root = @as([32]u8, @splat(0)),
         };
-        
+
         db.set_account(addr, account) catch break;
         _ = db.get_account(addr) catch break;
-        
+
         const storage_key: u256 = i;
         const storage_value: u256 = i * 42;
         db.set_storage(addr, storage_key, storage_value) catch break;
         _ = db.get_storage(addr, storage_key) catch break;
-        
+
         _ = db.account_exists(addr) catch break;
         _ = db.is_empty_account(addr) catch break;
     }
@@ -147,17 +146,17 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const stdout = std.io.getStdOut().writer();
-    
+
     var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
-    
+
     try bench.add("Database Get Account", benchDatabaseGetAccount, .{});
     try bench.add("Database Set Account", benchDatabaseSetAccount, .{});
     try bench.add("Database Storage Operations", benchDatabaseStorage, .{});
     try bench.add("Database Transient Storage", benchDatabaseTransientStorage, .{});
     try bench.add("Database Code Operations", benchDatabaseCodeOperations, .{});
     try bench.add("Database Mixed Operations", benchDatabaseMixedOperations, .{});
-    
+
     try stdout.print("Running Database Benchmarks...\n");
     try bench.run(stdout);
 }

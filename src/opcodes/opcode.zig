@@ -167,61 +167,61 @@ pub const Opcode = enum(u8) {
     REVERT = 0xfd,
     INVALID = 0xfe,
     SELFDESTRUCT = 0xff,
-    
+
     /// Check if opcode is a PUSH operation
     pub fn isPush(self: Opcode) bool {
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value >= 0x5f and value <= 0x7f; // PUSH0 through PUSH32
     }
-    
+
     /// Get the number of bytes pushed for PUSH operations (0-32)
     pub fn pushSize(self: Opcode) u8 {
         if (!self.isPush()) return 0;
-        
-        const value = @intFromEnum(self);
+
+        const value = @backingInt(self);
         if (value == 0x5f) return 0; // PUSH0
         return value - 0x5f; // PUSH1=1, PUSH2=2, ..., PUSH32=32
     }
-    
+
     /// Check if opcode is a DUP operation
     pub fn isDup(self: Opcode) bool {
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value >= 0x80 and value <= 0x8f; // DUP1 through DUP16
     }
-    
+
     /// Get the DUP position (1-16)
     pub fn dupPosition(self: Opcode) u8 {
         if (!self.isDup()) return 0;
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value - 0x7f; // DUP1=1, DUP2=2, ..., DUP16=16
     }
-    
+
     /// Check if opcode is a SWAP operation
     pub fn isSwap(self: Opcode) bool {
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value >= 0x90 and value <= 0x9f; // SWAP1 through SWAP16
     }
-    
+
     /// Get the SWAP position (1-16)
     pub fn swapPosition(self: Opcode) u8 {
         if (!self.isSwap()) return 0;
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value - 0x8f; // SWAP1=1, SWAP2=2, ..., SWAP16=16
     }
-    
+
     /// Check if opcode is a LOG operation
     pub fn isLog(self: Opcode) bool {
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value >= 0xa0 and value <= 0xa4; // LOG0 through LOG4
     }
-    
+
     /// Get the number of topics for LOG operations (0-4)
     pub fn logTopics(self: Opcode) u8 {
         if (!self.isLog()) return 0;
-        const value = @intFromEnum(self);
+        const value = @backingInt(self);
         return value - 0xa0; // LOG0=0, LOG1=1, ..., LOG4=4
     }
-    
+
     /// Check if opcode terminates execution
     pub fn isTerminating(self: Opcode) bool {
         return switch (self) {
@@ -229,26 +229,23 @@ pub const Opcode = enum(u8) {
             else => false,
         };
     }
-    
+
     /// Check if opcode can modify state
     pub fn isStateModifying(self: Opcode) bool {
         return switch (self) {
-            .SSTORE, .TSTORE, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4,
-            .CREATE, .CREATE2, .CALL, .CALLCODE, .DELEGATECALL,
-            .AUTHCALL, .SELFDESTRUCT => true,
+            .SSTORE, .TSTORE, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4, .CREATE, .CREATE2, .CALL, .CALLCODE, .DELEGATECALL, .AUTHCALL, .SELFDESTRUCT => true,
             else => false,
         };
     }
-    
+
     /// Check if opcode is arithmetic
     pub fn isArithmetic(self: Opcode) bool {
         return switch (self) {
-            .ADD, .MUL, .SUB, .DIV, .SDIV, .MOD, .SMOD,
-            .ADDMOD, .MULMOD, .EXP, .SIGNEXTEND => true,
+            .ADD, .MUL, .SUB, .DIV, .SDIV, .MOD, .SMOD, .ADDMOD, .MULMOD, .EXP, .SIGNEXTEND => true,
             else => false,
         };
     }
-    
+
     /// Check if opcode is comparison
     pub fn isComparison(self: Opcode) bool {
         return switch (self) {
@@ -256,7 +253,7 @@ pub const Opcode = enum(u8) {
             else => false,
         };
     }
-    
+
     /// Check if opcode is bitwise
     pub fn isBitwise(self: Opcode) bool {
         return switch (self) {
@@ -264,7 +261,7 @@ pub const Opcode = enum(u8) {
             else => false,
         };
     }
-    
+
     /// Get opcode name as string
     pub fn name(self: Opcode) []const u8 {
         return switch (self) {
@@ -429,7 +426,7 @@ pub const Opcode = enum(u8) {
 /// Synthetic opcodes: 0x100+ (mapped from OpcodeSynthetic values)
 pub const UnifiedOpcode = enum(u16) {
     pub fn name(self: UnifiedOpcode) []const u8 {
-        return switch (@intFromEnum(self)) {
+        return switch (@backingInt(self)) {
             // Regular opcodes
             0x00...0xFF => |opcode| getOpcodeName(@intCast(opcode)),
             // Synthetic opcodes - use @tagName directly
@@ -551,7 +548,7 @@ pub const UnifiedOpcode = enum(u16) {
             else => "UNKNOWN",
         };
     }
-    
+
     // Regular opcodes 0x00-0xFF
     STOP = 0x00,
     ADD = 0x01,
@@ -741,7 +738,7 @@ pub const UnifiedOpcode = enum(u16) {
 
     /// Convert from regular Opcode
     pub fn fromOpcode(opcode: Opcode) UnifiedOpcode {
-        return @enumFromInt(@intFromEnum(opcode));
+        return @fromBackingInt(@intCast(@backingInt(opcode)));
     }
 
     /// Alias for fromOpcode for compatibility
@@ -751,37 +748,37 @@ pub const UnifiedOpcode = enum(u16) {
 
     /// Convert from synthetic OpcodeSynthetic
     pub fn fromSynthetic(opcode: OpcodeSynthetic) UnifiedOpcode {
-        return @enumFromInt(0x100 + @intFromEnum(opcode));
+        return @fromBackingInt(@intCast(0x100 + @backingInt(opcode)));
     }
 
     /// Check if this is a regular EVM opcode (0x00-0xFF)
     pub fn isRegular(self: UnifiedOpcode) bool {
-        return @intFromEnum(self) < 0x100;
+        return @backingInt(self) < 0x100;
     }
 
     /// Check if this is a synthetic opcode (0x100+)
     pub fn isSynthetic(self: UnifiedOpcode) bool {
-        return @intFromEnum(self) >= 0x100;
+        return @backingInt(self) >= 0x100;
     }
 
     /// Convert to regular Opcode (only valid if isRegular() returns true)
     pub fn toOpcode(self: UnifiedOpcode) Opcode {
-        return @enumFromInt(@intFromEnum(self));
+        return @fromBackingInt(@intCast(@backingInt(self)));
     }
 
     /// Convert to synthetic OpcodeSynthetic (only valid if isSynthetic() returns true)
     pub fn toSynthetic(self: UnifiedOpcode) OpcodeSynthetic {
-        return @enumFromInt(@intFromEnum(self) - 0x100);
+        return @fromBackingInt(@intCast(@backingInt(self) - 0x100));
     }
 };
 
 test "opcode enum values" {
-    try std.testing.expectEqual(@as(u8, 0x00), @intFromEnum(Opcode.STOP));
-    try std.testing.expectEqual(@as(u8, 0x01), @intFromEnum(Opcode.ADD));
-    try std.testing.expectEqual(@as(u8, 0x5f), @intFromEnum(Opcode.PUSH0));
-    try std.testing.expectEqual(@as(u8, 0x60), @intFromEnum(Opcode.PUSH1));
-    try std.testing.expectEqual(@as(u8, 0x7f), @intFromEnum(Opcode.PUSH32));
-    try std.testing.expectEqual(@as(u8, 0xff), @intFromEnum(Opcode.SELFDESTRUCT));
+    try std.testing.expectEqual(@as(u8, 0x00), @backingInt(Opcode.STOP));
+    try std.testing.expectEqual(@as(u8, 0x01), @backingInt(Opcode.ADD));
+    try std.testing.expectEqual(@as(u8, 0x5f), @backingInt(Opcode.PUSH0));
+    try std.testing.expectEqual(@as(u8, 0x60), @backingInt(Opcode.PUSH1));
+    try std.testing.expectEqual(@as(u8, 0x7f), @backingInt(Opcode.PUSH32));
+    try std.testing.expectEqual(@as(u8, 0xff), @backingInt(Opcode.SELFDESTRUCT));
 }
 
 test "opcode push detection" {
@@ -789,7 +786,7 @@ test "opcode push detection" {
     try std.testing.expect(Opcode.PUSH1.isPush());
     try std.testing.expect(Opcode.PUSH16.isPush());
     try std.testing.expect(Opcode.PUSH32.isPush());
-    
+
     try std.testing.expect(!Opcode.ADD.isPush());
     try std.testing.expect(!Opcode.DUP1.isPush());
     try std.testing.expect(!Opcode.STOP.isPush());
@@ -800,7 +797,7 @@ test "opcode push size calculation" {
     try std.testing.expectEqual(@as(u8, 1), Opcode.PUSH1.pushSize());
     try std.testing.expectEqual(@as(u8, 16), Opcode.PUSH16.pushSize());
     try std.testing.expectEqual(@as(u8, 32), Opcode.PUSH32.pushSize());
-    
+
     // Non-push opcodes return 0
     try std.testing.expectEqual(@as(u8, 0), Opcode.ADD.pushSize());
     try std.testing.expectEqual(@as(u8, 0), Opcode.DUP1.pushSize());
@@ -810,7 +807,7 @@ test "opcode dup detection" {
     try std.testing.expect(Opcode.DUP1.isDup());
     try std.testing.expect(Opcode.DUP8.isDup());
     try std.testing.expect(Opcode.DUP16.isDup());
-    
+
     try std.testing.expect(!Opcode.PUSH1.isDup());
     try std.testing.expect(!Opcode.SWAP1.isDup());
     try std.testing.expect(!Opcode.ADD.isDup());
@@ -820,7 +817,7 @@ test "opcode dup position calculation" {
     try std.testing.expectEqual(@as(u8, 1), Opcode.DUP1.dupPosition());
     try std.testing.expectEqual(@as(u8, 8), Opcode.DUP8.dupPosition());
     try std.testing.expectEqual(@as(u8, 16), Opcode.DUP16.dupPosition());
-    
+
     // Non-dup opcodes return 0
     try std.testing.expectEqual(@as(u8, 0), Opcode.PUSH1.dupPosition());
     try std.testing.expectEqual(@as(u8, 0), Opcode.ADD.dupPosition());
@@ -830,7 +827,7 @@ test "opcode swap detection" {
     try std.testing.expect(Opcode.SWAP1.isSwap());
     try std.testing.expect(Opcode.SWAP8.isSwap());
     try std.testing.expect(Opcode.SWAP16.isSwap());
-    
+
     try std.testing.expect(!Opcode.DUP1.isSwap());
     try std.testing.expect(!Opcode.PUSH1.isSwap());
     try std.testing.expect(!Opcode.ADD.isSwap());
@@ -840,7 +837,7 @@ test "opcode swap position calculation" {
     try std.testing.expectEqual(@as(u8, 1), Opcode.SWAP1.swapPosition());
     try std.testing.expectEqual(@as(u8, 8), Opcode.SWAP8.swapPosition());
     try std.testing.expectEqual(@as(u8, 16), Opcode.SWAP16.swapPosition());
-    
+
     // Non-swap opcodes return 0
     try std.testing.expectEqual(@as(u8, 0), Opcode.DUP1.swapPosition());
     try std.testing.expectEqual(@as(u8, 0), Opcode.ADD.swapPosition());
@@ -850,7 +847,7 @@ test "opcode log detection" {
     try std.testing.expect(Opcode.LOG0.isLog());
     try std.testing.expect(Opcode.LOG1.isLog());
     try std.testing.expect(Opcode.LOG4.isLog());
-    
+
     try std.testing.expect(!Opcode.ADD.isLog());
     try std.testing.expect(!Opcode.SSTORE.isLog());
     try std.testing.expect(!Opcode.CALL.isLog());
@@ -860,7 +857,7 @@ test "opcode log topics calculation" {
     try std.testing.expectEqual(@as(u8, 0), Opcode.LOG0.logTopics());
     try std.testing.expectEqual(@as(u8, 1), Opcode.LOG1.logTopics());
     try std.testing.expectEqual(@as(u8, 4), Opcode.LOG4.logTopics());
-    
+
     // Non-log opcodes return 0
     try std.testing.expectEqual(@as(u8, 0), Opcode.ADD.logTopics());
     try std.testing.expectEqual(@as(u8, 0), Opcode.SSTORE.logTopics());
@@ -872,7 +869,7 @@ test "opcode terminating detection" {
     try std.testing.expect(Opcode.REVERT.isTerminating());
     try std.testing.expect(Opcode.INVALID.isTerminating());
     try std.testing.expect(Opcode.SELFDESTRUCT.isTerminating());
-    
+
     try std.testing.expect(!Opcode.ADD.isTerminating());
     try std.testing.expect(!Opcode.JUMP.isTerminating());
     try std.testing.expect(!Opcode.CALL.isTerminating());
@@ -886,7 +883,7 @@ test "opcode state modifying detection" {
     try std.testing.expect(Opcode.CREATE.isStateModifying());
     try std.testing.expect(Opcode.CALL.isStateModifying());
     try std.testing.expect(Opcode.SELFDESTRUCT.isStateModifying());
-    
+
     try std.testing.expect(!Opcode.ADD.isStateModifying());
     try std.testing.expect(!Opcode.SLOAD.isStateModifying());
     try std.testing.expect(!Opcode.STATICCALL.isStateModifying());
@@ -899,7 +896,7 @@ test "opcode arithmetic detection" {
     try std.testing.expect(Opcode.MOD.isArithmetic());
     try std.testing.expect(Opcode.EXP.isArithmetic());
     try std.testing.expect(Opcode.SIGNEXTEND.isArithmetic());
-    
+
     try std.testing.expect(!Opcode.LT.isArithmetic());
     try std.testing.expect(!Opcode.AND.isArithmetic());
     try std.testing.expect(!Opcode.PUSH1.isArithmetic());
@@ -910,7 +907,7 @@ test "opcode comparison detection" {
     try std.testing.expect(Opcode.GT.isComparison());
     try std.testing.expect(Opcode.EQ.isComparison());
     try std.testing.expect(Opcode.ISZERO.isComparison());
-    
+
     try std.testing.expect(!Opcode.ADD.isComparison());
     try std.testing.expect(!Opcode.AND.isComparison());
     try std.testing.expect(!Opcode.PUSH1.isComparison());
@@ -923,7 +920,7 @@ test "opcode bitwise detection" {
     try std.testing.expect(Opcode.NOT.isBitwise());
     try std.testing.expect(Opcode.SHL.isBitwise());
     try std.testing.expect(Opcode.SHR.isBitwise());
-    
+
     try std.testing.expect(!Opcode.ADD.isBitwise());
     try std.testing.expect(!Opcode.LT.isBitwise());
     try std.testing.expect(!Opcode.PUSH1.isBitwise());
@@ -940,57 +937,45 @@ test "opcode names" {
 
 test "opcode edge cases" {
     // Test boundary values
-    const push0_value = @intFromEnum(Opcode.PUSH0);
-    const push32_value = @intFromEnum(Opcode.PUSH32);
+    const push0_value = @backingInt(Opcode.PUSH0);
+    const push32_value = @backingInt(Opcode.PUSH32);
     try std.testing.expect(push0_value == 0x5f);
     try std.testing.expect(push32_value == 0x7f);
-    
+
     // Test DUP/SWAP boundaries
-    const dup1_value = @intFromEnum(Opcode.DUP1);
-    const dup16_value = @intFromEnum(Opcode.DUP16);
+    const dup1_value = @backingInt(Opcode.DUP1);
+    const dup16_value = @backingInt(Opcode.DUP16);
     try std.testing.expect(dup1_value == 0x80);
     try std.testing.expect(dup16_value == 0x8f);
-    
-    const swap1_value = @intFromEnum(Opcode.SWAP1);
-    const swap16_value = @intFromEnum(Opcode.SWAP16);
+
+    const swap1_value = @backingInt(Opcode.SWAP1);
+    const swap16_value = @backingInt(Opcode.SWAP16);
     try std.testing.expect(swap1_value == 0x90);
     try std.testing.expect(swap16_value == 0x9f);
-    
+
     // Test LOG boundaries
-    const log0_value = @intFromEnum(Opcode.LOG0);
-    const log4_value = @intFromEnum(Opcode.LOG4);
+    const log0_value = @backingInt(Opcode.LOG0);
+    const log4_value = @backingInt(Opcode.LOG4);
     try std.testing.expect(log0_value == 0xa0);
     try std.testing.expect(log4_value == 0xa4);
 }
 
 test "opcode categorization completeness" {
     // Verify that all opcodes in each category are properly detected
-    const push_opcodes = [_]Opcode{
-        .PUSH0, .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7,
-        .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15,
-        .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23,
-        .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31,
-        .PUSH32
-    };
-    
+    const push_opcodes = [_]Opcode{ .PUSH0, .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 };
+
     for (push_opcodes) |opcode| {
         try std.testing.expect(opcode.isPush());
     }
-    
-    const dup_opcodes = [_]Opcode{
-        .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8,
-        .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16
-    };
-    
+
+    const dup_opcodes = [_]Opcode{ .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8, .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16 };
+
     for (dup_opcodes) |opcode| {
         try std.testing.expect(opcode.isDup());
     }
-    
-    const swap_opcodes = [_]Opcode{
-        .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8,
-        .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16
-    };
-    
+
+    const swap_opcodes = [_]Opcode{ .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8, .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16 };
+
     for (swap_opcodes) |opcode| {
         try std.testing.expect(opcode.isSwap());
     }

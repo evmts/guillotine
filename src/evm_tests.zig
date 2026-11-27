@@ -5708,7 +5708,7 @@ test "E2E STATICCALL - read-only enforcement" {
             },
         };
 
-    const result = evm.call(staticcall_params);
+        const result = evm.call(staticcall_params);
 
         // Should fail due to SSTORE in static context
         try std.testing.expect(!result.success);
@@ -5728,7 +5728,7 @@ test "E2E STATICCALL - read-only enforcement" {
             },
         };
 
-    const result = evm.call(staticcall_params);
+        const result = evm.call(staticcall_params);
         defer if (result.output.len > 0) evm.allocator.free(result.output);
 
         // Should succeed since it only reads
@@ -5762,7 +5762,7 @@ test "E2E STATICCALL - read-only enforcement" {
         };
 
         const initial_balance = (try db.get_account(reader_address.bytes)).?.balance;
-    const result = evm.call(staticcall_params);
+        const result = evm.call(staticcall_params);
 
         try std.testing.expect(result.success);
 
@@ -6355,11 +6355,11 @@ test "E2E CALL failure scenarios" {
 
 test "top-level CALL increments sender nonce" {
     const allocator = std.testing.allocator;
-    
+
     // Create test database
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Create sender account with initial nonce
     const sender: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const initial_nonce: u64 = 5;
@@ -6369,7 +6369,7 @@ test "top-level CALL increments sender nonce" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6380,16 +6380,16 @@ test "top-level CALL increments sender nonce" {
         .base_fee = 0,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, sender, .CANCUN);
     defer evm.deinit();
-    
+
     // Execute CALL transaction
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6400,10 +6400,10 @@ test "top-level CALL increments sender nonce" {
             .gas = 100000,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     // Verify nonce was incremented
     const account_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(initial_nonce + 1, account_after.nonce);
@@ -6411,11 +6411,11 @@ test "top-level CALL increments sender nonce" {
 
 test "top-level CREATE increments sender nonce once" {
     const allocator = std.testing.allocator;
-    
+
     // Create test database
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Create sender account with initial nonce
     const sender: primitives.Address = .{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0)) };
     const initial_nonce: u64 = 5;
@@ -6425,7 +6425,7 @@ test "top-level CREATE increments sender nonce once" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6436,23 +6436,23 @@ test "top-level CREATE increments sender nonce once" {
         .base_fee = 0,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, sender, .CANCUN);
     defer evm.deinit();
-    
+
     // Simple contract creation bytecode (just returns empty code)
     const init_code = [_]u8{
-        0x60, 0x00, // PUSH1 0  
-        0x60, 0x00, // PUSH1 0  
-        0xF3,       // RETURN
+        0x60, 0x00, // PUSH1 0
+        0x60, 0x00, // PUSH1 0
+        0xF3, // RETURN
     };
-    
+
     // Execute CREATE transaction
     const call_params = DefaultEvm.CallParams{
         .create = .{
@@ -6462,10 +6462,10 @@ test "top-level CREATE increments sender nonce once" {
             .gas = 100000,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     // Verify nonce was incremented only once (not double-incremented)
     const account_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(initial_nonce + 1, account_after.nonce);
@@ -6473,11 +6473,11 @@ test "top-level CREATE increments sender nonce once" {
 
 test "failed CALL transaction still increments nonce" {
     const allocator = std.testing.allocator;
-    
+
     // Create test database
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Create sender account with insufficient balance
     const sender: primitives.Address = .{ .bytes = [_]u8{0x03} ++ @as([19]u8, @splat(0)) };
     const initial_nonce: u64 = 3;
@@ -6487,7 +6487,7 @@ test "failed CALL transaction still increments nonce" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6498,16 +6498,16 @@ test "failed CALL transaction still increments nonce" {
         .base_fee = 0,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, sender, .CANCUN);
     defer evm.deinit();
-    
+
     // Execute CALL with value transfer that will fail
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6518,10 +6518,10 @@ test "failed CALL transaction still increments nonce" {
             .gas = 100000,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(!result.success); // Transaction should fail
-    
+
     // Verify nonce was still incremented despite failure
     const account_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(initial_nonce + 1, account_after.nonce);
@@ -6529,11 +6529,11 @@ test "failed CALL transaction still increments nonce" {
 
 test "sequential transactions increment nonce correctly" {
     const allocator = std.testing.allocator;
-    
+
     // Create test database
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Create sender account
     const sender: primitives.Address = .{ .bytes = [_]u8{0x04} ++ @as([19]u8, @splat(0)) };
     const initial_nonce: u64 = 0;
@@ -6543,7 +6543,7 @@ test "sequential transactions increment nonce correctly" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6554,19 +6554,19 @@ test "sequential transactions increment nonce correctly" {
         .base_fee = 0,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    
+
     // Execute 3 CALL transactions
     var i: u32 = 0;
     while (i < 3) : (i += 1) {
         var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, sender, .CANCUN);
         defer evm.deinit();
-        
+
         const call_params = DefaultEvm.CallParams{
             .call = .{
                 .caller = sender,
@@ -6576,23 +6576,23 @@ test "sequential transactions increment nonce correctly" {
                 .gas = 100000,
             },
         };
-        
+
         const result = evm.call(call_params);
         try std.testing.expect(result.success);
     }
-    
+
     // Execute 2 CREATE transactions
     const init_code = [_]u8{
         0x60, 0x00, // PUSH1 0
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
-    
+
     i = 0;
     while (i < 2) : (i += 1) {
         var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, sender, .CANCUN);
         defer evm.deinit();
-        
+
         const call_params = DefaultEvm.CallParams{
             .create = .{
                 .caller = sender,
@@ -6601,11 +6601,11 @@ test "sequential transactions increment nonce correctly" {
                 .gas = 100000,
             },
         };
-        
+
         const result = evm.call(call_params);
         try std.testing.expect(result.success);
     }
-    
+
     // Verify final nonce is 5 (3 CALLs + 2 CREATEs)
     const account_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(@as(u64, 5), account_after.nonce);
@@ -6613,11 +6613,11 @@ test "sequential transactions increment nonce correctly" {
 
 test "nested calls don't increment origin nonce" {
     const allocator = std.testing.allocator;
-    
+
     // Create test database
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-    
+
     // Create sender account
     const sender: primitives.Address = .{ .bytes = [_]u8{0x05} ++ @as([19]u8, @splat(0)) };
     const initial_nonce: u64 = 10;
@@ -6627,33 +6627,33 @@ test "nested calls don't increment origin nonce" {
         .code_hash = @as([32]u8, @splat(0)),
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     // Create contract A that calls contract B
     // Contract A bytecode: PUSH20 <B_addr> PUSH1 0 PUSH1 0 PUSH1 0 PUSH1 0 PUSH1 0 PUSH1 0 CALL
     const contract_a_address: primitives.Address = .{ .bytes = [_]u8{0xA0} ++ @as([19]u8, @splat(0)) };
     const contract_b_address: primitives.Address = .{ .bytes = [_]u8{0xB0} ++ @as([19]u8, @splat(0)) };
-    
+
     // Contract A calls Contract B
     const contract_a_bytecode = [_]u8{0x73} ++ contract_b_address.bytes ++ // PUSH20 B_address
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (gas)
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (ret size)
-        [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (ret offset)  
+        [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (ret offset)
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (args size)
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (args offset)
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0 (value)
-        [_]u8{ 0x5A } ++ // GAS
-        [_]u8{ 0xF1 } ++ // CALL
+        [_]u8{0x5A} ++ // GAS
+        [_]u8{0xF1} ++ // CALL
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0
         [_]u8{ 0x60, 0x00 } ++ // PUSH1 0
-        [_]u8{ 0xF3 }; // RETURN
-    
+        [_]u8{0xF3}; // RETURN
+
     // Contract B just returns
     const contract_b_bytecode = [_]u8{
         0x60, 0x00, // PUSH1 0
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
-    
+
     const a_code_hash = try db.set_code(&contract_a_bytecode);
     try db.set_account(contract_a_address.bytes, Account{
         .balance = 0,
@@ -6661,7 +6661,7 @@ test "nested calls don't increment origin nonce" {
         .code_hash = a_code_hash,
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     const b_code_hash = try db.set_code(&contract_b_bytecode);
     try db.set_account(contract_b_address.bytes, Account{
         .balance = 0,
@@ -6669,7 +6669,7 @@ test "nested calls don't increment origin nonce" {
         .code_hash = b_code_hash,
         .storage_root = @as([32]u8, @splat(0)),
     });
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6680,16 +6680,16 @@ test "nested calls don't increment origin nonce" {
         .base_fee = 0,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, sender, .CANCUN);
     defer evm.deinit();
-    
+
     // Execute top-level call to Contract A (which calls Contract B)
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6700,10 +6700,10 @@ test "nested calls don't increment origin nonce" {
             .gas = 500000,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     // Verify nonce was incremented only once (for the top-level call)
     const account_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(initial_nonce + 1, account_after.nonce);
@@ -6712,13 +6712,13 @@ test "nested calls don't increment origin nonce" {
 test "Gas fees deducted from sender balance" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    
+
     const sender = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
     const coinbase = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
     const initial_balance: u256 = 1_000_000_000_000_000_000; // 1 ETH
     const gas_price: u256 = 20_000_000_000; // 20 gwei
     const gas_limit: u64 = 21_000;
-    
+
     // Set up sender account
     const sender_account = Account{
         .balance = initial_balance,
@@ -6728,7 +6728,7 @@ test "Gas fees deducted from sender balance" {
         .delegated_address = null,
     };
     try db.set_account(sender.bytes, sender_account);
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6739,16 +6739,16 @@ test "Gas fees deducted from sender balance" {
         .base_fee = 10_000_000_000, // 10 gwei
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = gas_limit,
         .coinbase = coinbase,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, gas_price, sender, .LONDON);
     defer evm.deinit();
-    
+
     // Execute simple transfer
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6759,20 +6759,20 @@ test "Gas fees deducted from sender balance" {
             .gas = gas_limit,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     // Verify gas was consumed
     const gas_consumed = gas_limit - result.gas_left;
     try std.testing.expect(gas_consumed > 0);
-    
+
     // Verify sender balance reduced by gas fees
     const sender_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     const expected_gas_fee = gas_price * @as(u256, @intCast(gas_consumed));
     const expected_balance = initial_balance - expected_gas_fee;
     try std.testing.expectEqual(expected_balance, sender_after.balance);
-    
+
     // Verify coinbase received priority fee (gas_price - base_fee) * gas_consumed
     const coinbase_after = db.get_account(coinbase.bytes) catch unreachable orelse unreachable;
     const priority_fee = gas_price - block_info.base_fee;
@@ -6783,13 +6783,13 @@ test "Gas fees deducted from sender balance" {
 test "Transaction fails if insufficient balance for gas" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    
+
     const sender = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
     const coinbase = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
     const gas_price: u256 = 20_000_000_000; // 20 gwei
     const gas_limit: u64 = 21_000;
     const insufficient_balance: u256 = 100; // Not enough for gas
-    
+
     // Set up sender account with insufficient balance
     const sender_account = Account{
         .balance = insufficient_balance,
@@ -6799,7 +6799,7 @@ test "Transaction fails if insufficient balance for gas" {
         .delegated_address = null,
     };
     try db.set_account(sender.bytes, sender_account);
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6810,16 +6810,16 @@ test "Transaction fails if insufficient balance for gas" {
         .base_fee = 10_000_000_000,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = gas_limit,
         .coinbase = coinbase,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, gas_price, sender, .LONDON);
     defer evm.deinit();
-    
+
     // Execute call
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6830,13 +6830,13 @@ test "Transaction fails if insufficient balance for gas" {
             .gas = gas_limit,
         },
     };
-    
+
     const result = evm.call(call_params);
-    
+
     // Transaction should fail due to insufficient gas
     try std.testing.expect(!result.success);
     try std.testing.expectEqual(@as(u64, 0), result.gas_left);
-    
+
     // Balance should remain unchanged
     const sender_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(insufficient_balance, sender_after.balance);
@@ -6845,14 +6845,14 @@ test "Transaction fails if insufficient balance for gas" {
 test "EIP-1559 correctly splits base fee and priority fee" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    
+
     const sender = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
     const coinbase = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
     const initial_balance: u256 = 1_000_000_000_000_000_000; // 1 ETH
     const base_fee: u256 = 10_000_000_000; // 10 gwei
     const gas_price: u256 = 15_000_000_000; // 15 gwei
     const gas_limit: u64 = 21_000;
-    
+
     // Set up sender account
     const sender_account = Account{
         .balance = initial_balance,
@@ -6862,7 +6862,7 @@ test "EIP-1559 correctly splits base fee and priority fee" {
         .delegated_address = null,
     };
     try db.set_account(sender.bytes, sender_account);
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6873,16 +6873,16 @@ test "EIP-1559 correctly splits base fee and priority fee" {
         .base_fee = base_fee,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = gas_limit,
         .coinbase = coinbase,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, gas_price, sender, .LONDON);
     defer evm.deinit();
-    
+
     // Execute simple call
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6893,37 +6893,37 @@ test "EIP-1559 correctly splits base fee and priority fee" {
             .gas = gas_limit,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     const gas_consumed = gas_limit - result.gas_left;
     const gas_consumed_u256: u256 = @intCast(gas_consumed);
-    
+
     // Verify sender loses full gas_price * gas_consumed
     const sender_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     const total_fee = gas_price * gas_consumed_u256;
     try std.testing.expectEqual(initial_balance - total_fee, sender_after.balance);
-    
+
     // Verify coinbase only receives priority fee (gas_price - base_fee) * gas_consumed
     const coinbase_after = db.get_account(coinbase.bytes) catch unreachable orelse unreachable;
     const priority_fee = gas_price - base_fee;
     const expected_coinbase_reward = priority_fee * gas_consumed_u256;
     try std.testing.expectEqual(expected_coinbase_reward, coinbase_after.balance);
-    
+
     // The base fee portion (base_fee * gas_consumed) is effectively burned
 }
 
 test "Pre-EIP-1559 all fees go to coinbase" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    
+
     const sender = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
     const coinbase = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
     const initial_balance: u256 = 1_000_000_000_000_000_000; // 1 ETH
     const gas_price: u256 = 20_000_000_000; // 20 gwei
     const gas_limit: u64 = 21_000;
-    
+
     // Set up sender account
     const sender_account = Account{
         .balance = initial_balance,
@@ -6933,7 +6933,7 @@ test "Pre-EIP-1559 all fees go to coinbase" {
         .delegated_address = null,
     };
     try db.set_account(sender.bytes, sender_account);
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -6944,17 +6944,17 @@ test "Pre-EIP-1559 all fees go to coinbase" {
         .base_fee = 0, // Pre-EIP-1559
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = gas_limit,
         .coinbase = coinbase,
         .chain_id = 1,
     };
-    
+
     // Use BERLIN hardfork (pre-EIP-1559)
     var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, gas_price, sender, .BERLIN);
     defer evm.deinit();
-    
+
     // Execute simple call
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -6965,18 +6965,18 @@ test "Pre-EIP-1559 all fees go to coinbase" {
             .gas = gas_limit,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     const gas_consumed = gas_limit - result.gas_left;
     const gas_consumed_u256: u256 = @intCast(gas_consumed);
-    
+
     // Verify sender loses gas_price * gas_consumed
     const sender_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     const total_fee = gas_price * gas_consumed_u256;
     try std.testing.expectEqual(initial_balance - total_fee, sender_after.balance);
-    
+
     // Verify coinbase receives ALL fees (no burning)
     const coinbase_after = db.get_account(coinbase.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(total_fee, coinbase_after.balance);
@@ -6985,13 +6985,13 @@ test "Pre-EIP-1559 all fees go to coinbase" {
 test "Zero gas price transactions work without balance changes" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    
+
     const sender = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
     const coinbase = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
     const initial_balance: u256 = 1_000_000_000_000_000_000; // 1 ETH
     const gas_price: u256 = 0; // Zero gas price
     const gas_limit: u64 = 21_000;
-    
+
     // Set up sender account
     const sender_account = Account{
         .balance = initial_balance,
@@ -7001,7 +7001,7 @@ test "Zero gas price transactions work without balance changes" {
         .delegated_address = null,
     };
     try db.set_account(sender.bytes, sender_account);
-    
+
     const block_info = BlockInfo{
         .chain_id = 1,
         .number = 1,
@@ -7012,16 +7012,16 @@ test "Zero gas price transactions work without balance changes" {
         .base_fee = 0,
         .prev_randao = @as([32]u8, @splat(0)),
     };
-    
+
     const context = TransactionContext{
         .gas_limit = gas_limit,
         .coinbase = coinbase,
         .chain_id = 1,
     };
-    
+
     var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, gas_price, sender, .CANCUN);
     defer evm.deinit();
-    
+
     // Execute simple call
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -7032,14 +7032,14 @@ test "Zero gas price transactions work without balance changes" {
             .gas = gas_limit,
         },
     };
-    
+
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-    
+
     // Verify no balance changes for gas fees
     const sender_after = db.get_account(sender.bytes) catch unreachable orelse unreachable;
     try std.testing.expectEqual(initial_balance, sender_after.balance);
-    
+
     // Verify coinbase received nothing
     const coinbase_after = db.get_account(coinbase.bytes) catch unreachable;
     if (coinbase_after) |acc| {

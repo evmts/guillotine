@@ -48,16 +48,16 @@ pub const OpSpecId = enum(u8) {
 
     /// True if `self` activates at or after `target` (op-revm `is_enabled_in`).
     pub fn isAtLeast(self: OpSpecId, target: OpSpecId) bool {
-        return @intFromEnum(self) >= @intFromEnum(target);
+        return @backingInt(self) >= @backingInt(target);
     }
 
     /// True if `self` activates before `target`.
     pub fn isBefore(self: OpSpecId, target: OpSpecId) bool {
-        return @intFromEnum(self) < @intFromEnum(target);
+        return @backingInt(self) < @backingInt(target);
     }
 
     pub fn toInt(self: OpSpecId) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 
     /// Lowercase name used by op-revm and chain configs (e.g. "jovian").

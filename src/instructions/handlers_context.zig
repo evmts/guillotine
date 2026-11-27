@@ -15,7 +15,7 @@ const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 /// opcode's static gas, already charged with its basic block, so the handler charges
 /// only the cold surcharge (2600 - 100) on first access.
 inline fn accessSurcharge(comptime opcode: Opcode, access_cost: u64) u64 {
-    return access_cost -| OPCODE_INFO[@intFromEnum(opcode)].gas_cost;
+    return access_cost -| OPCODE_INFO[@backingInt(opcode)].gas_cost;
 }
 
 /// Context opcode handlers for the EVM stack frame.
@@ -53,20 +53,27 @@ pub fn Handlers(FrameType: type) type {
             return N.next(self, opcode, cursor, s, gas_left);
         }
 
-        /// Write `length` bytes of `source`, starting at `offset`, to memory at `dest`.
+        const CopyRange = struct {
+            dest: usize,
+            source: []const u8,
+            offset: usize,
+            length: usize,
+        };
+
+        /// Write `range.length` bytes of `range.source`, starting at `range.offset`, to memory at `range.dest`.
         /// Bytes past the end of `source` read as zero, including every byte when
         /// `offset` lies beyond it. The caller has charged gas and grown memory over
         /// `[dest, dest + length)`. False when that range is not inside memory.
-        fn copyPadded(self: *FrameType, dest: usize, source: []const u8, offset: usize, length: usize) bool {
+        inline fn copyPadded(self: *FrameType, range: CopyRange) bool {
             const base: usize = self.memory.checkpoint;
             const bytes = self.memory.get_buffer_ref().items;
-            const start = std.math.add(usize, base, dest) catch return false;
-            const end = std.math.add(usize, start, length) catch return false;
+            const start = std.math.add(usize, base, range.dest) catch return false;
+            const end = std.math.add(usize, start, range.length) catch return false;
             if (end > bytes.len) return false;
             const target = bytes[start..end];
-            const copied = if (offset < source.len) @min(source.len - offset, length) else 0;
+            const copied = if (range.offset < range.source.len) @min(range.source.len - range.offset, range.length) else 0;
             // @memmove, like MCOPY: correct even if `source` were a view of this buffer.
-            if (copied != 0) @memmove(target[0..copied], source[offset..][0..copied]);
+            if (copied != 0) @memmove(target[0..copied], range.source[range.offset..][0..copied]);
             @memset(target[copied..], 0);
             return true;
         }
@@ -97,7 +104,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BALANCE requires 1 stack item");
             }
             const address_u256 = self.stack.peek_unsafe();
-            const addr = address_utils.fromWord(WordType,address_u256);
+            const addr = address_utils.fromWord(WordType, address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -240,7 +247,7 @@ pub fn Handlers(FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            if (!copyPadded(self, dest_offset_usize, self.calldata_slice, offset_usize, length_usize)) {
+            if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = self.calldata_slice, .offset = offset_usize, .length = length_usize })) {
                 return Error.OutOfBounds;
             }
 
@@ -313,7 +320,7 @@ pub fn Handlers(FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            if (!copyPadded(self, dest_offset_usize, self.code, offset_usize, length_usize)) {
+            if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = self.code, .offset = offset_usize, .length = length_usize })) {
                 return Error.OutOfBounds;
             }
 
@@ -337,7 +344,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODESIZE requires 1 stack item");
             }
             const address_u256 = self.stack.peek_unsafe();
-            const addr = address_utils.fromWord(WordType,address_u256);
+            const addr = address_utils.fromWord(WordType, address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -380,7 +387,7 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Third from top
             const length = self.stack.pop_unsafe(); // Fourth from top
 
-            const addr = address_utils.fromWord(WordType,address_u256);
+            const addr = address_utils.fromWord(WordType, address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -455,7 +462,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            if (!copyPadded(self, dest_offset_usize, code, offset_usize, length_usize)) {
+            if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = code, .offset = offset_usize, .length = length_usize })) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
@@ -471,7 +478,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODEHASH requires 1 stack item");
             }
             const address_u256 = self.stack.peek_unsafe();
-            const addr = address_utils.fromWord(WordType,address_u256);
+            const addr = address_utils.fromWord(WordType, address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -922,7 +929,7 @@ const MockEvm = struct {
     pub fn account_exists(self: *const MockEvm, address: Address) bool {
         _ = self;
         // Mock: all addresses exist except 0xFFFF...
-        const all_f = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable;
+        const all_f = Address{ .bytes = @as([20]u8, @splat(0xFF)) };
         return !address.eql(all_f);
     }
 

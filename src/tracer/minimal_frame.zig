@@ -55,7 +55,7 @@ pub const MinimalFrame = struct {
 
     // EIP-3074 AUTH state
     call_depth: u32,
-    
+
     // Active hardfork configuration for gas rules
     hardfork: Hardfork,
 
@@ -172,7 +172,7 @@ pub const MinimalFrame = struct {
     inline fn wordCount(bytes: u64) u64 {
         return (bytes + 31) / 32;
     }
-    
+
     /// Calculate word-aligned memory size for EVM compliance
     inline fn wordAlignedSize(bytes: u64) u32 {
         const words = wordCount(bytes);
@@ -301,30 +301,30 @@ pub const MinimalFrame = struct {
     /// Calculate CREATE gas cost (EIP-3860 aware)
     fn createGasCost(self: *const Self, init_code_size: u32) u64 {
         var gas_cost: u64 = GasConstants.CreateGas; // Base 32,000 gas
-        
+
         if (self.hardfork.isAtLeast(.SHANGHAI)) {
             @branchHint(.likely);
             const word_count = wordCount(@as(u64, init_code_size));
             gas_cost += word_count * GasConstants.InitcodeWordGas;
         }
-        
+
         return gas_cost;
     }
 
     /// Calculate CREATE2 gas cost (EIP-3860 aware)
     fn create2GasCost(self: *const Self, init_code_size: u32) u64 {
         var gas_cost: u64 = GasConstants.CreateGas; // Base 32,000 gas
-        
+
         // Keccak256 hash cost (always present for CREATE2)
         const word_count = wordCount(@as(u64, init_code_size));
         gas_cost += word_count * GasConstants.Keccak256WordGas;
-        
+
         if (self.hardfork.isAtLeast(.SHANGHAI)) {
             // Additional init code word cost
             @branchHint(.likely);
             gas_cost += word_count * GasConstants.InitcodeWordGas;
         }
-        
+
         return gas_cost;
     }
 
@@ -515,40 +515,40 @@ pub const MinimalFrame = struct {
             // LT
             0x10 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
-                try self.pushStack(if (a < b) 1 else 0);  // Compare a < b
+                const a = try self.popStack(); // Top of stack
+                const b = try self.popStack(); // Second from top
+                try self.pushStack(if (a < b) 1 else 0); // Compare a < b
                 self.pc += 1;
             },
 
             // GT
             0x11 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
-                try self.pushStack(if (a > b) 1 else 0);  // Compare a > b
+                const a = try self.popStack(); // Top of stack
+                const b = try self.popStack(); // Second from top
+                try self.pushStack(if (a > b) 1 else 0); // Compare a > b
                 self.pc += 1;
             },
 
             // SLT
             0x12 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
+                const a = try self.popStack(); // Top of stack
+                const b = try self.popStack(); // Second from top
                 const a_signed = @as(i256, @bitCast(a));
                 const b_signed = @as(i256, @bitCast(b));
-                try self.pushStack(if (a_signed < b_signed) 1 else 0);  // Compare a < b (signed)
+                try self.pushStack(if (a_signed < b_signed) 1 else 0); // Compare a < b (signed)
                 self.pc += 1;
             },
 
             // SGT
             0x13 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
+                const a = try self.popStack(); // Top of stack
+                const b = try self.popStack(); // Second from top
                 const a_signed = @as(i256, @bitCast(a));
                 const b_signed = @as(i256, @bitCast(b));
-                try self.pushStack(if (a_signed > b_signed) 1 else 0);  // Compare a > b (signed)
+                try self.pushStack(if (a_signed > b_signed) 1 else 0); // Compare a > b (signed)
                 self.pc += 1;
             },
 
@@ -1102,7 +1102,12 @@ pub const MinimalFrame = struct {
                 const is_cold = fork_gas.hasAccessLists(self.hardfork) and access_cost == GasConstants.ColdSloadCost;
 
                 // Same fork-aware metering as the Frame handler.
-                const cost = fork_gas.sstoreCost(self.hardfork, original_value, current_value, value, is_cold);
+                const cost = fork_gas.sstoreCostFor(self.hardfork, .{
+                    .original = original_value,
+                    .current = current_value,
+                    .new = value,
+                    .is_cold = is_cold,
+                });
                 try self.consumeGas(cost.gas);
 
                 if (cost.refund > 0) {
@@ -1126,7 +1131,7 @@ pub const MinimalFrame = struct {
 
                 // Validate jump destination
                 if (!self.valid_jumpdests.contains(dest_pc)) return error.InvalidJump;
-                
+
                 self.pc = dest_pc;
             },
 
@@ -1297,7 +1302,7 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
-                
+
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 // Init code is read from memory: charge expansion over [offset, offset+len)
                 // (nothing for zero length, whatever the offset).
@@ -1649,7 +1654,7 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
                 const salt = try self.popStack();
-                
+
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 // Init code is read from memory: charge expansion over [offset, offset+len)
                 // (nothing for zero length, whatever the offset).
@@ -2050,11 +2055,11 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 1: Valid JUMP to JUMPDEST
     {
         const bytecode = [_]u8{
-            0x60, 0x04,  // PUSH1 4
-            0x56,        // JUMP (pc=2)
-            0xFE,        // INVALID (pc=3) - should be skipped
-            0x5b,        // JUMPDEST (pc=4) - valid destination
-            0x00,        // STOP (pc=5)
+            0x60, 0x04, // PUSH1 4
+            0x56, // JUMP (pc=2)
+            0xFE, // INVALID (pc=3) - should be skipped
+            0x5b, // JUMPDEST (pc=4) - valid destination
+            0x00, // STOP (pc=5)
         };
 
         var frame = try MinimalFrame.init(
@@ -2079,11 +2084,11 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 2: Invalid JUMP (not to JUMPDEST)
     {
         const bytecode = [_]u8{
-            0x60, 0x03,  // PUSH1 3 - invalid destination
-            0x56,        // JUMP (pc=2)
-            0xFE,        // INVALID (pc=3) - not a JUMPDEST
-            0x5b,        // JUMPDEST (pc=4)
-            0x00,        // STOP
+            0x60, 0x03, // PUSH1 3 - invalid destination
+            0x56, // JUMP (pc=2)
+            0xFE, // INVALID (pc=3) - not a JUMPDEST
+            0x5b, // JUMPDEST (pc=4)
+            0x00, // STOP
         };
 
         var frame = try MinimalFrame.init(
@@ -2107,12 +2112,12 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 3: Valid JUMPI with true condition
     {
         const bytecode = [_]u8{
-            0x60, 0x01,  // PUSH1 1 - true condition
-            0x60, 0x06,  // PUSH1 6 - destination (top of stack)
-            0x57,        // JUMPI (pc=4)
-            0xFE,        // INVALID (pc=5) - should be skipped
-            0x5b,        // JUMPDEST (pc=6) - valid destination
-            0x00,        // STOP
+            0x60, 0x01, // PUSH1 1 - true condition
+            0x60, 0x06, // PUSH1 6 - destination (top of stack)
+            0x57, // JUMPI (pc=4)
+            0xFE, // INVALID (pc=5) - should be skipped
+            0x5b, // JUMPDEST (pc=6) - valid destination
+            0x00, // STOP
         };
 
         var frame = try MinimalFrame.init(
@@ -2137,11 +2142,11 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 4: JUMPI with false condition (no jump)
     {
         const bytecode = [_]u8{
-            0x60, 0x00,  // PUSH1 0 - false condition
-            0x60, 0x06,  // PUSH1 6 - destination (top of stack)
-            0x57,        // JUMPI (pc=4)
-            0x00,        // STOP (pc=5) - should execute this
-            0x5b,        // JUMPDEST (pc=6)
+            0x60, 0x00, // PUSH1 0 - false condition
+            0x60, 0x06, // PUSH1 6 - destination (top of stack)
+            0x57, // JUMPI (pc=4)
+            0x00, // STOP (pc=5) - should execute this
+            0x5b, // JUMPDEST (pc=6)
         };
 
         var frame = try MinimalFrame.init(
@@ -2166,11 +2171,11 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 5: Invalid JUMPI to non-JUMPDEST
     {
         const bytecode = [_]u8{
-            0x60, 0x01,  // PUSH1 1 - true condition
-            0x60, 0x05,  // PUSH1 5 - invalid destination (top of stack)
-            0x57,        // JUMPI (pc=4)
-            0xFE,        // INVALID (pc=5) - not a JUMPDEST
-            0x5b,        // JUMPDEST (pc=6)
+            0x60, 0x01, // PUSH1 1 - true condition
+            0x60, 0x05, // PUSH1 5 - invalid destination (top of stack)
+            0x57, // JUMPI (pc=4)
+            0xFE, // INVALID (pc=5) - not a JUMPDEST
+            0x5b, // JUMPDEST (pc=6)
         };
 
         var frame = try MinimalFrame.init(
@@ -2194,10 +2199,10 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 6: Jump destination inside PUSH data should fail
     {
         const bytecode = [_]u8{
-            0x60, 0x03,  // PUSH1 3 - trying to jump into PUSH data
-            0x56,        // JUMP (pc=2)
-            0x60, 0x5b,  // PUSH1 0x5b (pc=3,4) - the 0x5b at pc=4 looks like JUMPDEST but it's data!
-            0x00,        // STOP
+            0x60, 0x03, // PUSH1 3 - trying to jump into PUSH data
+            0x56, // JUMP (pc=2)
+            0x60, 0x5b, // PUSH1 0x5b (pc=3,4) - the 0x5b at pc=4 looks like JUMPDEST but it's data!
+            0x00, // STOP
         };
 
         var frame = try MinimalFrame.init(
@@ -2227,9 +2232,15 @@ test "callMemoryExpansionCost - basic functionality" {
     defer evm.deinit();
 
     evm.setBlockchainContext(
-        1, 100, 1000, 1, 1,
+        1,
+        100,
+        1000,
+        1,
+        1,
         Address{ .bytes = @splat(0) },
-        30000000, 1, 1,
+        30000000,
+        1,
+        1,
     );
     evm.setTransactionContext(Address{ .bytes = @splat(0) }, 1);
 
@@ -2397,9 +2408,15 @@ test "callMemoryExpansionCost - overflow protection" {
     defer evm.deinit();
 
     evm.setBlockchainContext(
-        1, 100, 1000, 1, 1,
+        1,
+        100,
+        1000,
+        1,
+        1,
         Address{ .bytes = @splat(0) },
-        30000000, 1, 1,
+        30000000,
+        1,
+        1,
     );
     evm.setTransactionContext(Address{ .bytes = @splat(0) }, 1);
 

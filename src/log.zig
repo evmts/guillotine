@@ -320,7 +320,7 @@ pub fn before_instruction(frame: anytype, comptime opcode: @import("opcodes/opco
                         .DUP14 => 14,
                         .DUP15 => 15,
                         .DUP16 => 16,
-                        else => unreachable,
+                        else => @compileError("expected DUP opcode"),
                     };
                     if (stack_size >= dup_pos) {
                         const value = stack_ptr[dup_pos - 1];
@@ -359,7 +359,7 @@ pub fn before_instruction(frame: anytype, comptime opcode: @import("opcodes/opco
                         .SWAP14 => 14,
                         .SWAP15 => 15,
                         .SWAP16 => 16,
-                        else => unreachable,
+                        else => @compileError("expected SWAP opcode"),
                     };
                     if (stack_size > swap_pos) {
                         const top = stack_ptr[0];

@@ -68,6 +68,7 @@ export default defineConfig({
         { text: 'State and journaling', link: '/guides/state' },
         { text: 'Tracing and debugging', link: '/guides/tracing' },
         { text: 'Testing and verification', link: '/guides/testing-and-verification' },
+        { text: 'TigerStyle and safety guarantees', link: '/guides/tigerstyle' },
         { text: 'Benchmarks and native JIT', link: '/guides/benchmarks-and-jit' },
         { text: 'Language bindings', link: '/guides/bindings' },
         { text: 'Publishing and releases', link: '/guides/publishing' },

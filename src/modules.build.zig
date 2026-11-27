@@ -120,7 +120,6 @@ pub fn createModules(
     lib_mod.addImport("compilers", compilers_mod);
     lib_mod.addImport("trie", trie_mod);
 
-
     // Executable module
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

@@ -425,6 +425,7 @@ Detailed documentation is available in `docs/`:
   - [GAS-METERING.md](docs/dev/GAS-METERING.md) - Gas calculation patterns
   - [TESTING.md](docs/dev/TESTING.md) - Test organization and debugging
   - [HARDFORKS.md](docs/dev/HARDFORKS.md) - EIP support matrix
+  - [TIGERSTYLE.md](docs/dev/TIGERSTYLE.md) - Safety guarantees, `ReleaseSafe`, EVM pooling, recursion & dependencies
   - [CONTRIBUTING.md](docs/dev/CONTRIBUTING.md) - Development workflow
 - **[docs/performance/](docs/performance/)** - Performance EVM specifics
 - **[docs/mini/](docs/mini/)** - Mini EVM specifics

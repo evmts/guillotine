@@ -546,7 +546,7 @@ test "HttpTransport rate limiter blocks excessive requests" {
 
 test "HttpTransport 429 status code detection" {
     const status: http.Status = .too_many_requests;
-    try std.testing.expectEqual(@as(u16, 429), @intFromEnum(status));
+    try std.testing.expectEqual(@as(u16, 429), @backingInt(status));
 }
 
 test "HttpTransport transient error classification includes rate limit" {

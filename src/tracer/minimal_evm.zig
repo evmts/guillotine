@@ -426,7 +426,7 @@ pub const MinimalEvm = struct {
         address: Address,
         value: u256,
         calldata: []const u8,
-    ) Error!CallResult {        
+    ) Error!CallResult {
         // Pre-warm transaction, including precompiles depending on hardfork
         try self.pre_warm_transaction(address);
 
@@ -483,7 +483,7 @@ pub const MinimalEvm = struct {
             // The refund cap should be based on total gas used, not just execution gas
             const execution_gas_used = if (execution_gas_limit > gas_left) execution_gas_limit - gas_left else 0;
             const total_gas_used = GasConstants.TxGas + execution_gas_used;
-            
+
             // Pre-London: refund up to half of gas used; post-London: refund up to one fifth of gas used
             const capped_refund = if (self.hardfork.isBefore(.LONDON)) blk: {
                 @branchHint(.cold);
@@ -492,7 +492,7 @@ pub const MinimalEvm = struct {
                 @branchHint(.likely);
                 break :blk @min(self.gas_refund, total_gas_used / 5);
             };
-            
+
             // Apply the refund
             gas_left = gas_left + capped_refund;
             self.gas_refund = 0;

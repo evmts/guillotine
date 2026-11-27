@@ -394,11 +394,11 @@ test "block info prev_randao variations" {
         @as([32]u8, @splat(0)),
         @as([32]u8, @splat(0xFF)),
         comptime repeat: {
-        const pattern = [_]u8{ 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF };
-        var out: [8 * 4]u8 = undefined;
-        for (&out, 0..) |*byte, i| byte.* = pattern[i % pattern.len];
-        break :repeat out;
-    },
+            const pattern = [_]u8{ 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF };
+            var out: [8 * 4]u8 = undefined;
+            for (&out, 0..) |*byte, i| byte.* = pattern[i % pattern.len];
+            break :repeat out;
+        },
     };
 
     for (randao_values) |randao| {

@@ -226,7 +226,7 @@ pub const GrowingArenaAllocator = struct {
             if (self.tracer) |t| {
                 const Tracer = @import("tracer/tracer.zig").Tracer;
                 const tracer_ptr = @as(*Tracer, @ptrCast(@alignCast(t)));
-                const align_value = @intFromEnum(ptr_align);
+                const align_value = @backingInt(ptr_align);
                 tracer_ptr.onArenaAlloc(len, align_value, self.current_capacity);
             }
 
@@ -315,7 +315,7 @@ pub const GrowingArenaAllocator = struct {
             if (self.tracer) |t| {
                 const Tracer = @import("tracer/tracer.zig").Tracer;
                 const tracer_ptr = @as(*Tracer, @ptrCast(@alignCast(t)));
-                const align_value = @intFromEnum(ptr_align);
+                const align_value = @backingInt(ptr_align);
                 tracer_ptr.onArenaAlloc(len, align_value, self.current_capacity);
             }
         } else {
@@ -357,15 +357,15 @@ test "GrowingArenaAllocator basic functionality" {
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
-    
+
     // Test basic allocation
     const data1 = try alloc.alloc(u8, 100);
     data1[0] = 42;
-    
+
     // Test larger allocation that might trigger growth
     const data2 = try alloc.alloc(u8, 2000);
     data2[0] = 43;
-    
+
     // Verify data is still accessible
     try std.testing.expectEqual(@as(u8, 42), data1[0]);
     try std.testing.expectEqual(@as(u8, 43), data2[0]);
@@ -376,14 +376,14 @@ test "GrowingArenaAllocator growth strategy" {
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
-    
+
     // Initial capacity should be around 1000
     const initial_cap = gaa.queryCapacity();
     try std.testing.expect(initial_cap >= 1000);
-    
+
     // Allocate enough to trigger growth
     _ = try alloc.alloc(u8, 1500);
-    
+
     // Capacity should have grown by at least 50%
     const new_cap = gaa.queryCapacity();
     try std.testing.expect(new_cap >= 1500);

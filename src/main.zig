@@ -25,6 +25,5 @@ test "simple test" {
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
-
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("Guillotine_lib");

@@ -31,10 +31,7 @@ pub const TrieIterator = struct {
 
         // Initialize with root if it exists
         if (builder.root_hash) |root| {
-            const hash_str = try bytes_to_hex_string(allocator, &root);
-            defer allocator.free(hash_str);
-
-            if (builder.nodes.get(hash_str)) |root_node| {
+            if (builder.nodes.get(root)) |root_node| {
                 const path = try allocator.alloc(u8, 0);
                 try stack.append(allocator, StackItem{
                     .node = root_node,
@@ -112,13 +109,9 @@ pub const TrieIterator = struct {
                     // Get next node
                     const next_node = switch (extension.next) {
                         .Raw => return TrieError.InvalidNode,
-                        .Hash => |hash| blk: {
-                            const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                            defer self.allocator.free(hash_str);
-                            break :blk self.builder.nodes.get(hash_str) orelse {
-                                self.allocator.free(new_path);
-                                return TrieError.NonExistentNode;
-                            };
+                        .Hash => |hash| self.builder.nodes.get(hash) orelse {
+                            self.allocator.free(new_path);
+                            return TrieError.NonExistentNode;
                         },
                     };
 
@@ -170,10 +163,7 @@ pub const TrieIterator = struct {
                                 },
                                 .Hash => |hash| {
                                     // Get the child node
-                                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                                    defer self.allocator.free(hash_str);
-
-                                    const child_node = self.builder.nodes.get(hash_str) orelse {
+                                    const child_node = self.builder.nodes.get(hash) orelse {
                                         self.allocator.free(new_path);
                                         return TrieError.NonExistentNode;
                                     };
@@ -210,38 +200,32 @@ pub const TrieIterator = struct {
 /// Complete Patricia Merkle Trie implementation with safe memory management
 pub const HashBuilder = struct {
     allocator: Allocator,
-    // Store nodes by their hash (hex encoded) - safer than complex pointer management
-    nodes: std.StringHashMap(TrieNode),
+    // Store nodes by their 32-byte Keccak hash directly (zero hex-string heap allocations).
+    nodes: std.AutoHashMap([32]u8, TrieNode),
     // The root node's hash (if built)
     root_hash: ?[32]u8,
 
     pub fn init(allocator: Allocator) HashBuilder {
         return HashBuilder{
             .allocator = allocator,
-            .nodes = std.StringHashMap(TrieNode).init(allocator),
+            .nodes = std.AutoHashMap([32]u8, TrieNode).init(allocator),
             .root_hash = null,
         };
     }
 
     pub fn deinit(self: *HashBuilder) void {
-        // Clean up all nodes
-        var it = self.nodes.iterator();
-        while (it.next()) |entry| {
-            // Free the hash key string
-            self.allocator.free(entry.key_ptr.*);
-            // Deinit the node
-            var node = entry.value_ptr.*;
+        var it = self.nodes.valueIterator();
+        while (it.next()) |node_ptr| {
+            var node = node_ptr.*;
             node.deinit(self.allocator);
         }
         self.nodes.deinit();
     }
 
     pub fn reset(self: *HashBuilder) void {
-        // Clean up all nodes
-        var it = self.nodes.iterator();
-        while (it.next()) |entry| {
-            self.allocator.free(entry.key_ptr.*);
-            var node = entry.value_ptr.*;
+        var it = self.nodes.valueIterator();
+        while (it.next()) |node_ptr| {
+            var node = node_ptr.*;
             node.deinit(self.allocator);
         }
         self.nodes.clearRetainingCapacity();
@@ -251,69 +235,51 @@ pub const HashBuilder = struct {
 
     /// Store a node and return its hash
     fn store_node(self: *HashBuilder, node: TrieNode) HashBuilderError![32]u8 {
-        // Calculate the hash
         const hash = try node.hash(self.allocator);
-        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-        errdefer self.allocator.free(hash_str);
 
-        // Check if we already have this node
-        if (self.nodes.contains(hash_str)) {
-            self.allocator.free(hash_str);
+        if (self.nodes.contains(hash)) {
             var duplicate = node;
             duplicate.deinit(self.allocator);
             return hash;
         }
 
-        // Store the node
-        try self.nodes.put(hash_str, node);
+        try self.nodes.put(hash, node);
         return hash;
     }
 
     /// Add a key-value pair to the trie
     pub fn insert(self: *HashBuilder, key: []const u8, value: []const u8) HashBuilderError!void {
-        // Convert key to nibbles
         const nibbles = try trie.key_to_nibbles(self.allocator, key);
         defer self.allocator.free(nibbles);
 
-        // Get or create root
-        const root_node = if (self.root_hash) |hash| blk: {
-            const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-            defer self.allocator.free(hash_str);
-            break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-        } else TrieNode{ .Empty = {} };
+        const root_node = if (self.root_hash) |hash|
+            self.nodes.get(hash) orelse return TrieError.NonExistentNode
+        else
+            TrieNode{ .Empty = {} };
 
-        // Insert into the trie
         const new_root = try self.insert_node(root_node, nibbles, value);
-
-        // Store the new root and update hash
         self.root_hash = try self.store_node(new_root);
     }
 
     /// Get a value from the trie
     pub fn get(self: *HashBuilder, key: []const u8) HashBuilderError!?[]const u8 {
-        if (self.root_hash == null) return null;
+        const root = self.root_hash orelse return null;
 
         const nibbles = try trie.key_to_nibbles(self.allocator, key);
         defer self.allocator.free(nibbles);
 
-        const hash_str = try bytes_to_hex_string(self.allocator, &self.root_hash.?);
-        defer self.allocator.free(hash_str);
-
-        const root_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+        const root_node = self.nodes.get(root) orelse return TrieError.NonExistentNode;
         return try self.get_value(root_node, nibbles);
     }
 
     /// Delete a key-value pair from the trie
     pub fn delete(self: *HashBuilder, key: []const u8) HashBuilderError!void {
-        if (self.root_hash == null) return;
+        const root = self.root_hash orelse return;
 
         const nibbles = try trie.key_to_nibbles(self.allocator, key);
         defer self.allocator.free(nibbles);
 
-        const hash_str = try bytes_to_hex_string(self.allocator, &self.root_hash.?);
-        defer self.allocator.free(hash_str);
-
-        const root_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+        const root_node = self.nodes.get(root) orelse return TrieError.NonExistentNode;
 
         const result = try self.delete_node(root_node, nibbles);
         if (result) |new_root| {
@@ -334,36 +300,180 @@ pub const HashBuilder = struct {
         return try TrieIterator.init(allocator, self);
     }
 
-    // Internal implementation methods
+    const TraversalFrame = union(enum) {
+        extension: []const u8,
+        branch: struct {
+            node: BranchNode,
+            key: u8,
+        },
 
-    fn insert_node(self: *HashBuilder, node: TrieNode, nibbles: []const u8, value: []const u8) HashBuilderError!TrieNode {
-        switch (node) {
-            .Empty => {
-                // Create new leaf
-                const path_copy = try self.allocator.dupe(u8, nibbles);
-                const value_copy = try self.allocator.dupe(u8, value);
-                const leaf = try LeafNode.init(self.allocator, path_copy, HashValue{ .Raw = value_copy });
-                return TrieNode{ .Leaf = leaf };
-            },
-            .Leaf => |leaf| {
-                if (std.mem.eql(u8, leaf.nibbles, nibbles)) {
-                    // Replace value
-                    const path_copy = try self.allocator.dupe(u8, nibbles);
-                    const value_copy = try self.allocator.dupe(u8, value);
-                    const new_leaf = try LeafNode.init(self.allocator, path_copy, HashValue{ .Raw = value_copy });
-                    return TrieNode{ .Leaf = new_leaf };
-                }
-
-                // Split the leaf
-                return try self.split_leaf(leaf, nibbles, value);
-            },
-            .Extension => |extension| {
-                return try self.insert_into_extension(extension, nibbles, value);
-            },
-            .Branch => |branch| {
-                return try self.insert_into_branch(branch, nibbles, value);
-            },
+        fn deinit(self: *TraversalFrame, allocator: Allocator) void {
+            switch (self.*) {
+                .extension => {},
+                .branch => |*b| b.node.deinit(allocator),
+            }
         }
+    };
+
+    fn deinitFrames(self: *HashBuilder, frames: *std.ArrayList(TraversalFrame)) void {
+        for (frames.items) |*frame| frame.deinit(self.allocator);
+        frames.deinit(self.allocator);
+    }
+
+    /// Iteratively insert a key-value pair (descent + bottom-up rebuild, zero recursion).
+    fn insert_node(self: *HashBuilder, start_node: TrieNode, start_nibbles: []const u8, value: []const u8) HashBuilderError!TrieNode {
+        var frames = std.ArrayList(TraversalFrame).empty;
+        errdefer self.deinitFrames(&frames);
+
+        var cur_node = start_node;
+        var remaining = start_nibbles;
+        const max_steps: usize = start_nibbles.len + 2;
+        var steps: usize = 0;
+
+        var rebuilt: TrieNode = undefined;
+        var have_rebuilt = false;
+
+        while (steps < max_steps) : (steps += 1) {
+            switch (cur_node) {
+                .Empty => {
+                    const path_copy = try self.allocator.dupe(u8, remaining);
+                    const value_copy = try self.allocator.dupe(u8, value);
+                    const leaf = try LeafNode.init(self.allocator, path_copy, HashValue{ .Raw = value_copy });
+                    rebuilt = TrieNode{ .Leaf = leaf };
+                    have_rebuilt = true;
+                    break;
+                },
+                .Leaf => |leaf| {
+                    if (std.mem.eql(u8, leaf.nibbles, remaining)) {
+                        const path_copy = try self.allocator.dupe(u8, remaining);
+                        const value_copy = try self.allocator.dupe(u8, value);
+                        const new_leaf = try LeafNode.init(self.allocator, path_copy, HashValue{ .Raw = value_copy });
+                        rebuilt = TrieNode{ .Leaf = new_leaf };
+                    } else {
+                        rebuilt = try self.split_leaf(leaf, remaining, value);
+                    }
+                    have_rebuilt = true;
+                    break;
+                },
+                .Extension => |extension| {
+                    const common_len = common_prefix_length(extension.nibbles, remaining);
+                    if (common_len == extension.nibbles.len) {
+                        const next_node = switch (extension.next) {
+                            .Raw => return TrieError.InvalidNode,
+                            .Hash => |hash| self.nodes.get(hash) orelse return TrieError.NonExistentNode,
+                        };
+                        try frames.append(self.allocator, .{ .extension = extension.nibbles });
+                        cur_node = next_node;
+                        remaining = remaining[common_len..];
+                    } else {
+                        rebuilt = try self.split_extension(extension, remaining, value, common_len);
+                        have_rebuilt = true;
+                        break;
+                    }
+                },
+                .Branch => |branch| {
+                    var new_branch = try branch.dupe(self.allocator);
+                    errdefer new_branch.deinit(self.allocator);
+
+                    if (remaining.len == 0) {
+                        if (new_branch.value) |*old_value| old_value.deinit(self.allocator);
+                        new_branch.value = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
+                        rebuilt = TrieNode{ .Branch = new_branch };
+                        have_rebuilt = true;
+                        break;
+                    }
+
+                    const key = remaining[0];
+                    const tail = remaining[1..];
+                    if (new_branch.children_mask.is_set(@intCast(key))) {
+                        const child = new_branch.children[key].?;
+                        if (child == .Hash) {
+                            const next_node = self.nodes.get(child.Hash) orelse return TrieError.NonExistentNode;
+                            try frames.append(self.allocator, .{ .branch = .{ .node = new_branch, .key = key } });
+                            cur_node = next_node;
+                            remaining = tail;
+                            continue;
+                        }
+                        rebuilt = try self.insert_branch_raw_child(&new_branch, key, child.Raw, tail, value);
+                        have_rebuilt = true;
+                        break;
+                    }
+
+                    if (tail.len == 0) {
+                        new_branch.children[key] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
+                    } else {
+                        const leaf = try LeafNode.init(
+                            self.allocator,
+                            try self.allocator.dupe(u8, tail),
+                            HashValue{ .Raw = try self.allocator.dupe(u8, value) },
+                        );
+                        const leaf_hash = try self.store_node(TrieNode{ .Leaf = leaf });
+                        new_branch.children[key] = HashValue{ .Hash = leaf_hash };
+                    }
+                    new_branch.children_mask.set(@intCast(key));
+                    rebuilt = TrieNode{ .Branch = new_branch };
+                    have_rebuilt = true;
+                    break;
+                },
+            }
+        }
+        if (!have_rebuilt) return TrieError.InvalidNode;
+
+        while (frames.pop()) |frame| {
+            errdefer rebuilt.deinit(self.allocator);
+            switch (frame) {
+                .extension => |ext_nibbles| {
+                    const updated_hash = try self.store_node(rebuilt);
+                    const path_copy = try self.allocator.dupe(u8, ext_nibbles);
+                    const new_ext = try ExtensionNode.init(self.allocator, path_copy, HashValue{ .Hash = updated_hash });
+                    rebuilt = TrieNode{ .Extension = new_ext };
+                },
+                .branch => |b| {
+                    var branch_node = b.node;
+                    errdefer branch_node.deinit(self.allocator);
+                    const updated_hash = try self.store_node(rebuilt);
+                    branch_node.children[b.key].?.deinit(self.allocator);
+                    branch_node.children[b.key] = HashValue{ .Hash = updated_hash };
+                    rebuilt = TrieNode{ .Branch = branch_node };
+                },
+            }
+        }
+        frames.deinit(self.allocator);
+        return rebuilt;
+    }
+
+    fn insert_branch_raw_child(
+        self: *HashBuilder,
+        new_branch: *BranchNode,
+        key: u8,
+        existing_data: []const u8,
+        remaining_path: []const u8,
+        value: []const u8,
+    ) HashBuilderError!TrieNode {
+        if (remaining_path.len == 0) {
+            const replacement = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
+            new_branch.children[key].?.deinit(self.allocator);
+            new_branch.children[key] = replacement;
+            return TrieNode{ .Branch = new_branch.* };
+        }
+
+        var sub_branch = BranchNode.init();
+        errdefer sub_branch.deinit(self.allocator);
+        if (remaining_path.len == 1) {
+            sub_branch.children[remaining_path[0]] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
+            sub_branch.children_mask.set(@intCast(remaining_path[0]));
+        } else {
+            const leaf_path = try self.allocator.dupe(u8, remaining_path[1..]);
+            const new_leaf = try LeafNode.init(self.allocator, leaf_path, HashValue{ .Raw = try self.allocator.dupe(u8, value) });
+            const leaf_hash = try self.store_node(TrieNode{ .Leaf = new_leaf });
+            sub_branch.children[remaining_path[0]] = HashValue{ .Hash = leaf_hash };
+            sub_branch.children_mask.set(@intCast(remaining_path[0]));
+        }
+        sub_branch.value = HashValue{ .Raw = try self.allocator.dupe(u8, existing_data) };
+        const updated_hash = try self.store_node(TrieNode{ .Branch = sub_branch });
+        new_branch.children[key].?.deinit(self.allocator);
+        new_branch.children[key] = HashValue{ .Hash = updated_hash };
+        return TrieNode{ .Branch = new_branch.* };
     }
 
     fn split_leaf(self: *HashBuilder, leaf: LeafNode, nibbles: []const u8, value: []const u8) HashBuilderError!TrieNode {
@@ -459,38 +569,6 @@ pub const HashBuilder = struct {
         }
     }
 
-    fn insert_into_extension(self: *HashBuilder, extension: ExtensionNode, nibbles: []const u8, value: []const u8) HashBuilderError!TrieNode {
-        const common_len = common_prefix_length(extension.nibbles, nibbles);
-
-        if (common_len == extension.nibbles.len) {
-            // Extension is prefix of path, continue with next node
-            const remaining_path = nibbles[common_len..];
-
-            // Get next node
-            const next_node = switch (extension.next) {
-                .Raw => return TrieError.InvalidNode,
-                .Hash => |hash| blk: {
-                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                    defer self.allocator.free(hash_str);
-                    break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                },
-            };
-
-            // Insert into next node
-            const updated_node = try self.insert_node(next_node, remaining_path, value);
-            const updated_hash = try self.store_node(updated_node);
-
-            // Create new extension with updated next
-            const path_copy = try self.allocator.dupe(u8, extension.nibbles);
-            const new_extension = try ExtensionNode.init(self.allocator, path_copy, HashValue{ .Hash = updated_hash });
-
-            return TrieNode{ .Extension = new_extension };
-        } else {
-            // Split the extension
-            return try self.split_extension(extension, nibbles, value, common_len);
-        }
-    }
-
     fn split_extension(self: *HashBuilder, extension: ExtensionNode, nibbles: []const u8, value: []const u8, common_len: usize) HashBuilderError!TrieNode {
         // Create branch at split point
         var branch = BranchNode.init();
@@ -528,7 +606,6 @@ pub const HashBuilder = struct {
         }
 
         if (common_len > 0) {
-            // Create new extension
             const branch_node = TrieNode{ .Branch = branch };
             const branch_hash = try self.store_node(branch_node);
 
@@ -541,271 +618,209 @@ pub const HashBuilder = struct {
         }
     }
 
-    fn insert_into_branch(self: *HashBuilder, branch: BranchNode, nibbles: []const u8, value: []const u8) HashBuilderError!TrieNode {
-        var new_branch = try branch.dupe(self.allocator);
+    /// Iteratively look up a key in the trie (zero recursion, zero heap allocations).
+    fn get_value(self: *const HashBuilder, start_node: TrieNode, start_nibbles: []const u8) HashBuilderError!?[]const u8 {
+        var cur_node = start_node;
+        var remaining = start_nibbles;
+        const max_steps: usize = start_nibbles.len + 2;
+        var steps: usize = 0;
 
-        if (nibbles.len == 0) {
-            // Set branch value
-            if (new_branch.value) |*old_value| {
-                old_value.deinit(self.allocator);
+        while (steps < max_steps) : (steps += 1) {
+            switch (cur_node) {
+                .Empty => return null,
+                .Leaf => |leaf| {
+                    if (!std.mem.eql(u8, leaf.nibbles, remaining)) return null;
+                    return switch (leaf.value) {
+                        .Raw => |data| data,
+                        .Hash => TrieError.InvalidNode,
+                    };
+                },
+                .Extension => |extension| {
+                    if (remaining.len < extension.nibbles.len) return null;
+                    if (!std.mem.eql(u8, extension.nibbles, remaining[0..extension.nibbles.len])) return null;
+                    cur_node = switch (extension.next) {
+                        .Raw => return TrieError.InvalidNode,
+                        .Hash => |hash| self.nodes.get(hash) orelse return TrieError.NonExistentNode,
+                    };
+                    remaining = remaining[extension.nibbles.len..];
+                },
+                .Branch => |branch| {
+                    if (remaining.len == 0) {
+                        const value = branch.value orelse return null;
+                        return switch (value) {
+                            .Raw => |data| data,
+                            .Hash => TrieError.InvalidNode,
+                        };
+                    }
+                    const key = remaining[0];
+                    if (!branch.children_mask.is_set(@intCast(key))) return null;
+                    const child = branch.children[key].?;
+                    switch (child) {
+                        .Raw => |data| return if (remaining.len == 1) data else null,
+                        .Hash => |hash| {
+                            cur_node = self.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                            remaining = remaining[1..];
+                        },
+                    }
+                },
             }
-            new_branch.value = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
-            return TrieNode{ .Branch = new_branch };
         }
+        return TrieError.InvalidNode;
+    }
 
-        const key = nibbles[0];
-        const remaining_path = nibbles[1..];
+    /// Iteratively delete a key from the trie (descent + bottom-up canonical collapse, zero recursion).
+    fn delete_node(self: *HashBuilder, start_node: TrieNode, start_nibbles: []const u8) HashBuilderError!?TrieNode {
+        var frames = std.ArrayList(TraversalFrame).empty;
+        errdefer self.deinitFrames(&frames);
 
-        if (new_branch.children_mask.is_set(@intCast(key))) {
-            // Update existing child
-            const child = new_branch.children[key].?;
-            if (child == .Raw and remaining_path.len == 0) {
-                // The key ends at this slot. Keep the value inline, as split_leaf,
-                // split_extension and a new child store it, so the node (and the
-                // root hash) does not depend on whether the key was overwritten.
-                const replacement = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
-                new_branch.children[key].?.deinit(self.allocator);
-                new_branch.children[key] = replacement;
-                return TrieNode{ .Branch = new_branch };
-            }
-            const updated_node = switch (child) {
-                .Raw => |data| blk: {
-                    // The key continues past this slot: the inline value moves into a
-                    // new branch's value and the new key goes below it.
-                    var sub_branch = BranchNode.init();
+        var cur_node = start_node;
+        var remaining = start_nibbles;
+        const max_steps: usize = start_nibbles.len + 2;
+        var steps: usize = 0;
 
-                    // Add existing value at remaining_path[0]
-                    if (remaining_path.len == 1) {
-                        sub_branch.children[remaining_path[0]] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
-                        sub_branch.children_mask.set(@intCast(remaining_path[0]));
+        var current: ?TrieNode = null;
+        var settled = false;
+
+        while (steps < max_steps) : (steps += 1) {
+            switch (cur_node) {
+                .Empty => {
+                    current = null;
+                    settled = true;
+                    break;
+                },
+                .Leaf => |leaf| {
+                    if (std.mem.eql(u8, leaf.nibbles, remaining)) {
+                        current = null;
                     } else {
-                        const leaf_path = try self.allocator.dupe(u8, remaining_path[1..]);
-                        const new_leaf = try LeafNode.init(self.allocator, leaf_path, HashValue{ .Raw = try self.allocator.dupe(u8, value) });
-                        const leaf_node = TrieNode{ .Leaf = new_leaf };
-                        const leaf_hash = try self.store_node(leaf_node);
-                        sub_branch.children[remaining_path[0]] = HashValue{ .Hash = leaf_hash };
-                        sub_branch.children_mask.set(@intCast(remaining_path[0]));
+                        const path_copy = try self.allocator.dupe(u8, leaf.nibbles);
+                        const new_leaf = try LeafNode.init(self.allocator, path_copy, try leaf.value.dupe(self.allocator));
+                        current = TrieNode{ .Leaf = new_leaf };
                     }
-
-                    // Set the existing data as the branch value
-                    sub_branch.value = HashValue{ .Raw = try self.allocator.dupe(u8, data) };
-
-                    break :blk TrieNode{ .Branch = sub_branch };
+                    settled = true;
+                    break;
                 },
-                .Hash => |hash| blk: {
-                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                    defer self.allocator.free(hash_str);
-                    const next_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                    break :blk try self.insert_node(next_node, remaining_path, value);
-                },
-            };
-
-            const updated_hash = try self.store_node(updated_node);
-
-            // Free old child and set new one
-            new_branch.children[key].?.deinit(self.allocator);
-            new_branch.children[key] = HashValue{ .Hash = updated_hash };
-        } else {
-            // Add new child
-            if (remaining_path.len == 0) {
-                new_branch.children[key] = HashValue{ .Raw = try self.allocator.dupe(u8, value) };
-            } else {
-                const leaf = try LeafNode.init(self.allocator, try self.allocator.dupe(u8, remaining_path), HashValue{ .Raw = try self.allocator.dupe(u8, value) });
-                const leaf_node = TrieNode{ .Leaf = leaf };
-                const leaf_hash = try self.store_node(leaf_node);
-                new_branch.children[key] = HashValue{ .Hash = leaf_hash };
-            }
-            new_branch.children_mask.set(@intCast(key));
-        }
-
-        return TrieNode{ .Branch = new_branch };
-    }
-
-    fn get_value(self: *const HashBuilder, node: TrieNode, nibbles: []const u8) HashBuilderError!?[]const u8 {
-        switch (node) {
-            .Empty => return null,
-            .Leaf => |leaf| {
-                if (std.mem.eql(u8, leaf.nibbles, nibbles)) {
-                    switch (leaf.value) {
-                        .Raw => |data| return data,
-                        .Hash => return TrieError.InvalidNode, // Leaves should have raw values
+                .Extension => |extension| {
+                    if (remaining.len < extension.nibbles.len or
+                        !std.mem.eql(u8, extension.nibbles, remaining[0..extension.nibbles.len]))
+                    {
+                        const path_copy = try self.allocator.dupe(u8, extension.nibbles);
+                        const new_ext = try ExtensionNode.init(self.allocator, path_copy, extension.next);
+                        current = TrieNode{ .Extension = new_ext };
+                        settled = true;
+                        break;
                     }
-                }
-                return null;
-            },
-            .Extension => |extension| {
-                if (nibbles.len < extension.nibbles.len) return null;
-                if (!std.mem.eql(u8, extension.nibbles, nibbles[0..extension.nibbles.len])) return null;
+                    const next_node = switch (extension.next) {
+                        .Raw => return TrieError.InvalidNode,
+                        .Hash => |hash| self.nodes.get(hash) orelse return TrieError.NonExistentNode,
+                    };
+                    try frames.append(self.allocator, .{ .extension = extension.nibbles });
+                    cur_node = next_node;
+                    remaining = remaining[extension.nibbles.len..];
+                },
+                .Branch => |branch| {
+                    var new_branch = try branch.dupe(self.allocator);
+                    errdefer new_branch.deinit(self.allocator);
 
-                const next_node = switch (extension.next) {
-                    .Raw => return TrieError.InvalidNode,
-                    .Hash => |hash| blk: {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
-                        break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                    },
-                };
-
-                return try self.get_value(next_node, nibbles[extension.nibbles.len..]);
-            },
-            .Branch => |branch| {
-                if (nibbles.len == 0) {
-                    if (branch.value) |value| {
-                        switch (value) {
-                            .Raw => |data| return data,
-                            .Hash => return TrieError.InvalidNode,
+                    if (remaining.len == 0) {
+                        if (new_branch.value) |*value| {
+                            value.deinit(self.allocator);
+                            new_branch.value = null;
                         }
+                        current = try self.collapse_branch(&new_branch);
+                        settled = true;
+                        break;
                     }
-                    return null;
-                }
 
-                const key = nibbles[0];
-                if (!branch.children_mask.is_set(@intCast(key))) return null;
-
-                const child = branch.children[key].?;
-                return switch (child) {
-                    .Raw => |data| {
-                        if (nibbles.len == 1) return data;
-                        return null;
-                    },
-                    .Hash => |hash| blk: {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
-                        const next_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                        break :blk try self.get_value(next_node, nibbles[1..]);
-                    },
-                };
-            },
-        }
-    }
-
-    fn delete_node(self: *HashBuilder, node: TrieNode, nibbles: []const u8) HashBuilderError!?TrieNode {
-        // Simplified delete - in a full implementation this would handle node consolidation
-        switch (node) {
-            .Empty => return null,
-            .Leaf => |leaf| {
-                if (std.mem.eql(u8, leaf.nibbles, nibbles)) {
-                    return null; // Delete this leaf
-                }
-                // Copy the leaf
-                const path_copy = try self.allocator.dupe(u8, leaf.nibbles);
-                const new_leaf = try LeafNode.init(self.allocator, path_copy, try leaf.value.dupe(self.allocator));
-                return TrieNode{ .Leaf = new_leaf };
-            },
-            .Extension => |extension| {
-                if (nibbles.len < extension.nibbles.len) {
-                    // Path doesn't match
-                    const path_copy = try self.allocator.dupe(u8, extension.nibbles);
-                    const new_extension = try ExtensionNode.init(self.allocator, path_copy, extension.next);
-                    return TrieNode{ .Extension = new_extension };
-                }
-
-                if (!std.mem.eql(u8, extension.nibbles, nibbles[0..extension.nibbles.len])) {
-                    // Path doesn't match
-                    const path_copy = try self.allocator.dupe(u8, extension.nibbles);
-                    const new_extension = try ExtensionNode.init(self.allocator, path_copy, extension.next);
-                    return TrieNode{ .Extension = new_extension };
-                }
-
-                // Follow extension and delete from next node
-                const next_node = switch (extension.next) {
-                    .Raw => return TrieError.InvalidNode,
-                    .Hash => |hash| blk: {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
-                        break :blk self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-                    },
-                };
-
-                const result = try self.delete_node(next_node, nibbles[extension.nibbles.len..]);
-                if (result) |new_next| {
-                    switch (new_next) {
-                        .Leaf => |child_leaf| {
-                            // Collapse Extension -> Leaf into a single canonical Leaf
-                            const merged_path = try self.allocator.alloc(u8, extension.nibbles.len + child_leaf.nibbles.len);
-                            @memcpy(merged_path[0..extension.nibbles.len], extension.nibbles);
-                            @memcpy(merged_path[extension.nibbles.len..], child_leaf.nibbles);
-                            self.allocator.free(child_leaf.nibbles);
-                            const merged_leaf = try LeafNode.init(self.allocator, merged_path, child_leaf.value);
-                            return TrieNode{ .Leaf = merged_leaf };
-                        },
-                        .Extension => |child_ext| {
-                            // Collapse Extension -> Extension into a single canonical Extension
-                            const merged_path = try self.allocator.alloc(u8, extension.nibbles.len + child_ext.nibbles.len);
-                            @memcpy(merged_path[0..extension.nibbles.len], extension.nibbles);
-                            @memcpy(merged_path[extension.nibbles.len..], child_ext.nibbles);
-                            self.allocator.free(child_ext.nibbles);
-                            const merged_ext = try ExtensionNode.init(self.allocator, merged_path, child_ext.next);
-                            return TrieNode{ .Extension = merged_ext };
-                        },
-                        else => {
-                            const new_hash = try self.store_node(new_next);
-                            const path_copy = try self.allocator.dupe(u8, extension.nibbles);
-                            const new_extension = try ExtensionNode.init(self.allocator, path_copy, HashValue{ .Hash = new_hash });
-                            return TrieNode{ .Extension = new_extension };
-                        },
-                    }
-                } else {
-                    return null; // Next node was deleted
-                }
-            },
-            .Branch => |branch| {
-                var new_branch = try branch.dupe(self.allocator);
-                errdefer new_branch.deinit(self.allocator);
-
-                if (nibbles.len == 0) {
-                    // Delete branch value
-                    if (new_branch.value) |*value| {
-                        value.deinit(self.allocator);
-                        new_branch.value = null;
-                    }
-                } else {
-                    const key = nibbles[0];
+                    const key = remaining[0];
                     if (new_branch.children_mask.is_set(@intCast(key))) {
                         const child = new_branch.children[key].?;
                         switch (child) {
                             .Raw => {
-                                if (nibbles.len == 1) {
-                                    // Delete this child
+                                if (remaining.len == 1) {
                                     new_branch.children[key].?.deinit(self.allocator);
                                     new_branch.children[key] = null;
                                     new_branch.children_mask.unset(@intCast(key));
                                 }
                             },
                             .Hash => |hash| {
-                                const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                                defer self.allocator.free(hash_str);
-                                const next_node = self.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
-
-                                const result = try self.delete_node(next_node, nibbles[1..]);
-                                if (result) |new_next| {
-                                    if (new_next == .Leaf and new_next.Leaf.nibbles.len == 0 and new_next.Leaf.value == .Raw) {
-                                        // The remaining key ends at this slot. Store its value
-                                        // inline, as insertion does, so the root hash does not
-                                        // depend on the order of inserts and deletes.
-                                        const inline_value = HashValue{ .Raw = try self.allocator.dupe(u8, new_next.Leaf.value.Raw) };
-                                        var discarded = new_next;
-                                        discarded.deinit(self.allocator);
-                                        new_branch.children[key].?.deinit(self.allocator);
-                                        new_branch.children[key] = inline_value;
-                                    } else {
-                                        const new_hash = try self.store_node(new_next);
-                                        new_branch.children[key].?.deinit(self.allocator);
-                                        new_branch.children[key] = HashValue{ .Hash = new_hash };
-                                    }
-                                } else {
-                                    new_branch.children[key].?.deinit(self.allocator);
-                                    new_branch.children[key] = null;
-                                    new_branch.children_mask.unset(@intCast(key));
-                                }
+                                const next_node = self.nodes.get(hash) orelse return TrieError.NonExistentNode;
+                                try frames.append(self.allocator, .{ .branch = .{ .node = new_branch, .key = key } });
+                                cur_node = next_node;
+                                remaining = remaining[1..];
+                                continue;
                             },
                         }
                     }
-                }
 
-                return try self.collapse_branch(&new_branch);
-            },
+                    current = try self.collapse_branch(&new_branch);
+                    settled = true;
+                    break;
+                },
+            }
         }
+        if (!settled) return TrieError.InvalidNode;
+
+        while (frames.pop()) |frame| {
+            errdefer if (current) |*owned| owned.deinit(self.allocator);
+            switch (frame) {
+                .extension => |ext_nibbles| {
+                    current = try self.unwind_delete_extension(ext_nibbles, current);
+                },
+                .branch => |b| {
+                    var branch_node = b.node;
+                    errdefer branch_node.deinit(self.allocator);
+                    current = try self.unwind_delete_branch(&branch_node, b.key, current);
+                },
+            }
+        }
+        frames.deinit(self.allocator);
+        return current;
+    }
+
+    fn unwind_delete_extension(self: *HashBuilder, ext_nibbles: []const u8, child: ?TrieNode) HashBuilderError!?TrieNode {
+        const new_next = child orelse return null;
+        return switch (new_next) {
+            .Leaf => |child_leaf| {
+                const merged_path = try self.allocator.alloc(u8, ext_nibbles.len + child_leaf.nibbles.len);
+                @memcpy(merged_path[0..ext_nibbles.len], ext_nibbles);
+                @memcpy(merged_path[ext_nibbles.len..], child_leaf.nibbles);
+                self.allocator.free(child_leaf.nibbles);
+                return TrieNode{ .Leaf = try LeafNode.init(self.allocator, merged_path, child_leaf.value) };
+            },
+            .Extension => |child_ext| {
+                const merged_path = try self.allocator.alloc(u8, ext_nibbles.len + child_ext.nibbles.len);
+                @memcpy(merged_path[0..ext_nibbles.len], ext_nibbles);
+                @memcpy(merged_path[ext_nibbles.len..], child_ext.nibbles);
+                self.allocator.free(child_ext.nibbles);
+                return TrieNode{ .Extension = try ExtensionNode.init(self.allocator, merged_path, child_ext.next) };
+            },
+            else => {
+                const new_hash = try self.store_node(new_next);
+                const path_copy = try self.allocator.dupe(u8, ext_nibbles);
+                return TrieNode{ .Extension = try ExtensionNode.init(self.allocator, path_copy, HashValue{ .Hash = new_hash }) };
+            },
+        };
+    }
+
+    fn unwind_delete_branch(self: *HashBuilder, branch: *BranchNode, key: u8, child: ?TrieNode) HashBuilderError!?TrieNode {
+        if (child) |new_next| {
+            if (new_next == .Leaf and new_next.Leaf.nibbles.len == 0 and new_next.Leaf.value == .Raw) {
+                const inline_value = HashValue{ .Raw = try self.allocator.dupe(u8, new_next.Leaf.value.Raw) };
+                var discarded = new_next;
+                discarded.deinit(self.allocator);
+                branch.children[key].?.deinit(self.allocator);
+                branch.children[key] = inline_value;
+            } else {
+                const new_hash = try self.store_node(new_next);
+                branch.children[key].?.deinit(self.allocator);
+                branch.children[key] = HashValue{ .Hash = new_hash };
+            }
+        } else {
+            branch.children[key].?.deinit(self.allocator);
+            branch.children[key] = null;
+            branch.children_mask.unset(@intCast(key));
+        }
+        return try self.collapse_branch(branch);
     }
 
     /// Canonical MPT branch compression (Yellow Paper Appendix D):
@@ -848,9 +863,7 @@ pub const HashBuilder = struct {
                     return TrieNode{ .Leaf = leaf };
                 },
                 .Hash => |child_hash| {
-                    const hash_str = try bytes_to_hex_string(self.allocator, &child_hash);
-                    defer self.allocator.free(hash_str);
-                    if (self.nodes.get(hash_str)) |target_node| {
+                    if (self.nodes.get(child_hash)) |target_node| {
                         switch (target_node) {
                             .Leaf => |child_leaf| {
                                 const merged = try self.allocator.alloc(u8, 1 + child_leaf.nibbles.len);
@@ -897,19 +910,6 @@ fn common_prefix_length(a: []const u8, b: []const u8) usize {
     var i: usize = 0;
     while (i < min_len and a[i] == b[i]) : (i += 1) {}
     return i;
-}
-
-fn bytes_to_hex_string(allocator: Allocator, bytes: []const u8) std.mem.Allocator.Error![]u8 {
-    const hex_chars = "0123456789abcdef";
-    const hex = try allocator.alloc(u8, bytes.len * 2);
-    errdefer allocator.free(hex);
-
-    for (bytes, 0..) |byte, i| {
-        hex[i * 2] = hex_chars[byte >> 4];
-        hex[i * 2 + 1] = hex_chars[byte & 0x0F];
-    }
-
-    return hex;
 }
 
 // Tests

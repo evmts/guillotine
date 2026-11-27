@@ -79,17 +79,17 @@ pub const Program = struct {
         if (ctx.gas_remaining < 0) {
             ctx.gas_remaining = 0;
             const exit: ExitCode = if (self.replay_exceptional_halts) .fallback else .out_of_gas;
-            ctx.exit_code = @intFromEnum(exit);
+            ctx.exit_code = @backingInt(exit);
             return exit;
         }
         if (self.uses_keccak and ctx.helpers.keccak256 == null) {
-            ctx.exit_code = @intFromEnum(ExitCode.fallback);
+            ctx.exit_code = @backingInt(ExitCode.fallback);
             return .fallback;
         }
         const rc = self.entry(ctx);
         const exit = std.enums.fromInt(ExitCode, rc) orelse return error.InvalidExitCode;
         if (self.replay_exceptional_halts and exit.isExceptional()) {
-            ctx.exit_code = @intFromEnum(ExitCode.fallback);
+            ctx.exit_code = @backingInt(ExitCode.fallback);
             return .fallback;
         }
         return exit;
@@ -477,7 +477,7 @@ const Codegen = struct {
         };
         for (stubs) |stub| {
             self.bind(stub.label);
-            try e.movzW(0, @intCast(@intFromEnum(stub.code)));
+            try e.movzW(0, @intCast(@backingInt(stub.code)));
             try e.movz(R.gas, 0, 0);
             try self.b(epilogue);
         }
@@ -498,7 +498,7 @@ const Codegen = struct {
     }
 
     fn exitWith(self: *Codegen, code: ExitCode) a64.Error!void {
-        try self.e.movzW(0, @intCast(@intFromEnum(code)));
+        try self.e.movzW(0, @intCast(@backingInt(code)));
         try self.b(epilogue);
     }
 

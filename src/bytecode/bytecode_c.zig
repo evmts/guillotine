@@ -76,7 +76,6 @@ pub fn createHandle(alloc: std.mem.Allocator, data: []const u8) !*CBytecodeHandl
     return handle;
 }
 
-
 /// Destroy bytecode and free memory
 /// @param handle Bytecode handle
 pub fn evm_bytecode_destroy(handle: ?*CBytecodeHandle) callconv(.c) void {
@@ -107,7 +106,7 @@ pub fn evm_bytecode_get_length(handle: ?*const CBytecodeHandle) callconv(.c) usi
 /// @return Number of bytes copied, or 0 on error
 pub fn evm_bytecode_get_data(handle: ?*const CBytecodeHandle, buffer: [*]u8, buffer_len: usize) callconv(.c) usize {
     const h = handle orelse return 0;
-    
+
     const copy_len = @min(h.raw_data.len, buffer_len);
     @memcpy(buffer[0..copy_len], h.raw_data[0..copy_len]);
     return copy_len;
@@ -167,12 +166,7 @@ pub fn evm_bytecode_get_runtime_data(handle: ?*const CBytecodeHandle, buffer: [*
 /// @param max_dests Maximum number of destinations to find
 /// @param count_out Actual number of destinations found
 /// @return Error code
-pub fn evm_bytecode_find_jump_dests(
-    handle: ?*const CBytecodeHandle,
-    jump_dests: [*]u32,
-    max_dests: u32,
-    count_out: *u32
-) callconv(.c) c_int {
+pub fn evm_bytecode_find_jump_dests(handle: ?*const CBytecodeHandle, jump_dests: [*]u32, max_dests: u32, count_out: *u32) callconv(.c) c_int {
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
     var count: u32 = 0;
     var pos: usize = 0;
@@ -231,18 +225,18 @@ pub const CBytecodeAnalysis = extern struct {
     // Arrays of program counters
     push_pcs: [*]u32,
     push_pcs_count: u32,
-    
+
     jumpdests: [*]u32,
     jumpdests_count: u32,
-    
+
     // Basic blocks
     basic_blocks: [*]CBasicBlock,
     basic_blocks_count: u32,
-    
+
     // Jump fusions
     jump_fusions: [*]CJumpFusion,
     jump_fusions_count: u32,
-    
+
     // Advanced fusions
     advanced_fusions: [*]CAdvancedFusion,
     advanced_fusions_count: u32,
@@ -261,7 +255,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
     // that evm_bytecode_free_analysis accepts, never uninitialized pointers and counts.
     analysis_out.* = std.mem.zeroes(CBytecodeAnalysis);
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
-    
+
     // Call the Zig analyzer with correct types
     const BasicBlock = struct {
         start: BytecodeType.PcType,
@@ -273,7 +267,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
         folded_value: u256 = 0,
         count: u8 = 0,
     };
-    
+
     const analysis = bytecodeAnalyze(
         BytecodeType.PcType,
         BasicBlock,
@@ -281,7 +275,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
         alloc,
         h.bytecode.raw(),
     ) catch return EVM_BYTECODE_ERROR_INVALID_BYTECODE;
-    
+
     defer {
         alloc.free(analysis.push_pcs);
         alloc.free(analysis.jumpdests);
@@ -291,14 +285,14 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
         var mut_advanced_fusions = analysis.advanced_fusions;
         mut_advanced_fusions.deinit();
     }
-    
+
     // Convert push_pcs
-    const c_push_pcs = alloc.alloc(u32, analysis.push_pcs.len) catch 
+    const c_push_pcs = alloc.alloc(u32, analysis.push_pcs.len) catch
         return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
     for (analysis.push_pcs, 0..) |pc, i| {
         c_push_pcs[i] = @intCast(pc);
     }
-    
+
     // Convert jumpdests
     const c_jumpdests = alloc.alloc(u32, analysis.jumpdests.len) catch {
         alloc.free(c_push_pcs);
@@ -307,7 +301,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
     for (analysis.jumpdests, 0..) |pc, i| {
         c_jumpdests[i] = @intCast(pc);
     }
-    
+
     // Convert basic blocks
     const c_blocks = alloc.alloc(CBasicBlock, analysis.basic_blocks.len) catch {
         alloc.free(c_push_pcs);
@@ -320,7 +314,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
             .end = @intCast(block.end),
         };
     }
-    
+
     // Convert jump fusions
     const c_jump_fusions = alloc.alloc(CJumpFusion, analysis.jump_fusions.count()) catch {
         alloc.free(c_push_pcs);
@@ -338,7 +332,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
             };
         }
     }
-    
+
     // Convert advanced fusions
     const c_advanced = alloc.alloc(CAdvancedFusion, analysis.advanced_fusions.count()) catch {
         alloc.free(c_push_pcs);
@@ -369,25 +363,25 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
             };
         }
     }
-    
+
     // Fill output structure
     analysis_out.* = .{
         .push_pcs = c_push_pcs.ptr,
         .push_pcs_count = @intCast(c_push_pcs.len),
-        
+
         .jumpdests = c_jumpdests.ptr,
         .jumpdests_count = @intCast(c_jumpdests.len),
-        
+
         .basic_blocks = c_blocks.ptr,
         .basic_blocks_count = @intCast(c_blocks.len),
-        
+
         .jump_fusions = c_jump_fusions.ptr,
         .jump_fusions_count = @intCast(c_jump_fusions.len),
-        
+
         .advanced_fusions = c_advanced.ptr,
         .advanced_fusions_count = @intCast(c_advanced.len),
     };
-    
+
     return EVM_BYTECODE_SUCCESS;
 }
 
@@ -425,7 +419,7 @@ pub fn evm_bytecode_free_analysis_with_allocator(alloc: std.mem.Allocator, analy
 /// @return Opcode name, or "INVALID" if not recognized
 pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
     const opcode = std.enums.fromInt(Opcode, opcode_value) orelse return "INVALID";
-    
+
     return switch (opcode) {
         .STOP => "STOP",
         .ADD => "ADD",
@@ -638,7 +632,7 @@ pub fn evm_bytecode_error_string(error_code: c_int) callconv(.c) [*:0]const u8 {
 /// @param buffer_len Length of the buffer
 /// @return Number of bytes written (including null terminator), or 0 on error
 pub fn evm_bytecode_pretty_print(data: [*]const u8, data_len: usize, buffer: [*]u8, buffer_len: usize) usize {
-   return evm_bytecode_pretty_print_with_allocator(allocator, data, data_len, buffer, buffer_len);
+    return evm_bytecode_pretty_print_with_allocator(allocator, data, data_len, buffer, buffer_len);
 }
 
 pub fn evm_bytecode_pretty_print_with_allocator(alloc: std.mem.Allocator, data: [*]const u8, data_len: usize, buffer: [*]u8, buffer_len: usize) usize {
@@ -672,18 +666,18 @@ pub fn evm_bytecode_test_opcodes() callconv(.c) c_int {
     if (evm_bytecode_is_valid_opcode(0x00) != 1) return -1; // STOP
     if (evm_bytecode_is_valid_opcode(0x01) != 1) return -2; // ADD
     if (evm_bytecode_is_valid_opcode(0x60) != 1) return -3; // PUSH1
-    
+
     // Test invalid opcode
     if (evm_bytecode_is_valid_opcode(0x0C) != 0) return -4; // Invalid opcode
-    
+
     // Test opcode names
     const stop_name = evm_bytecode_opcode_name(0x00);
     const add_name = evm_bytecode_opcode_name(0x01);
-    
+
     // Simple check - names should not be "INVALID"
     if (std.mem.eql(u8, std.mem.span(stop_name), "INVALID")) return -5;
     if (std.mem.eql(u8, std.mem.span(add_name), "INVALID")) return -6;
-    
+
     return 0;
 }
 
@@ -738,7 +732,8 @@ test "Bytecode C API opcode/jumpdest/bounds and stats" {
     try std.testing.expectEqual(@as(c_int, 0), evm_bytecode_is_jump_dest(h, 3));
 
     // Find jumpdests
-    var out: [8]u32 = undefined; var found: u32 = 0;
+    var out: [8]u32 = undefined;
+    var found: u32 = 0;
     const rc = evm_bytecode_find_jump_dests(h, &out, out.len, &found);
     try std.testing.expectEqual(@as(c_int, EVM_BYTECODE_SUCCESS), rc);
     try std.testing.expectEqual(@as(u32, 2), found);
@@ -785,7 +780,7 @@ test "Pretty print basic bytecode" {
     try std.testing.expectEqual(@as(u8, 0), buffer[written - 1]);
 
     // Output should contain expected opcodes
-    const output = buffer[0..written-1];
+    const output = buffer[0 .. written - 1];
     try std.testing.expect(std.mem.indexOf(u8, output, "PUSH1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "ADD") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "STOP") != null);
@@ -836,7 +831,7 @@ test "Pretty print empty bytecode" {
 
 test "Pretty print with invalid bytecode" {
     // Invalid opcode (0x0C not defined)
-    const code = [_]u8{ 0x0C };
+    const code = [_]u8{0x0C};
     var buffer: [256]u8 = undefined;
 
     const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
@@ -856,7 +851,7 @@ test "Pretty print complex bytecode with jumpdest" {
 
     try std.testing.expect(written > 0);
 
-    const output = buffer[0..written-1];
+    const output = buffer[0 .. written - 1];
     try std.testing.expect(std.mem.indexOf(u8, output, "PUSH1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "JUMPI") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "JUMPDEST") != null);
@@ -894,13 +889,7 @@ test "Pretty print memory leak detection" {
     // Call pretty_print multiple times to detect leaks
     for (0..100) |_| {
         var buffer: [1024]u8 = undefined;
-        const written = evm_bytecode_pretty_print_with_allocator(
-            test_allocator,
-            &code,
-            code.len,
-            &buffer,
-            buffer.len
-        );
+        const written = evm_bytecode_pretty_print_with_allocator(test_allocator, &code, code.len, &buffer, buffer.len);
         try std.testing.expect(written > 0);
     }
 
@@ -920,8 +909,8 @@ test "Pretty print with truncated PUSH data" {
 test "Pretty print with all PUSH variants" {
     // Test PUSH1 through PUSH4
     const code = [_]u8{
-        0x60, 0x01,             // PUSH1 0x01
-        0x61, 0x01, 0x02,       // PUSH2 0x0102
+        0x60, 0x01, // PUSH1 0x01
+        0x61, 0x01, 0x02, // PUSH2 0x0102
         0x62, 0x01, 0x02, 0x03, // PUSH3 0x010203
         0x63, 0x01, 0x02, 0x03, 0x04, // PUSH4 0x01020304
     };
@@ -930,7 +919,7 @@ test "Pretty print with all PUSH variants" {
     const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
     try std.testing.expect(written > 0);
 
-    const output = buffer[0..written-1];
+    const output = buffer[0 .. written - 1];
     try std.testing.expect(std.mem.indexOf(u8, output, "PUSH1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PUSH2") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PUSH3") != null);

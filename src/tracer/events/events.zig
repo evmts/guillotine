@@ -19,18 +19,18 @@ pub const EvmEvent = union(enum) {
     transaction_start: lifecycle.TransactionStart,
     transaction_end: lifecycle.TransactionEnd,
     block_context: lifecycle.BlockContext,
-    
+
     // Execution events
     vm_step: lifecycle.VmStep,
     execution_halt: lifecycle.ExecutionHalt,
     opcode_frequency: lifecycle.OpcodeFrequency,
-    
+
     // Call frame events
     call_enter: lifecycle.CallEnter,
     call_exit: lifecycle.CallExit,
     create_enter: lifecycle.CreateEnter,
     create_exit: lifecycle.CreateExit,
-    
+
     // State change events
     storage_read: state.StorageRead,
     storage_write: state.StorageWrite,
@@ -43,68 +43,68 @@ pub const EvmEvent = union(enum) {
     account_created: state.AccountCreated,
     account_deleted: state.AccountDeleted,
     state_committed: state.StateCommitted,
-    
+
     // Contract events
     selfdestruct: lifecycle.Selfdestruct,
     log_emitted: lifecycle.LogEmitted,
-    
+
     // Gas events
     gas_refund: gas_and_execution.GasRefund,
     gas_stipend: gas_and_execution.GasStipend,
     intrinsic_gas: gas_and_execution.IntrinsicGas,
     memory_expansion: gas_and_execution.MemoryExpansion,
-    
+
     // Function/ABI events
     function_selector: gas_and_execution.FunctionSelector,
     function_call: gas_and_execution.FunctionCall,
     event_decoded: gas_and_execution.EventDecoded,
-    
+
     // External code events
     external_code_copy: gas_and_execution.ExternalCodeCopy,
     external_code_size: gas_and_execution.ExternalCodeSize,
     external_code_hash: gas_and_execution.ExternalCodeHash,
     return_data_copy: gas_and_execution.ReturnDataCopy,
-    
+
     // Jump analysis events
     jump_destination: gas_and_execution.JumpDestination,
     jump_analysis: gas_and_execution.JumpAnalysis,
     push_data: gas_and_execution.PushData,
-    
+
     // Precompile events
     precompile_call: lifecycle.PrecompileCall,
     precompile_result: lifecycle.PrecompileResult,
-    
+
     // Error events
     revert: lifecycle.Revert,
     invalid_opcode: lifecycle.InvalidOpcode,
     out_of_gas: lifecycle.OutOfGas,
     stack_error: lifecycle.StackError,
     memory_error: lifecycle.MemoryError,
-    
+
     // Access list events (EIP-2929/2930)
     account_accessed: state.AccountAccessed,
     storage_accessed: state.StorageAccessed,
     account_warmed: state.AccountWarmed,
     storage_warmed: state.StorageWarmed,
-    
+
     // EIP-1559 events
     base_fee_change: gas_and_execution.BaseFeeChange,
     priority_fee: gas_and_execution.PriorityFee,
-    
+
     // EIP-4844 blob events
     blob_hash_access: gas_and_execution.BlobHashAccess,
     blob_base_fee: gas_and_execution.BlobBaseFee,
-    
+
     // MEV/DeFi events
     swap_detected: defi.SwapDetected,
     flash_loan: defi.FlashLoan,
     arbitrage_opportunity: defi.ArbitrageOpportunity,
     sandwich_attack: defi.SandwichAttack,
-    
+
     // Coinbase/miner events
     coinbase_touch: gas_and_execution.CoinbaseTouch,
     coinbase_payment: gas_and_execution.CoinbasePayment,
-    
+
     // ERC20 detection events
     erc20_transfer: token.Erc20Transfer,
     erc20_approval: token.Erc20Approval,
@@ -112,21 +112,21 @@ pub const EvmEvent = union(enum) {
     erc20_burn: token.Erc20Burn,
     erc20_function_detected: token.Erc20FunctionDetected,
     erc20_contract_detected: token.Erc20ContractDetected,
-    
+
     // ERC721/1155 detection events
     erc721_transfer: token.Erc721Transfer,
     erc721_approval: token.Erc721Approval,
     erc1155_transfer: token.Erc1155Transfer,
-    
+
     // Token pattern detection
     token_pattern_detected: token.TokenPatternDetected,
-    
+
     // Proxy and notable contract detection
     diamond_proxy_detected: proxy_and_contracts.DiamondProxyDetected,
     proxy_pattern_detected: proxy_and_contracts.ProxyPatternDetected,
     multi_sig_detected: proxy_and_contracts.MultiSigDetected,
     timelock_detected: proxy_and_contracts.TimelockDetected,
-    
+
     // ENS events
     ens_name_registered: proxy_and_contracts.EnsNameRegistered,
     ens_name_renewed: proxy_and_contracts.EnsNameRenewed,
@@ -136,14 +136,14 @@ pub const EvmEvent = union(enum) {
     ens_text_changed: proxy_and_contracts.EnsTextChanged,
     ens_address_changed: proxy_and_contracts.EnsAddressChanged,
     ens_contenthash_changed: proxy_and_contracts.EnsContenthashChanged,
-    
+
     // DeFi protocol detection
     uniswap_detected: defi.UniswapDetected,
     compound_detected: defi.CompoundDetected,
     aave_detected: defi.AaveDetected,
     maker_detected: defi.MakerDetected,
     curve_detected: defi.CurveDetected,
-    
+
     // Ethereum mainnet-specific events (post-merge)
     beacon_deposit: mainnet_and_layer2.BeaconDeposit,
     validator_withdrawal: mainnet_and_layer2.ValidatorWithdrawal,
@@ -152,7 +152,7 @@ pub const EvmEvent = union(enum) {
     full_withdrawal: mainnet_and_layer2.FullWithdrawal,
     slashing_event: mainnet_and_layer2.SlashingEvent,
     sync_committee_update: mainnet_and_layer2.SyncCommitteeUpdate,
-    
+
     // Layer 2 bridge events
     bridge_deposit: mainnet_and_layer2.BridgeDeposit,
     bridge_withdrawal: mainnet_and_layer2.BridgeWithdrawal,
@@ -223,16 +223,16 @@ pub fn getEventSeverity(event: EvmEvent) EvmEvent.metadata.EventSeverity {
 // Test helper
 test "event size and alignment" {
     const testing = std.testing;
-    
+
     // Ensure reasonable event sizes
     try testing.expect(@sizeOf(EvmEvent) <= 512);
     try testing.expect(@alignOf(EvmEvent) <= 16);
-    
+
     // Verify event categorization
     const step_event = EvmEvent{ .vm_step = undefined };
     try testing.expectEqual(EvmEvent.metadata.EventCategory.execution, getEventCategory(step_event));
     try testing.expectEqual(EvmEvent.metadata.EventSeverity.trace, getEventSeverity(step_event));
-    
+
     const revert_event = EvmEvent{ .revert = undefined };
     try testing.expectEqual(EvmEvent.metadata.EventCategory.@"error", getEventCategory(revert_event));
     try testing.expectEqual(EvmEvent.metadata.EventSeverity.warn, getEventSeverity(revert_event));

@@ -1,0 +1,103 @@
+---
+title: TigerStyle & Safety Guarantees
+description: How Guillotine applies TigerStyle engineering principles, what requires ReleaseSafe, how to pool EVMs for static memory budgets, and where Guillotine intentionally diverges for performance.
+---
+
+# TigerStyle & Safety Guarantees
+
+Guillotine borrows heavily from TigerBeetle's [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md) methodology while making explicit, documented trade-offs where an embeddable Ethereum Virtual Machine differs from a standalone database.
+
+## You Are Only TigerStyle in `ReleaseSafe`
+
+**Guillotine is not TigerStyle-compliant in `ReleaseFast` or `ReleaseSmall`.** Build with **`-Doptimize=ReleaseSafe`** when you want runtime safety invariants active in production.
+
+| Mechanism | `Debug` / `ReleaseSafe` | `ReleaseFast` / `ReleaseSmall` |
+| --- | --- | --- |
+| Zig safety checks (overflow, bounds, null) | **Enabled** | Disabled |
+| `Dispatch.Item` schedule items | **Tagged 16-byte union**, validated item by item | **Untagged 8-byte extern union** (comptime-pinned) |
+| `preserve_none` opcode inner loop hooks | Enabled (`handler_abi.hooksEnabled`) | Compiled out (zero overhead) |
+| `Stack` `_unsafe` bounds assertions | **Active** | Compiled out (relies on basic-block pre-validation) |
+| `SafetyCounter` (`EvmConfig.loop_quota`) | **Enabled** (`1_000_000` default) | Disabled (`null` default; gas bounds execution) |
+
+Untrusted EVM inputs (adversarial bytecode, calldata, invalid jumps, gas exhaustion, oversized initcode) are **always** validated and returned as typed errors in every build mode—they never crash the process. Internal programmer invariants are asserted in `Debug` and `ReleaseSafe` (and verified continuously across all 66,652 EEST state tests, fuzz campaigns, and Lean differential fuzzing in `ReleaseSafe`).
+
+## Memory Allocation & EVM Pooling
+
+Guillotine does **not** perform eager upfront static allocation inside `Evm.init` unless the consumer supplies a static/bounded allocator.
+
+Eagerly allocating worst-case EVM buffers (`64 MiB` arena + per-depth memory) inside every `Evm` instance would make lightweight or multi-instance hosts pay tens of megabytes per idle handle. Instead, Guillotine starts small (`64 KiB` call arena) and stabilizes memory through reusable pools (`FrameMemoryPool`, `FrameStackPool`, `GrowingArenaAllocator`, `DispatchCache`).
+
+### Expected Production Pattern: Pool of `Evm` Instances
+
+Run a **fixed pool of reusable `Evm` instances (typically one per worker thread / CPU core)** rather than creating one `Evm` per transaction or funneling all work through a single `Evm`:
+
+```zig
+const WorkerEvm = evm.Evm(.{});
+
+// Initialize once per worker thread:
+var vm = try WorkerEvm.init(worker_allocator, &db, block_info, tx_ctx, gas_price, origin);
+defer vm.deinit();
+
+// Reuse across transactions:
+const result = vm.call(params);
+defer result.deinit(worker_allocator);
+vm.resetTouched(); // Keeps touched_addresses / touched_storage bounded.
+```
+
+### Consumer-Driven Upfront Static Allocation
+
+If you require strict static memory bounds (zero OS heap allocations after startup), pass a consumer-owned `FixedBufferAllocator` or capped allocator into each pooled `Evm`:
+
+```zig
+const budget = try page_allocator.alloc(u8, 128 * 1024 * 1024);
+defer page_allocator.free(budget);
+
+var fba = std.heap.FixedBufferAllocator.init(budget);
+var vm = try WorkerEvm.init(fba.allocator(), &db, block_info, tx_ctx, gas_price, origin);
+defer vm.deinit();
+```
+
+## `SafetyCounter` (`loop_quota`)
+
+`SafetyCounter` (`src/internal/safety_counter.zig`) follows the same build-mode and pooling model:
+
+- Enabled by default in `Debug` and `ReleaseSafe` (`loop_quota = 1_000_000`), returning `error.SafetyLimitExceeded` rather than panicking.
+- Disabled (`null`) in `ReleaseFast` and `ReleaseSmall` so gas-metered execution pays zero extra per-instruction overhead.
+- Consumers can opt into hard instruction caps in `ReleaseFast` on a dedicated simulation pool via `EvmConfig.loop_quota`:
+
+```zig
+const SimulationEvm = evm.Evm(.{
+    .loop_quota = 10_000_000,
+});
+```
+
+## Native Recursion for Nested Calls
+
+Guillotine uses **native OS call-stack recursion** for nested EVM calls (`CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, `CREATE2`) up to `max_call_depth = 1024`, rather than an iterative call-frame state machine.
+
+This keeps the `preserve_none` + `.always_tail` register-pinned interpreter free of suspend/resume boilerplate on shallow calls. For deep call chains, `src/native_stack.zig` probes the calling thread's native stack bounds and transparently trampolines onto a reusable `large_stack_worker` thread when remaining stack space runs low.
+
+By contrast, the Merkle Patricia Trie (`src/trie/`) is **fully iterative** with `[32]u8` keys (zero recursion and zero per-hop hex-string heap allocations).
+
+## 70-Line Functions Without Performance Loss
+
+Guillotine adopts TigerStyle's **≤70-line function** and **≤100-column line** targets without hurting throughput:
+
+- Mark extracted hot-path helpers `inline`.
+- Outline cold validation and error paths with `@branchHint(.cold)` / `@branchHint(.unlikely)` to improve L1 instruction-cache locality.
+- Enforce `zig fmt --check` in CI.
+
+## Dependencies
+
+Guillotine intentionally uses audited consensus cryptography rather than re-implementing elliptic-curve pairings from scratch:
+
+| Dependency | Location | Purpose |
+| --- | --- | --- |
+| **Zig stdlib (`0.17.1`)** | Toolchain | Core runtime, allocators, hashing, build system |
+| **`voltaire` (vendored)** | `lib/voltaire` | EVM primitives (`Address`, `U256`, RLP) and Rust crypto wrappers (`keccak-asm`, `secp256k1`) |
+| **`ark` (`ark-bn254`, `ark-bls12-381`)** | `lib/ark`, `Cargo.toml` | Audited pairing & curve precompiles (`0x06–0x08`, `0x0B–0x11`) |
+| **`blst` & `c-kzg`** | `lib/blst.zig`, `lib/c-kzg.zig` | EIP-4844 KZG point evaluation (`0x0A`) and BLS12-381 |
+| **`foundry-compilers`** | `lib/foundry-compilers` | Solidity compilation for tests/benchmarks only (not linked into production EVM builds) |
+| **`zbench`, `clap`** | `build.zig.zon` (`.lazy = true`) | Optional CLI/benchmark tooling, never fetched by library consumers |
+
+See [`docs/dev/TIGERSTYLE.md`](https://github.com/evmts/guillotine/blob/main/docs/dev/TIGERSTYLE.md) for the full developer specification.

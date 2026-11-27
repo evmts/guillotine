@@ -533,16 +533,7 @@ test "AccessList - boundary values for storage slots" {
     const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
 
     // Test boundary values
-    const boundary_slots = [_]u256{ 
-        0, 
-        1, 
-        std.math.maxInt(u8),
-        std.math.maxInt(u16), 
-        std.math.maxInt(u32),
-        std.math.maxInt(u64),
-        std.math.maxInt(u128),
-        std.math.maxInt(u256) 
-    };
+    const boundary_slots = [_]u256{ 0, 1, std.math.maxInt(u8), std.math.maxInt(u16), std.math.maxInt(u32), std.math.maxInt(u64), std.math.maxInt(u128), std.math.maxInt(u256) };
 
     for (boundary_slots) |slot| {
         // First access should be cold
@@ -701,14 +692,14 @@ test "AccessList - empty pre-warm list" {
     defer access_list.deinit();
 
     const empty_addresses: []const Address = &.{};
-    
+
     // Should not crash with empty slice
     try access_list.pre_warm_addresses(empty_addresses);
 
     // State should remain unchanged
     const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
     try testing.expect(!access_list.is_address_warm(test_address));
-    
+
     const cost = try access_list.access_address(test_address);
     try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost);
 }

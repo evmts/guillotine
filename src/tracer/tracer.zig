@@ -302,7 +302,7 @@ pub const Tracer = struct {
         if (!self.config.enabled) return;
         const main_evm = frame.getEvm();
         const opcode_name = comptime @tagName(opcode);
-        const opcode_value = @intFromEnum(opcode);
+        const opcode_value = @backingInt(opcode);
 
         var schedule_idx: u32 = 0;
         if (@hasField(@TypeOf(frame.*), "dispatch")) {
@@ -495,7 +495,7 @@ pub const Tracer = struct {
             .ISZERO_JUMPI, .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => 3,
             // Block entry and the invalid-jump trap are not bytecode instructions.
             .BLOCK_BEGIN, .INVALID_JUMP_TARGET => 0,
-            else => if (@intFromEnum(opcode) <= 0xFF) 1 else @compileError("Tracer.instructionsCovered: unmapped synthetic opcode " ++ @tagName(opcode)),
+            else => if (@backingInt(opcode) <= 0xFF) 1 else @compileError("Tracer.instructionsCovered: unmapped synthetic opcode " ++ @tagName(opcode)),
         };
     }
 
@@ -691,7 +691,7 @@ pub const Tracer = struct {
             .fusion_info = null,
         };
 
-        const opcode_value = @intFromEnum(opcode);
+        const opcode_value = @backingInt(opcode);
         const is_synthetic = opcode_value > 0xFF;
 
         // Use UnifiedOpcode to get the name directly
@@ -730,8 +730,6 @@ pub const Tracer = struct {
     }
 
     /// Describe a fusion operation for advanced trace
-
-
     /// Helper to get opcode number from handler pointer by searching opcode_handlers array
     fn getOpcodeFromHandler(self: *Tracer, comptime FrameType: type, handler: FrameType.OpcodeHandler) ?u8 {
         _ = self;

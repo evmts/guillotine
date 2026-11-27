@@ -140,7 +140,7 @@ test "bytecode config custom values" {
         .max_bytecode_size = 32768,
         .max_initcode_size = 65536,
     };
-    
+
     try std.testing.expectEqual(@as(u32, 32768), config.max_bytecode_size);
     try std.testing.expectEqual(@as(u32, 65536), config.max_initcode_size);
     try std.testing.expectEqual(u32, config.PcType()); // 65536 bytes of initcode need u32
@@ -152,11 +152,11 @@ test "bytecode config validation runtime checks" {
         .max_bytecode_size = 24576,
         .max_initcode_size = 49152,
     };
-    
+
     // These should not cause runtime errors
     try std.testing.expectEqual(@as(u32, 24576), valid_config.max_bytecode_size);
     try std.testing.expectEqual(@as(u32, 49152), valid_config.max_initcode_size);
-    
+
     // Test small valid values
     const small_config = BytecodeConfig{
         .max_bytecode_size = 1000,
@@ -166,10 +166,9 @@ test "bytecode config validation runtime checks" {
     try std.testing.expectEqual(@as(u32, 2000), small_config.max_initcode_size);
 }
 
-
 test "bytecode config pc type consistency" {
     // Test that different sizes produce expected types
-    const sizes_and_types = [_]struct{ size: u32, expected_type: type }{
+    const sizes_and_types = [_]struct { size: u32, expected_type: type }{
         .{ .size = 1, .expected_type = u8 },
         .{ .size = 100, .expected_type = u8 },
         .{ .size = 255, .expected_type = u8 },
@@ -181,7 +180,7 @@ test "bytecode config pc type consistency" {
         .{ .size = 65535, .expected_type = u16 },
         .{ .size = 65536, .expected_type = u32 },
     };
-    
+
     inline for (sizes_and_types) |item| {
         const config = comptime BytecodeConfig{ .max_bytecode_size = item.size, .max_initcode_size = item.size };
         try std.testing.expectEqual(item.expected_type, config.PcType());
@@ -192,13 +191,13 @@ test "bytecode config ethereum constants" {
     // Test Ethereum mainnet values
     const mainnet_config = BytecodeConfig{
         .max_bytecode_size = 24576, // EIP-170
-        .max_initcode_size = 49152, // EIP-3860 
+        .max_initcode_size = 49152, // EIP-3860
     };
-    
+
     try std.testing.expectEqual(@as(u32, 24576), mainnet_config.max_bytecode_size);
     try std.testing.expectEqual(@as(u32, 49152), mainnet_config.max_initcode_size);
     try std.testing.expect(mainnet_config.max_initcode_size >= mainnet_config.max_bytecode_size);
-    
+
     // Test that initcode is exactly 2x bytecode (EIP-3860)
     try std.testing.expectEqual(mainnet_config.max_bytecode_size * 2, mainnet_config.max_initcode_size);
 }

@@ -105,6 +105,7 @@ zig build test-opcodes -Dtest-filter='ADD'
 | [GAS-METERING.md](./GAS-METERING.md) | Gas calculation patterns and costs | Debugging gas issues |
 | [TESTING.md](./TESTING.md) | Test organization and debugging | Running/writing tests |
 | [HARDFORKS.md](./HARDFORKS.md) | EIP support matrix and feature flags | Adding hardfork features |
+| [TIGERSTYLE.md](./TIGERSTYLE.md) | Safety guarantees, `ReleaseSafe`, EVM pooling, recursion & deps | Deploying safely or reviewing code |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Development workflow and conventions | Making contributions |
 
 ## Quick Navigation by Topic

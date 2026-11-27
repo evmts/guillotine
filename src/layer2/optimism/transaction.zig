@@ -333,11 +333,11 @@ test "OpTxType: isDeposit for each type" {
 }
 
 test "OpTxType: correct enum values" {
-    try std.testing.expectEqual(@as(u8, 0x00), @intFromEnum(OpTxType.Legacy));
-    try std.testing.expectEqual(@as(u8, 0x01), @intFromEnum(OpTxType.Eip2930));
-    try std.testing.expectEqual(@as(u8, 0x02), @intFromEnum(OpTxType.Eip1559));
-    try std.testing.expectEqual(@as(u8, 0x03), @intFromEnum(OpTxType.Eip4844));
-    try std.testing.expectEqual(@as(u8, 0x7E), @intFromEnum(OpTxType.Deposit));
+    try std.testing.expectEqual(@as(u8, 0x00), @backingInt(OpTxType.Legacy));
+    try std.testing.expectEqual(@as(u8, 0x01), @backingInt(OpTxType.Eip2930));
+    try std.testing.expectEqual(@as(u8, 0x02), @backingInt(OpTxType.Eip1559));
+    try std.testing.expectEqual(@as(u8, 0x03), @backingInt(OpTxType.Eip4844));
+    try std.testing.expectEqual(@as(u8, 0x7E), @backingInt(OpTxType.Deposit));
 }
 
 test "OpTxType: name returns correct strings" {
@@ -431,7 +431,7 @@ test "Integration: regular transaction with L1 data cost" {
 }
 
 test "OpTxType: EIP-7702 is type 0x04 and gated on Isthmus" {
-    try std.testing.expectEqual(@as(u8, 0x04), @intFromEnum(OpTxType.Eip7702));
+    try std.testing.expectEqual(@as(u8, 0x04), @backingInt(OpTxType.Eip7702));
     try std.testing.expectEqualStrings("EIP-7702 (Set Code)", OpTxType.Eip7702.name());
     try std.testing.expect(!OpTxType.Eip7702.isDeposit());
     const envelope = [_]u8{ 0x04, 0xf8, 0x00 };

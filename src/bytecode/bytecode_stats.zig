@@ -18,21 +18,21 @@ pub const BytecodeStats = struct {
         pc: usize,
         second_opcode: Opcode,
     };
-    
+
     pub const Jump = struct {
         pc: usize,
         target: u256,
     };
-    
+
     pub const PushValue = struct {
         pc: usize,
         value: u256,
     };
-    
+
     pub const Pattern = struct {
         opcodes: []const u8,
         count: u32,
-        
+
         pub fn format(self: Pattern, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             _ = fmt;
             _ = options;
@@ -48,7 +48,7 @@ pub const BytecodeStats = struct {
             try writer.writeAll("]");
         }
     };
-    
+
     opcode_counts: [256]u32,
     push_values: []const PushValue,
     potential_fusions: []const Fusion,
@@ -64,7 +64,7 @@ pub const BytecodeStats = struct {
     patterns_6: []const Pattern,
     patterns_7: []const Pattern,
     patterns_8: []const Pattern,
-    
+
     /// Analyze bytecode and return statistics
     pub fn analyze(allocator: std.mem.Allocator, bytecode: []const u8) !BytecodeStats {
         var opcode_counts = @as([256]u32, @splat(0));
@@ -77,7 +77,7 @@ pub const BytecodeStats = struct {
         var jumps = try std.ArrayList(Jump).initCapacity(allocator, 0);
         errdefer jumps.deinit(allocator);
         var backwards_jumps: usize = 0;
-        
+
         // Pattern tracking maps
         var pattern_map_2 = std.AutoHashMap(PatternKey2, u32).init(allocator);
         defer pattern_map_2.deinit();
@@ -93,35 +93,36 @@ pub const BytecodeStats = struct {
         defer pattern_map_7.deinit();
         var pattern_map_8 = std.AutoHashMap(PatternKey8, u32).init(allocator);
         defer pattern_map_8.deinit();
-        
+
         // Store the actual opcodes for pattern analysis (excluding push data)
         var opcodes = try std.ArrayList(u8).initCapacity(allocator, bytecode.len);
         defer opcodes.deinit(allocator);
-        
+
         var pc: usize = 0;
         while (pc < bytecode.len) {
             const opcode_byte = bytecode[pc];
             opcode_counts[opcode_byte] += 1;
-            
+
             // Add to opcodes list for pattern tracking (only actual opcodes, not push data)
             try opcodes.append(allocator, opcode_byte);
-            
+
             const opcode = std.enums.fromInt(Opcode, opcode_byte) orelse {
                 // Invalid opcode
                 pc += 1;
                 continue;
             };
-            
+
             // Track JUMPDEST locations
             if (opcode == .JUMPDEST) {
                 try jumpdests.append(allocator, pc);
             }
-            
+
             // Check for PUSH opcodes
-            if (@intFromEnum(opcode) >= @intFromEnum(Opcode.PUSH1) and 
-                @intFromEnum(opcode) <= @intFromEnum(Opcode.PUSH32)) {
-                const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
-                
+            if (@backingInt(opcode) >= @backingInt(Opcode.PUSH1) and
+                @backingInt(opcode) <= @backingInt(Opcode.PUSH32))
+            {
+                const push_size = @backingInt(opcode) - @backingInt(Opcode.PUSH1) + 1;
+
                 if (pc + push_size < bytecode.len) {
                     // Extract push value
                     var value: u256 = 0;
@@ -131,7 +132,7 @@ pub const BytecodeStats = struct {
                         }
                     }
                     try push_values.append(allocator, .{ .pc = pc, .value = value });
-                    
+
                     // Check for potential fusion with next opcode
                     const next_pc = pc + 1 + push_size;
                     if (next_pc < bytecode.len) {
@@ -139,7 +140,7 @@ pub const BytecodeStats = struct {
                             pc += 1 + push_size;
                             continue;
                         };
-                        
+
                         // Common fusion patterns
                         switch (next_opcode) {
                             .ADD, .MUL, .SUB, .DIV, .JUMP, .JUMPI, .GT, .LT, .EQ => {
@@ -149,7 +150,7 @@ pub const BytecodeStats = struct {
                         }
                     }
                 }
-                
+
                 pc += 1 + push_size;
             } else if (opcode == .JUMP or opcode == .JUMPI) {
                 // For static analysis, we can only track JUMP after PUSH
@@ -158,13 +159,14 @@ pub const BytecodeStats = struct {
                     var push_pc = pc - 1;
                     var found_push = false;
                     var jump_target: u256 = 0;
-                    
+
                     // Scan backwards for PUSH instruction
                     while (push_pc > 0 and pc - push_pc < 33) : (push_pc -= 1) {
                         const prev_opcode = std.enums.fromInt(Opcode, bytecode[push_pc]) orelse continue;
-                        if (@intFromEnum(prev_opcode) >= @intFromEnum(Opcode.PUSH1) and 
-                            @intFromEnum(prev_opcode) <= @intFromEnum(Opcode.PUSH32)) {
-                            const push_size = @intFromEnum(prev_opcode) - @intFromEnum(Opcode.PUSH1) + 1;
+                        if (@backingInt(prev_opcode) >= @backingInt(Opcode.PUSH1) and
+                            @backingInt(prev_opcode) <= @backingInt(Opcode.PUSH32))
+                        {
+                            const push_size = @backingInt(prev_opcode) - @backingInt(Opcode.PUSH1) + 1;
                             if (push_pc + 1 + push_size == pc) {
                                 // This PUSH feeds into our JUMP
                                 jump_target = 0;
@@ -178,7 +180,7 @@ pub const BytecodeStats = struct {
                             }
                         }
                     }
-                    
+
                     if (found_push) {
                         try jumps.append(allocator, .{ .pc = pc, .target = jump_target });
                         if (jump_target < pc) {
@@ -191,10 +193,10 @@ pub const BytecodeStats = struct {
                 pc += 1;
             }
         }
-        
+
         // Now analyze patterns from the collected opcodes
         const opcode_list = opcodes.items;
-        
+
         // Track 2-opcode patterns
         if (opcode_list.len >= 2) {
             var i: usize = 0;
@@ -207,7 +209,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Track 3-opcode patterns
         if (opcode_list.len >= 3) {
             var i: usize = 0;
@@ -220,7 +222,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Track 4-opcode patterns
         if (opcode_list.len >= 4) {
             var i: usize = 0;
@@ -233,7 +235,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Track 5-opcode patterns
         if (opcode_list.len >= 5) {
             var i: usize = 0;
@@ -246,7 +248,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Track 6-opcode patterns
         if (opcode_list.len >= 6) {
             var i: usize = 0;
@@ -259,7 +261,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Track 7-opcode patterns
         if (opcode_list.len >= 7) {
             var i: usize = 0;
@@ -272,7 +274,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Track 8-opcode patterns
         if (opcode_list.len >= 8) {
             var i: usize = 0;
@@ -285,7 +287,7 @@ pub const BytecodeStats = struct {
                 entry.value_ptr.* += 1;
             }
         }
-        
+
         // Extract top 3 patterns for each length
         const patterns_2 = try extractTopPatterns2(allocator, pattern_map_2);
         const patterns_3 = try extractTopPatterns3(allocator, pattern_map_3);
@@ -294,7 +296,7 @@ pub const BytecodeStats = struct {
         const patterns_6 = try extractTopPatterns6(allocator, pattern_map_6);
         const patterns_7 = try extractTopPatterns7(allocator, pattern_map_7);
         const patterns_8 = try extractTopPatterns8(allocator, pattern_map_8);
-        
+
         return BytecodeStats{
             .opcode_counts = opcode_counts,
             .push_values = try push_values.toOwnedSlice(allocator),
@@ -312,11 +314,11 @@ pub const BytecodeStats = struct {
             .patterns_8 = patterns_8,
         };
     }
-    
+
     fn extractTopPatterns2(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey2, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 2);
@@ -324,14 +326,14 @@ pub const BytecodeStats = struct {
             opcodes[1] = entry.key_ptr.b;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         // Sort by count descending
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         // Return top 3 and clean up the rest
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
@@ -344,11 +346,11 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     fn extractTopPatterns3(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey3, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 3);
@@ -357,13 +359,13 @@ pub const BytecodeStats = struct {
             opcodes[2] = entry.key_ptr.c;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
         for (0..top_count) |i| {
@@ -375,11 +377,11 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     fn extractTopPatterns4(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey4, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 4);
@@ -389,13 +391,13 @@ pub const BytecodeStats = struct {
             opcodes[3] = entry.key_ptr.d;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
         for (0..top_count) |i| {
@@ -407,11 +409,11 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     fn extractTopPatterns5(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey5, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 5);
@@ -422,13 +424,13 @@ pub const BytecodeStats = struct {
             opcodes[4] = entry.key_ptr.e;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
         for (0..top_count) |i| {
@@ -440,11 +442,11 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     fn extractTopPatterns6(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey6, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 6);
@@ -456,13 +458,13 @@ pub const BytecodeStats = struct {
             opcodes[5] = entry.key_ptr.f;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
         for (0..top_count) |i| {
@@ -474,11 +476,11 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     fn extractTopPatterns7(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey7, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 7);
@@ -491,13 +493,13 @@ pub const BytecodeStats = struct {
             opcodes[6] = entry.key_ptr.g;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
         for (0..top_count) |i| {
@@ -509,11 +511,11 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     fn extractTopPatterns8(allocator: std.mem.Allocator, map: std.AutoHashMap(PatternKey8, u32)) ![]const Pattern {
         var patterns = try std.ArrayList(Pattern).initCapacity(allocator, map.count());
         defer patterns.deinit(allocator);
-        
+
         var iter = map.iterator();
         while (iter.next()) |entry| {
             const opcodes = try allocator.alloc(u8, 8);
@@ -527,13 +529,13 @@ pub const BytecodeStats = struct {
             opcodes[7] = entry.key_ptr.h;
             try patterns.append(allocator, .{ .opcodes = opcodes, .count = entry.value_ptr.* });
         }
-        
+
         std.mem.sort(Pattern, patterns.items, {}, struct {
             fn lessThan(_: void, a: Pattern, b: Pattern) bool {
                 return a.count > b.count;
             }
         }.lessThan);
-        
+
         const top_count = @min(3, patterns.items.len);
         const result = try allocator.alloc(Pattern, top_count);
         for (0..top_count) |i| {
@@ -545,7 +547,7 @@ pub const BytecodeStats = struct {
         }
         return result;
     }
-    
+
     /// Deallocate statistics data
     pub fn deinit(self: *BytecodeStats, allocator: std.mem.Allocator) void {
         allocator.free(self.push_values);
@@ -582,13 +584,13 @@ pub const BytecodeStats = struct {
         }
         allocator.free(self.patterns_8);
     }
-    
+
     pub fn formatStats(self: BytecodeStats, allocator: std.mem.Allocator) ![]const u8 {
         // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
         var list: std.Io.Writer.Allocating = .init(allocator);
         defer list.deinit();
         const writer = &list.writer;
-        
+
         try writer.writeAll("\n=== Bytecode Statistics ===\n");
         try writer.writeAll("Opcode counts:\n");
         var total_opcodes: u32 = 0;
@@ -636,31 +638,31 @@ pub const BytecodeStats = struct {
             }
             try writer.writeAll("\n");
         }
-        
+
         // Display pattern statistics
         try writer.writeAll("Pattern Analysis:\n");
-        
+
         if (self.patterns_2.len > 0) {
             try writer.writeAll("\nTop 2-opcode patterns:\n");
             for (self.patterns_2) |pattern| {
                 try writer.print("  {} × {}\n", .{ pattern.count, pattern });
             }
         }
-        
+
         if (self.patterns_3.len > 0) {
             try writer.writeAll("\nTop 3-opcode patterns:\n");
             for (self.patterns_3) |pattern| {
                 try writer.print("  {} × {}\n", .{ pattern.count, pattern });
             }
         }
-        
+
         if (self.patterns_4.len > 0) {
             try writer.writeAll("\nTop 4-opcode patterns:\n");
             for (self.patterns_4) |pattern| {
                 try writer.print("  {} × {}\n", .{ pattern.count, pattern });
             }
         }
-        
+
         if (self.patterns_5.len > 0) {
             try writer.writeAll("\nTop 5-opcode patterns:\n");
             for (self.patterns_5) |pattern| {
@@ -688,40 +690,40 @@ pub const BytecodeStats = struct {
                 try writer.print("  {} × {}\n", .{ pattern.count, pattern });
             }
         }
-        
+
         try writer.print("\nContract type: {s}\n", .{if (self.is_create_code) "Create/Deploy code" else "Runtime code"});
         try writer.writeAll("======================\n");
-        
+
         return try list.toOwnedSlice();
     }
 };
 
 test "BytecodeStats formatStats basic functionality" {
     const allocator = std.testing.allocator;
-    
+
     // Create mock statistics data
     var opcode_counts = @as([256]u32, @splat(0));
-    opcode_counts[@intFromEnum(Opcode.PUSH1)] = 3;
-    opcode_counts[@intFromEnum(Opcode.ADD)] = 2;
-    opcode_counts[@intFromEnum(Opcode.STOP)] = 1;
-    
+    opcode_counts[@backingInt(Opcode.PUSH1)] = 3;
+    opcode_counts[@backingInt(Opcode.ADD)] = 2;
+    opcode_counts[@backingInt(Opcode.STOP)] = 1;
+
     const push_values = [_]BytecodeStats.PushValue{
         .{ .pc = 0, .value = 0x42 },
         .{ .pc = 5, .value = 0x1337 },
     };
-    
+
     const fusions = [_]BytecodeStats.Fusion{
         .{ .pc = 0, .second_opcode = Opcode.ADD },
         .{ .pc = 5, .second_opcode = Opcode.JUMP },
     };
-    
+
     const jumpdests = [_]usize{ 10, 20, 30 };
-    
+
     const jumps = [_]BytecodeStats.Jump{
         .{ .pc = 2, .target = 10 },
         .{ .pc = 7, .target = 20 },
     };
-    
+
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &push_values,
@@ -738,10 +740,10 @@ test "BytecodeStats formatStats basic functionality" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     // Verify key sections are present
     try std.testing.expect(std.mem.indexOf(u8, output, "=== Bytecode Statistics ===") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Opcode counts:") != null);
@@ -749,28 +751,28 @@ test "BytecodeStats formatStats basic functionality" {
     try std.testing.expect(std.mem.indexOf(u8, output, "ADD: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "STOP: 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Total opcodes: 6") != null);
-    
+
     // Verify push values section
     try std.testing.expect(std.mem.indexOf(u8, output, "Push values (2 total):") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 0: 0x42") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 5: 0x1337") != null);
-    
+
     // Verify fusion section
     try std.testing.expect(std.mem.indexOf(u8, output, "Potential fusions (2 total):") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 0: PUSH + ADD") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 5: PUSH + JUMP") != null);
-    
+
     // Verify jumpdests section
     try std.testing.expect(std.mem.indexOf(u8, output, "Jump destinations (3 total):") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 10") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 20") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 30") != null);
-    
+
     // Verify jumps section
     try std.testing.expect(std.mem.indexOf(u8, output, "Jumps (2 total, 0 backwards):") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 2 ↓ target 0xa") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 7 ↓ target 0x14") != null);
-    
+
     // Verify contract type
     try std.testing.expect(std.mem.indexOf(u8, output, "Contract type: Runtime code") != null);
 }
@@ -795,15 +797,15 @@ test "BytecodeStats formatStats empty statistics" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     // Should still have basic structure
     try std.testing.expect(std.mem.indexOf(u8, output, "=== Bytecode Statistics ===") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Total opcodes: 0") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Contract type: Runtime code") != null);
-    
+
     // Should not have sections for empty data
     try std.testing.expect(std.mem.indexOf(u8, output, "Push values") == null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Potential fusions") == null);
@@ -815,7 +817,7 @@ test "BytecodeStats formatStats create code detection" {
     const allocator = std.testing.allocator;
 
     var opcode_counts = @as([256]u32, @splat(0));
-    opcode_counts[@intFromEnum(Opcode.CODECOPY)] = 1;
+    opcode_counts[@backingInt(Opcode.CODECOPY)] = 1;
 
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
@@ -833,10 +835,10 @@ test "BytecodeStats formatStats create code detection" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     try std.testing.expect(std.mem.indexOf(u8, output, "Contract type: Create/Deploy code") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "CODECOPY: 1") != null);
 }
@@ -846,9 +848,9 @@ test "BytecodeStats formatStats backwards jumps" {
 
     const opcode_counts = @as([256]u32, @splat(0));
     const jumps = [_]BytecodeStats.Jump{
-        .{ .pc = 10, .target = 5 },  // Backwards jump
+        .{ .pc = 10, .target = 5 }, // Backwards jump
         .{ .pc = 15, .target = 20 }, // Forward jump
-        .{ .pc = 25, .target = 8 },  // Backwards jump
+        .{ .pc = 25, .target = 8 }, // Backwards jump
     };
 
     const stats = BytecodeStats{
@@ -867,22 +869,22 @@ test "BytecodeStats formatStats backwards jumps" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     // Verify backwards jump detection
     try std.testing.expect(std.mem.indexOf(u8, output, "Jumps (3 total, 2 backwards):") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "PC 10 ↑ target 0x5") != null);  // Backwards (↑)
+    try std.testing.expect(std.mem.indexOf(u8, output, "PC 10 ↑ target 0x5") != null); // Backwards (↑)
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 15 ↓ target 0x14") != null); // Forward (↓)
-    try std.testing.expect(std.mem.indexOf(u8, output, "PC 25 ↑ target 0x8") != null);  // Backwards (↑)
+    try std.testing.expect(std.mem.indexOf(u8, output, "PC 25 ↑ target 0x8") != null); // Backwards (↑)
 }
 
 test "BytecodeStats formatStats large values" {
     const allocator = std.testing.allocator;
 
     var opcode_counts = @as([256]u32, @splat(0));
-    opcode_counts[@intFromEnum(Opcode.PUSH32)] = 999999;
+    opcode_counts[@backingInt(Opcode.PUSH32)] = 999999;
 
     const push_values = [_]BytecodeStats.PushValue{
         .{ .pc = 0, .value = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF }, // Max u256
@@ -908,10 +910,10 @@ test "BytecodeStats formatStats large values" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     // Verify large numbers are formatted correctly
     try std.testing.expect(std.mem.indexOf(u8, output, "PUSH32: 999999") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Total opcodes: 999999") != null);
@@ -948,10 +950,10 @@ test "BytecodeStats formatStats all fusion types" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     // Verify all fusion types are present
     try std.testing.expect(std.mem.indexOf(u8, output, "Potential fusions (6 total):") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "PC 0: PUSH + ADD") != null);
@@ -985,10 +987,10 @@ test "BytecodeStats formatStats invalid opcode handling" {
         .patterns_7 = &.{},
         .patterns_8 = &.{},
     };
-    
+
     const output = try stats.formatStats(allocator);
     defer allocator.free(output);
-    
+
     // Verify invalid opcodes are shown with hex notation
     try std.testing.expect(std.mem.indexOf(u8, output, "UNKNOWN(0xfe): 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "UNKNOWN(0xff): 2") != null);
@@ -998,39 +1000,39 @@ test "BytecodeStats formatStats invalid opcode handling" {
 test "BytecodeStats analyze - basic functionality" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x10, // pc=0, value=0x10
-        @intFromEnum(Opcode.ADD),         // pc=2
-        @intFromEnum(Opcode.PUSH2), 0x12, 0x34, // pc=3, value=0x1234  
-        @intFromEnum(Opcode.MUL),         // pc=6
-        @intFromEnum(Opcode.JUMPDEST),    // pc=7
-        @intFromEnum(Opcode.STOP),        // pc=8
+        @backingInt(Opcode.PUSH1), 0x10, // pc=0, value=0x10
+        @backingInt(Opcode.ADD), // pc=2
+        @backingInt(Opcode.PUSH2), 0x12, 0x34, // pc=3, value=0x1234
+        @backingInt(Opcode.MUL), // pc=6
+        @backingInt(Opcode.JUMPDEST), // pc=7
+        @backingInt(Opcode.STOP), // pc=8
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Test opcode counts
-    try std.testing.expectEqual(@as(u32, 2), stats.opcode_counts[@intFromEnum(Opcode.PUSH1)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.ADD)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH2)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.MUL)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.JUMPDEST)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
-    
+    try std.testing.expectEqual(@as(u32, 2), stats.opcode_counts[@backingInt(Opcode.PUSH1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.ADD)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.PUSH2)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.MUL)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.JUMPDEST)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.STOP)]);
+
     // Test push values
     try std.testing.expectEqual(@as(usize, 2), stats.push_values.len);
     try std.testing.expectEqual(@as(usize, 0), stats.push_values[0].pc);
     try std.testing.expectEqual(@as(u256, 0x10), stats.push_values[0].value);
     try std.testing.expectEqual(@as(usize, 3), stats.push_values[1].pc);
     try std.testing.expectEqual(@as(u256, 0x1234), stats.push_values[1].value);
-    
+
     // Test potential fusions
     try std.testing.expectEqual(@as(usize, 2), stats.potential_fusions.len);
     try std.testing.expectEqual(@as(usize, 0), stats.potential_fusions[0].pc);
     try std.testing.expectEqual(Opcode.ADD, stats.potential_fusions[0].second_opcode);
     try std.testing.expectEqual(@as(usize, 3), stats.potential_fusions[1].pc);
     try std.testing.expectEqual(Opcode.MUL, stats.potential_fusions[1].second_opcode);
-    
+
     // Test JUMPDEST detection
     try std.testing.expectEqual(@as(usize, 1), stats.jumpdests.len);
     try std.testing.expectEqual(@as(usize, 7), stats.jumpdests[0]);
@@ -1039,17 +1041,17 @@ test "BytecodeStats analyze - basic functionality" {
 test "BytecodeStats analyze - empty bytecode" {
     const allocator = std.testing.allocator;
     const bytecode: []const u8 = &.{};
-    
+
     var stats = try BytecodeStats.analyze(allocator, bytecode);
     defer stats.deinit(allocator);
-    
+
     // All arrays should be empty
     try std.testing.expectEqual(@as(usize, 0), stats.push_values.len);
     try std.testing.expectEqual(@as(usize, 0), stats.potential_fusions.len);
     try std.testing.expectEqual(@as(usize, 0), stats.jumpdests.len);
     try std.testing.expectEqual(@as(usize, 0), stats.jumps.len);
     try std.testing.expectEqual(@as(usize, 0), stats.backwards_jumps);
-    
+
     // All opcode counts should be zero
     for (stats.opcode_counts) |count| {
         try std.testing.expectEqual(@as(u32, 0), count);
@@ -1059,29 +1061,29 @@ test "BytecodeStats analyze - empty bytecode" {
 test "BytecodeStats analyze - push value extraction" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0xFF,         // 1-byte push
-        @intFromEnum(Opcode.PUSH2), 0x12, 0x34,   // 2-byte push
-        @intFromEnum(Opcode.PUSH4), 0xDE, 0xAD, 0xBE, 0xEF, // 4-byte push
-        @intFromEnum(Opcode.PUSH8), 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, // 8-byte push
+        @backingInt(Opcode.PUSH1), 0xFF, // 1-byte push
+        @backingInt(Opcode.PUSH2), 0x12, 0x34, // 2-byte push
+        @backingInt(Opcode.PUSH4), 0xDE, 0xAD, 0xBE, 0xEF, // 4-byte push
+        @backingInt(Opcode.PUSH8), 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, // 8-byte push
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     try std.testing.expectEqual(@as(usize, 4), stats.push_values.len);
-    
+
     // Test PUSH1
     try std.testing.expectEqual(@as(usize, 0), stats.push_values[0].pc);
     try std.testing.expectEqual(@as(u256, 0xFF), stats.push_values[0].value);
-    
-    // Test PUSH2 
+
+    // Test PUSH2
     try std.testing.expectEqual(@as(usize, 2), stats.push_values[1].pc);
     try std.testing.expectEqual(@as(u256, 0x1234), stats.push_values[1].value);
-    
+
     // Test PUSH4
     try std.testing.expectEqual(@as(usize, 5), stats.push_values[2].pc);
     try std.testing.expectEqual(@as(u256, 0xDEADBEEF), stats.push_values[2].value);
-    
+
     // Test PUSH8
     try std.testing.expectEqual(@as(usize, 10), stats.push_values[3].pc);
     try std.testing.expectEqual(@as(u256, 0x0123456789ABCDEF), stats.push_values[3].value);
@@ -1090,36 +1092,36 @@ test "BytecodeStats analyze - push value extraction" {
 test "BytecodeStats analyze - jump detection and backwards jumps" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.JUMPDEST),    // pc=0
-        @intFromEnum(Opcode.PUSH1), 0x08, // pc=1, target=8
-        @intFromEnum(Opcode.JUMP),        // pc=3, forward jump
-        @intFromEnum(Opcode.PUSH1), 0x00, // pc=4, target=0  
-        @intFromEnum(Opcode.JUMP),        // pc=6, backward jump
-        @intFromEnum(Opcode.JUMPDEST),    // pc=7
-        @intFromEnum(Opcode.JUMPDEST),    // pc=8
-        @intFromEnum(Opcode.STOP),        // pc=9
+        @backingInt(Opcode.JUMPDEST), // pc=0
+        @backingInt(Opcode.PUSH1), 0x08, // pc=1, target=8
+        @backingInt(Opcode.JUMP), // pc=3, forward jump
+        @backingInt(Opcode.PUSH1), 0x00, // pc=4, target=0
+        @backingInt(Opcode.JUMP), // pc=6, backward jump
+        @backingInt(Opcode.JUMPDEST), // pc=7
+        @backingInt(Opcode.JUMPDEST), // pc=8
+        @backingInt(Opcode.STOP), // pc=9
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Test JUMPDEST detection
     try std.testing.expectEqual(@as(usize, 3), stats.jumpdests.len);
     try std.testing.expectEqual(@as(usize, 0), stats.jumpdests[0]);
     try std.testing.expectEqual(@as(usize, 7), stats.jumpdests[1]);
     try std.testing.expectEqual(@as(usize, 8), stats.jumpdests[2]);
-    
+
     // Test jump detection
     try std.testing.expectEqual(@as(usize, 2), stats.jumps.len);
-    
+
     // First jump: forward (pc=3, target=8)
     try std.testing.expectEqual(@as(usize, 3), stats.jumps[0].pc);
     try std.testing.expectEqual(@as(u256, 8), stats.jumps[0].target);
-    
+
     // Second jump: backward (pc=6, target=0)
     try std.testing.expectEqual(@as(usize, 6), stats.jumps[1].pc);
     try std.testing.expectEqual(@as(u256, 0), stats.jumps[1].target);
-    
+
     // Test backwards jump counting
     try std.testing.expectEqual(@as(usize, 1), stats.backwards_jumps);
 }
@@ -1127,16 +1129,16 @@ test "BytecodeStats analyze - jump detection and backwards jumps" {
 test "BytecodeStats analyze - jumpi detection" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x05, // pc=0, target=5
-        @intFromEnum(Opcode.JUMPI),       // pc=2
-        @intFromEnum(Opcode.STOP),        // pc=3
-        @intFromEnum(Opcode.JUMPDEST),    // pc=4
-        @intFromEnum(Opcode.JUMPDEST),    // pc=5
+        @backingInt(Opcode.PUSH1), 0x05, // pc=0, target=5
+        @backingInt(Opcode.JUMPI), // pc=2
+        @backingInt(Opcode.STOP), // pc=3
+        @backingInt(Opcode.JUMPDEST), // pc=4
+        @backingInt(Opcode.JUMPDEST), // pc=5
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Test JUMPI detection
     try std.testing.expectEqual(@as(usize, 1), stats.jumps.len);
     try std.testing.expectEqual(@as(usize, 2), stats.jumps[0].pc);
@@ -1147,30 +1149,27 @@ test "BytecodeStats analyze - fusion pattern detection" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
         // Test all fusion patterns
-        @intFromEnum(Opcode.PUSH1), 0x10, @intFromEnum(Opcode.ADD),  // ADD fusion
-        @intFromEnum(Opcode.PUSH1), 0x20, @intFromEnum(Opcode.MUL),  // MUL fusion
-        @intFromEnum(Opcode.PUSH1), 0x30, @intFromEnum(Opcode.SUB),  // SUB fusion
-        @intFromEnum(Opcode.PUSH1), 0x40, @intFromEnum(Opcode.DIV),  // DIV fusion
-        @intFromEnum(Opcode.PUSH1), 0x50, @intFromEnum(Opcode.JUMP), // JUMP fusion
-        @intFromEnum(Opcode.PUSH1), 0x60, @intFromEnum(Opcode.JUMPI), // JUMPI fusion
-        @intFromEnum(Opcode.PUSH1), 0x70, @intFromEnum(Opcode.GT),   // GT fusion
-        @intFromEnum(Opcode.PUSH1), 0x80, @intFromEnum(Opcode.LT),   // LT fusion
-        @intFromEnum(Opcode.PUSH1), 0x90, @intFromEnum(Opcode.EQ),   // EQ fusion
+        @backingInt(Opcode.PUSH1), 0x10, @backingInt(Opcode.ADD), // ADD fusion
+        @backingInt(Opcode.PUSH1), 0x20, @backingInt(Opcode.MUL), // MUL fusion
+        @backingInt(Opcode.PUSH1), 0x30, @backingInt(Opcode.SUB), // SUB fusion
+        @backingInt(Opcode.PUSH1), 0x40, @backingInt(Opcode.DIV), // DIV fusion
+        @backingInt(Opcode.PUSH1), 0x50, @backingInt(Opcode.JUMP), // JUMP fusion
+        @backingInt(Opcode.PUSH1), 0x60, @backingInt(Opcode.JUMPI), // JUMPI fusion
+        @backingInt(Opcode.PUSH1), 0x70, @backingInt(Opcode.GT), // GT fusion
+        @backingInt(Opcode.PUSH1), 0x80, @backingInt(Opcode.LT), // LT fusion
+        @backingInt(Opcode.PUSH1), 0x90, @backingInt(Opcode.EQ), // EQ fusion
         // Non-fusion pattern
-        @intFromEnum(Opcode.PUSH1), 0xA0, @intFromEnum(Opcode.POP),  // Should not fuse
+        @backingInt(Opcode.PUSH1), 0xA0, @backingInt(Opcode.POP), // Should not fuse
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Should detect 9 fusion patterns (all except the last POP)
     try std.testing.expectEqual(@as(usize, 9), stats.potential_fusions.len);
-    
-    const expected_opcodes = [_]Opcode{
-        Opcode.ADD, Opcode.MUL, Opcode.SUB, Opcode.DIV, Opcode.JUMP,
-        Opcode.JUMPI, Opcode.GT, Opcode.LT, Opcode.EQ
-    };
-    
+
+    const expected_opcodes = [_]Opcode{ Opcode.ADD, Opcode.MUL, Opcode.SUB, Opcode.DIV, Opcode.JUMP, Opcode.JUMPI, Opcode.GT, Opcode.LT, Opcode.EQ };
+
     for (stats.potential_fusions, expected_opcodes, 0..) |fusion, expected_opcode, i| {
         try std.testing.expectEqual(@as(usize, i * 3), fusion.pc); // Each pattern is 3 bytes
         try std.testing.expectEqual(expected_opcode, fusion.second_opcode);
@@ -1180,23 +1179,23 @@ test "BytecodeStats analyze - fusion pattern detection" {
 test "BytecodeStats analyze - invalid opcodes handling" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x42,
+        @backingInt(Opcode.PUSH1), 0x42,
         0xFE, // Invalid opcode
-        0xFF, // Invalid opcode  
-        @intFromEnum(Opcode.STOP),
+        0xFF, // Invalid opcode
+        @backingInt(Opcode.STOP),
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Valid opcodes should be counted
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH1)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
-    
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.PUSH1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.STOP)]);
+
     // Invalid opcodes should also be counted
     try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[0xFE]);
     try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[0xFF]);
-    
+
     // Push value should still be detected
     try std.testing.expectEqual(@as(usize, 1), stats.push_values.len);
     try std.testing.expectEqual(@as(u256, 0x42), stats.push_values[0].value);
@@ -1205,17 +1204,17 @@ test "BytecodeStats analyze - invalid opcodes handling" {
 test "BytecodeStats analyze - truncated push instructions" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH2), 0x12, // Missing second byte
-        @intFromEnum(Opcode.PUSH4), 0x01, 0x02, // Missing two bytes
+        @backingInt(Opcode.PUSH2), 0x12, // Missing second byte
+        @backingInt(Opcode.PUSH4), 0x01, 0x02, // Missing two bytes
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Should still count the PUSH opcodes
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH2)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH4)]);
-    
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.PUSH2)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.PUSH4)]);
+
     // Should extract partial values
     try std.testing.expectEqual(@as(usize, 2), stats.push_values.len);
     try std.testing.expectEqual(@as(u256, 0x12), stats.push_values[0].value); // Only got one byte
@@ -1225,14 +1224,14 @@ test "BytecodeStats analyze - truncated push instructions" {
 test "BytecodeStats analyze - push32 maximum value" {
     const allocator = std.testing.allocator;
     var bytecode: [33]u8 = undefined;
-    bytecode[0] = @intFromEnum(Opcode.PUSH32);
+    bytecode[0] = @backingInt(Opcode.PUSH32);
     for (1..33) |i| {
         bytecode[i] = 0xFF; // Maximum value
     }
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     try std.testing.expectEqual(@as(usize, 1), stats.push_values.len);
     try std.testing.expectEqual(@as(u256, std.math.maxInt(u256)), stats.push_values[0].value);
 }
@@ -1240,39 +1239,39 @@ test "BytecodeStats analyze - push32 maximum value" {
 test "BytecodeStats analyze - complex jump pattern" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH2), 0x00, 0x10, // Target 0x0010 = 16
-        @intFromEnum(Opcode.JUMP),              // pc=3
-        @intFromEnum(Opcode.PUSH1), 0x00,       // Target 0x00 = 0
-        @intFromEnum(Opcode.PUSH1), 0x20,       // Target 0x20 = 32  
-        @intFromEnum(Opcode.JUMPI),             // pc=7
-        @intFromEnum(Opcode.JUMPDEST),          // pc=8 (not targeted)
-        @intFromEnum(Opcode.PUSH1), 0x08,       // Target 0x08 = 8
-        @intFromEnum(Opcode.JUMP),              // pc=11 (backwards to 8)
-        @intFromEnum(Opcode.JUMPDEST),          // pc=12
-        @intFromEnum(Opcode.JUMPDEST),          // pc=13
-        @intFromEnum(Opcode.JUMPDEST),          // pc=14
-        @intFromEnum(Opcode.JUMPDEST),          // pc=15
-        @intFromEnum(Opcode.JUMPDEST),          // pc=16
+        @backingInt(Opcode.PUSH2), 0x00, 0x10, // Target 0x0010 = 16
+        @backingInt(Opcode.JUMP), // pc=3
+        @backingInt(Opcode.PUSH1), 0x00, // Target 0x00 = 0
+        @backingInt(Opcode.PUSH1), 0x20, // Target 0x20 = 32
+        @backingInt(Opcode.JUMPI), // pc=7
+        @backingInt(Opcode.JUMPDEST), // pc=8 (not targeted)
+        @backingInt(Opcode.PUSH1), 0x08, // Target 0x08 = 8
+        @backingInt(Opcode.JUMP), // pc=11 (backwards to 8)
+        @backingInt(Opcode.JUMPDEST), // pc=12
+        @backingInt(Opcode.JUMPDEST), // pc=13
+        @backingInt(Opcode.JUMPDEST), // pc=14
+        @backingInt(Opcode.JUMPDEST), // pc=15
+        @backingInt(Opcode.JUMPDEST), // pc=16
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Should detect 3 jumps
     try std.testing.expectEqual(@as(usize, 3), stats.jumps.len);
-    
+
     // First jump: forward to 16
     try std.testing.expectEqual(@as(usize, 3), stats.jumps[0].pc);
     try std.testing.expectEqual(@as(u256, 16), stats.jumps[0].target);
-    
+
     // Second jump: forward to 32 (JUMPI)
     try std.testing.expectEqual(@as(usize, 7), stats.jumps[1].pc);
     try std.testing.expectEqual(@as(u256, 32), stats.jumps[1].target);
-    
+
     // Third jump: backward to 8
     try std.testing.expectEqual(@as(usize, 11), stats.jumps[2].pc);
     try std.testing.expectEqual(@as(u256, 8), stats.jumps[2].target);
-    
+
     // One backwards jump
     try std.testing.expectEqual(@as(usize, 1), stats.backwards_jumps);
 }
@@ -1280,15 +1279,15 @@ test "BytecodeStats analyze - complex jump pattern" {
 test "BytecodeStats analyze - no jump target found" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.ADD),  // No PUSH before
-        @intFromEnum(Opcode.JUMP), // Should not be detected
-        @intFromEnum(Opcode.MUL),
-        @intFromEnum(Opcode.JUMPI), // Should not be detected
+        @backingInt(Opcode.ADD), // No PUSH before
+        @backingInt(Opcode.JUMP), // Should not be detected
+        @backingInt(Opcode.MUL),
+        @backingInt(Opcode.JUMPI), // Should not be detected
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // No jumps should be detected
     try std.testing.expectEqual(@as(usize, 0), stats.jumps.len);
     try std.testing.expectEqual(@as(usize, 0), stats.backwards_jumps);
@@ -1297,29 +1296,29 @@ test "BytecodeStats analyze - no jump target found" {
 test "BytecodeStats analyze - distant push target" {
     const allocator = std.testing.allocator;
     var bytecode: [50]u8 = undefined;
-    
+
     // Fill with NOPs to create distance
     for (0..40) |i| {
-        bytecode[i] = @intFromEnum(Opcode.STOP); // Use STOP as filler
+        bytecode[i] = @backingInt(Opcode.STOP); // Use STOP as filler
     }
-    
-    // Add a distant PUSH followed by JUMP  
-    bytecode[40] = @intFromEnum(Opcode.PUSH1);
+
+    // Add a distant PUSH followed by JUMP
+    bytecode[40] = @backingInt(Opcode.PUSH1);
     bytecode[41] = 0x30; // Target 48
-    bytecode[42] = @intFromEnum(Opcode.JUMP);
-    
+    bytecode[42] = @backingInt(Opcode.JUMP);
+
     // Add more filler
-    bytecode[43] = @intFromEnum(Opcode.STOP);
-    bytecode[44] = @intFromEnum(Opcode.STOP);
-    bytecode[45] = @intFromEnum(Opcode.STOP);
-    bytecode[46] = @intFromEnum(Opcode.STOP);
-    bytecode[47] = @intFromEnum(Opcode.STOP);
-    bytecode[48] = @intFromEnum(Opcode.JUMPDEST);
-    bytecode[49] = @intFromEnum(Opcode.STOP);
-    
+    bytecode[43] = @backingInt(Opcode.STOP);
+    bytecode[44] = @backingInt(Opcode.STOP);
+    bytecode[45] = @backingInt(Opcode.STOP);
+    bytecode[46] = @backingInt(Opcode.STOP);
+    bytecode[47] = @backingInt(Opcode.STOP);
+    bytecode[48] = @backingInt(Opcode.JUMPDEST);
+    bytecode[49] = @backingInt(Opcode.STOP);
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Should detect the jump
     try std.testing.expectEqual(@as(usize, 1), stats.jumps.len);
     try std.testing.expectEqual(@as(usize, 42), stats.jumps[0].pc);
@@ -1330,48 +1329,44 @@ test "BytecodeStats analyze - pattern tracking" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
         // Pattern: PUSH1, DUP1, PUSH1, DUP1 (repeated pattern)
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH1), 0x02,
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH1), 0x03,
-        @intFromEnum(Opcode.DUP1),
+        @backingInt(Opcode.PUSH1), 0x01,
+        @backingInt(Opcode.DUP1),  @backingInt(Opcode.PUSH1),
+        0x02,                      @backingInt(Opcode.DUP1),
+        @backingInt(Opcode.PUSH1), 0x03,
+        @backingInt(Opcode.DUP1),
         // Add some other opcodes
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.MUL),
-        @intFromEnum(Opcode.SUB),
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.MUL),
-        @intFromEnum(Opcode.SUB),
+         @backingInt(Opcode.ADD),
+        @backingInt(Opcode.MUL),   @backingInt(Opcode.SUB),
+        @backingInt(Opcode.ADD),   @backingInt(Opcode.MUL),
+        @backingInt(Opcode.SUB),
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
     defer stats.deinit(allocator);
-    
+
     // Check 2-opcode patterns
     try std.testing.expect(stats.patterns_2.len > 0);
     // Most common 2-pattern should be PUSH1, DUP1
-    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_2[0].opcodes[0]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.DUP1), stats.patterns_2[0].opcodes[1]);
+    try std.testing.expectEqual(@backingInt(Opcode.PUSH1), stats.patterns_2[0].opcodes[0]);
+    try std.testing.expectEqual(@backingInt(Opcode.DUP1), stats.patterns_2[0].opcodes[1]);
     try std.testing.expectEqual(@as(u32, 3), stats.patterns_2[0].count);
-    
+
     // Check 3-opcode patterns
     try std.testing.expect(stats.patterns_3.len > 0);
     // Most common 3-pattern should be DUP1, PUSH1, DUP1
-    try std.testing.expectEqual(@intFromEnum(Opcode.DUP1), stats.patterns_3[0].opcodes[0]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_3[0].opcodes[1]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.DUP1), stats.patterns_3[0].opcodes[2]);
+    try std.testing.expectEqual(@backingInt(Opcode.DUP1), stats.patterns_3[0].opcodes[0]);
+    try std.testing.expectEqual(@backingInt(Opcode.PUSH1), stats.patterns_3[0].opcodes[1]);
+    try std.testing.expectEqual(@backingInt(Opcode.DUP1), stats.patterns_3[0].opcodes[2]);
     try std.testing.expectEqual(@as(u32, 2), stats.patterns_3[0].count);
 }
 
 test "BytecodeStats deinit memory management" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x42,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.JUMPDEST),
-        @intFromEnum(Opcode.PUSH1), 0x03,
-        @intFromEnum(Opcode.JUMP),
+        @backingInt(Opcode.PUSH1), 0x42,
+        @backingInt(Opcode.ADD),   @backingInt(Opcode.JUMPDEST),
+        @backingInt(Opcode.PUSH1), 0x03,
+        @backingInt(Opcode.JUMP),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1389,13 +1384,12 @@ test "BytecodeStats deinit memory management" {
 test "BytecodeStats pattern extraction - 2-opcode patterns" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.PUSH1), 0x02,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.PUSH1), 0x03,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.PUSH1), 0x04,
-        @intFromEnum(Opcode.ADD),
+        @backingInt(Opcode.PUSH1), 0x01,
+        @backingInt(Opcode.PUSH1), 0x02,
+        @backingInt(Opcode.ADD),   @backingInt(Opcode.PUSH1),
+        0x03,                      @backingInt(Opcode.ADD),
+        @backingInt(Opcode.PUSH1), 0x04,
+        @backingInt(Opcode.ADD),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1403,20 +1397,19 @@ test "BytecodeStats pattern extraction - 2-opcode patterns" {
 
     // Should detect PUSH1, ADD pattern (appears 3 times)
     try std.testing.expect(stats.patterns_2.len > 0);
-    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_2[0].opcodes[0]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.ADD), stats.patterns_2[0].opcodes[1]);
+    try std.testing.expectEqual(@backingInt(Opcode.PUSH1), stats.patterns_2[0].opcodes[0]);
+    try std.testing.expectEqual(@backingInt(Opcode.ADD), stats.patterns_2[0].opcodes[1]);
     try std.testing.expectEqual(@as(u32, 3), stats.patterns_2[0].count);
 }
 
 test "BytecodeStats pattern extraction - 3-opcode patterns" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.PUSH1), 0x02,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.PUSH1), 0x03,
-        @intFromEnum(Opcode.PUSH1), 0x04,
-        @intFromEnum(Opcode.ADD),
+        @backingInt(Opcode.PUSH1), 0x01,
+        @backingInt(Opcode.PUSH1), 0x02,
+        @backingInt(Opcode.ADD),   @backingInt(Opcode.PUSH1),
+        0x03,                      @backingInt(Opcode.PUSH1),
+        0x04,                      @backingInt(Opcode.ADD),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1424,23 +1417,25 @@ test "BytecodeStats pattern extraction - 3-opcode patterns" {
 
     // Should detect PUSH1, PUSH1, ADD pattern (appears 2 times)
     try std.testing.expect(stats.patterns_3.len > 0);
-    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_3[0].opcodes[0]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_3[0].opcodes[1]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.ADD), stats.patterns_3[0].opcodes[2]);
+    try std.testing.expectEqual(@backingInt(Opcode.PUSH1), stats.patterns_3[0].opcodes[0]);
+    try std.testing.expectEqual(@backingInt(Opcode.PUSH1), stats.patterns_3[0].opcodes[1]);
+    try std.testing.expectEqual(@backingInt(Opcode.ADD), stats.patterns_3[0].opcodes[2]);
     try std.testing.expectEqual(@as(u32, 2), stats.patterns_3[0].count);
 }
 
 test "BytecodeStats pattern extraction - 4-opcode patterns" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.SWAP1),
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH1), 0x02,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.SWAP1),
+        @backingInt(Opcode.DUP1),
+        @backingInt(Opcode.PUSH1),
+        0x01,
+        @backingInt(Opcode.ADD),
+        @backingInt(Opcode.SWAP1),
+        @backingInt(Opcode.DUP1),
+        @backingInt(Opcode.PUSH1),
+        0x02,
+        @backingInt(Opcode.ADD),
+        @backingInt(Opcode.SWAP1),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1448,26 +1443,22 @@ test "BytecodeStats pattern extraction - 4-opcode patterns" {
 
     // Should detect DUP1, PUSH1, ADD, SWAP1 pattern
     try std.testing.expect(stats.patterns_4.len > 0);
-    try std.testing.expectEqual(@intFromEnum(Opcode.DUP1), stats.patterns_4[0].opcodes[0]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_4[0].opcodes[1]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.ADD), stats.patterns_4[0].opcodes[2]);
-    try std.testing.expectEqual(@intFromEnum(Opcode.SWAP1), stats.patterns_4[0].opcodes[3]);
+    try std.testing.expectEqual(@backingInt(Opcode.DUP1), stats.patterns_4[0].opcodes[0]);
+    try std.testing.expectEqual(@backingInt(Opcode.PUSH1), stats.patterns_4[0].opcodes[1]);
+    try std.testing.expectEqual(@backingInt(Opcode.ADD), stats.patterns_4[0].opcodes[2]);
+    try std.testing.expectEqual(@backingInt(Opcode.SWAP1), stats.patterns_4[0].opcodes[3]);
     try std.testing.expectEqual(@as(u32, 2), stats.patterns_4[0].count);
 }
 
 test "BytecodeStats pattern extraction - 5-opcode patterns" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x00,
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.REVERT),
-        @intFromEnum(Opcode.JUMPDEST),
-        @intFromEnum(Opcode.STOP),
-        @intFromEnum(Opcode.PUSH1), 0x00,
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.REVERT),
-        @intFromEnum(Opcode.JUMPDEST),
-        @intFromEnum(Opcode.STOP),
+        @backingInt(Opcode.PUSH1),    0x00,
+        @backingInt(Opcode.DUP1),     @backingInt(Opcode.REVERT),
+        @backingInt(Opcode.JUMPDEST), @backingInt(Opcode.STOP),
+        @backingInt(Opcode.PUSH1),    0x00,
+        @backingInt(Opcode.DUP1),     @backingInt(Opcode.REVERT),
+        @backingInt(Opcode.JUMPDEST), @backingInt(Opcode.STOP),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1483,12 +1474,12 @@ test "BytecodeStats pattern extraction - 6-opcode patterns" {
     var bytecode: [18]u8 = undefined;
     // Create a 6-opcode pattern that repeats 3 times
     const pattern = [_]u8{
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.DUP2),
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.SWAP1),
-        @intFromEnum(Opcode.POP),
-        @intFromEnum(Opcode.JUMPDEST),
+        @backingInt(Opcode.DUP1),
+        @backingInt(Opcode.DUP2),
+        @backingInt(Opcode.ADD),
+        @backingInt(Opcode.SWAP1),
+        @backingInt(Opcode.POP),
+        @backingInt(Opcode.JUMPDEST),
     };
     for (0..3) |i| {
         @memcpy(bytecode[i * 6 .. (i + 1) * 6], &pattern);
@@ -1506,12 +1497,10 @@ test "BytecodeStats pattern extraction - 7-opcode patterns" {
     const allocator = std.testing.allocator;
     var bytecode: [14]u8 = undefined;
     const pattern = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x00,
-        @intFromEnum(Opcode.CALLDATALOAD),
-        @intFromEnum(Opcode.PUSH1), 0xE0,
-        @intFromEnum(Opcode.SHR),
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH4),
+        @backingInt(Opcode.PUSH1),        0x00,
+        @backingInt(Opcode.CALLDATALOAD), @backingInt(Opcode.PUSH1),
+        0xE0,                             @backingInt(Opcode.SHR),
+        @backingInt(Opcode.DUP1),         @backingInt(Opcode.PUSH4),
     };
     @memcpy(bytecode[0..7], &pattern);
     @memcpy(bytecode[7..14], &pattern);
@@ -1527,12 +1516,11 @@ test "BytecodeStats pattern extraction - 8-opcode patterns" {
     const allocator = std.testing.allocator;
     var bytecode: [16]u8 = undefined;
     const pattern = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x00,
-        @intFromEnum(Opcode.CALLDATALOAD),
-        @intFromEnum(Opcode.PUSH1), 0xE0,
-        @intFromEnum(Opcode.SHR),
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH4), 0xAA,
+        @backingInt(Opcode.PUSH1),        0x00,
+        @backingInt(Opcode.CALLDATALOAD), @backingInt(Opcode.PUSH1),
+        0xE0,                             @backingInt(Opcode.SHR),
+        @backingInt(Opcode.DUP1),         @backingInt(Opcode.PUSH4),
+        0xAA,
     };
     @memcpy(bytecode[0..8], &pattern);
     @memcpy(bytecode[8..16], &pattern);
@@ -1547,14 +1535,12 @@ test "BytecodeStats pattern extraction - 8-opcode patterns" {
 test "BytecodeStats pattern extraction - no memory leaks" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.PUSH1), 0x02,
-        @intFromEnum(Opcode.ADD),
-        @intFromEnum(Opcode.DUP1),
-        @intFromEnum(Opcode.PUSH1), 0x03,
-        @intFromEnum(Opcode.MUL),
-        @intFromEnum(Opcode.SWAP1),
-        @intFromEnum(Opcode.POP),
+        @backingInt(Opcode.PUSH1), 0x01,
+        @backingInt(Opcode.PUSH1), 0x02,
+        @backingInt(Opcode.ADD),   @backingInt(Opcode.DUP1),
+        @backingInt(Opcode.PUSH1), 0x03,
+        @backingInt(Opcode.MUL),   @backingInt(Opcode.SWAP1),
+        @backingInt(Opcode.POP),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1573,7 +1559,7 @@ test "BytecodeStats pattern extraction - top 3 limit" {
     // Create bytecode with many different patterns
     var bytecode: [30]u8 = undefined;
     for (0..15) |i| {
-        bytecode[i * 2] = @intFromEnum(Opcode.PUSH1);
+        bytecode[i * 2] = @backingInt(Opcode.PUSH1);
         bytecode[i * 2 + 1] = @as(u8, @intCast(i));
     }
 
@@ -1610,8 +1596,8 @@ test "BytecodeStats pattern extraction - empty bytecode" {
 test "BytecodeStats pattern Format implementation" {
     const allocator = std.testing.allocator;
     const bytecode = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x01,
-        @intFromEnum(Opcode.ADD),
+        @backingInt(Opcode.PUSH1), 0x01,
+        @backingInt(Opcode.ADD),
     };
 
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
@@ -1629,4 +1615,3 @@ test "BytecodeStats pattern Format implementation" {
         try std.testing.expect(std.mem.indexOf(u8, pattern_str, "]") != null);
     }
 }
-

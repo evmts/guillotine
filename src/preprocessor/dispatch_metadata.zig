@@ -2,7 +2,6 @@ const std = @import("std");
 
 /// Metadata types for dispatch instruction stream
 /// These structs contain pre-computed data that helps opcodes execute more efficiently
-
 /// Creates metadata types for a given Frame type
 pub fn DispatchMetadata(comptime FrameType: type) type {
     return struct {
@@ -48,7 +47,6 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
             value: FrameType.PcType,
             _padding: @Int(.unsigned, 64 - @bitSizeOf(FrameType.PcType)) = 0,
         };
-
     };
 }
 
@@ -66,15 +64,15 @@ const TestFrame = struct {
 
 test "JumpDestMetadata packs correctly into 64 bits" {
     const Metadata = DispatchMetadata(TestFrame);
-    
+
     try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.JumpDestMetadata));
-    
+
     const metadata = Metadata.JumpDestMetadata{
         .gas = 1000,
         .min_stack = -10,
         .max_stack = 100,
     };
-    
+
     try testing.expectEqual(@as(u32, 1000), metadata.gas);
     try testing.expectEqual(@as(i16, -10), metadata.min_stack);
     try testing.expectEqual(@as(i16, 100), metadata.max_stack);
@@ -82,13 +80,13 @@ test "JumpDestMetadata packs correctly into 64 bits" {
 
 test "PushInlineMetadata stores u64 values" {
     const Metadata = DispatchMetadata(TestFrame);
-    
+
     try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.PushInlineMetadata));
-    
+
     const metadata = Metadata.PushInlineMetadata{
         .value = 0xDEADBEEFCAFEBABE,
     };
-    
+
     try testing.expectEqual(@as(u64, 0xDEADBEEFCAFEBABE), metadata.value);
 }
 
@@ -105,11 +103,11 @@ test "PushPointerMetadata is one pointer to the value" {
 
 test "PcMetadata stores program counter value" {
     const Metadata = DispatchMetadata(TestFrame);
-    
+
     const metadata = Metadata.PcMetadata{
         .value = 12345,
     };
-    
+
     try testing.expectEqual(@as(u32, 12345), metadata.value);
 }
 
@@ -125,6 +123,6 @@ test "every metadata type fits one 8-byte schedule item" {
 
 test "FirstBlockMetadata is same as JumpDestMetadata" {
     const Metadata = DispatchMetadata(TestFrame);
-    
+
     try testing.expectEqual(@TypeOf(Metadata.JumpDestMetadata{}), @TypeOf(Metadata.FirstBlockMetadata{}));
 }

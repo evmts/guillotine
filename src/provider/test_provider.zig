@@ -39,7 +39,6 @@ test "parse hex numbers" {
 }
 
 test "getCode - empty code returns empty array" {
-
     const mockResponse = "\"0x\"";
     const trimmed = std.mem.trim(u8, mockResponse, "\"");
     try std.testing.expect(std.mem.startsWith(u8, trimmed, "0x"));

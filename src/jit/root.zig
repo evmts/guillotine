@@ -150,8 +150,8 @@ pub const default_helpers = RuntimeHelpers{
 /// `ctx.helpers.memory_grow`; the defaults use `std.heap.page_allocator`.
 pub const helpers = struct {
     const ok: u32 = 0;
-    const oog: u32 = @intFromEnum(ExitCode.out_of_gas);
-    const bounds: u32 = @intFromEnum(ExitCode.out_of_bounds);
+    const oog: u32 = @backingInt(ExitCode.out_of_gas);
+    const bounds: u32 = @backingInt(ExitCode.out_of_bounds);
     const sign_bit: u256 = 1 << 255;
     const minus_one: u256 = std.math.maxInt(u256);
 
@@ -303,7 +303,7 @@ pub const helpers = struct {
                 const rc = ctx.helpers.memory_grow(ctx, new_len);
                 if (rc != ok) return rc;
             }
-            const ptr = ctx.memory_ptr orelse return @intFromEnum(ExitCode.fallback);
+            const ptr = ctx.memory_ptr orelse return @backingInt(ExitCode.fallback);
             @memset(ptr[ctx.memory_len..new_len], 0);
             ctx.memory_len = new_len;
         }
@@ -432,7 +432,7 @@ pub const helpers = struct {
     pub fn memoryGrow(ctx: *JitContext, new_len: usize) callconv(.c) u32 {
         const allocator = std.heap.page_allocator;
         const cap = @max(new_len, ctx.memory_cap *| 2, 4096);
-        const fresh = allocator.alloc(u8, cap) catch return @intFromEnum(ExitCode.fallback);
+        const fresh = allocator.alloc(u8, cap) catch return @backingInt(ExitCode.fallback);
         if (ctx.memory_ptr) |old| {
             @memcpy(fresh[0..ctx.memory_len], old[0..ctx.memory_len]);
             allocator.free(old[0..ctx.memory_cap]);
@@ -555,7 +555,7 @@ const reference = struct {
 
     fn halt(ctx: *JitContext, code: ExitCode) ExitCode {
         ctx.gas_remaining = 0;
-        ctx.exit_code = @intFromEnum(code);
+        ctx.exit_code = @backingInt(code);
         return code;
     }
 
@@ -654,7 +654,7 @@ const reference = struct {
                         else => h.mcopy,
                     };
                     const rc = f(ctx);
-                    if (rc != 0) return halt(ctx, @enumFromInt(rc));
+                    if (rc != 0) return halt(ctx, @fromBackingInt(@intCast(rc)));
                 },
                 0x35 => h.calldataload(ctx),
                 0x36 => push(ctx, ctx.calldata_len),
@@ -686,7 +686,7 @@ const reference = struct {
                 },
                 0xF3, 0xFD => {
                     const rc = h.ret(ctx, @intFromBool(op == 0xFD));
-                    if (rc != 0) return halt(ctx, @enumFromInt(rc));
+                    if (rc != 0) return halt(ctx, @fromBackingInt(@intCast(rc)));
                     return if (op == 0xF3) .return_ok else .revert;
                 },
                 else => return error.UnsupportedInReference,
@@ -729,7 +729,7 @@ fn runJit(allocator: std.mem.Allocator, code: []const u8, gas: i64, calldata: []
     frame.init(gas, calldata, &default_helpers);
     defer frame.deinit();
     const exit = try program.run(&frame.ctx);
-    try testing.expectEqual(@intFromEnum(exit), frame.ctx.exit_code);
+    try testing.expectEqual(@backingInt(exit), frame.ctx.exit_code);
     return Outcome.capture(allocator, frame, exit);
 }
 

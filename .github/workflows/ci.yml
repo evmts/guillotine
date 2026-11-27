@@ -30,6 +30,33 @@ jobs:
           echo "zig ast-check: $checked tracked files, $failed failed"
           test "$checked" -gt 0
           test "$failed" -eq 0
+      - name: Canonical Zig formatting (zig fmt --check src/)
+        run: zig fmt --check src/
+      - name: TigerStyle hygiene check (no prod debug prints or empty catches)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path("src")
+          bad = []
+          for p in sorted(root.rglob("*.zig")):
+              if p.name.endswith(("_test.zig", "_tests.zig", "_bench.zig")) or "/_test_utils/" in str(p):
+                  continue
+              lines = p.read_text(errors="replace").splitlines()
+              for idx, line in enumerate(lines, 1):
+                  if re.match(r'^test\s*(?:"[^"]*")?\s*\{', line):
+                      break
+                  code = line.split("//", 1)[0]
+                  if "std.debug.print(" in code:
+                      bad.append(f"{p}:{idx}: forbidden std.debug.print in production code")
+                  if re.search(r'\bcatch\s*\{\s*\}', code):
+                      bad.append(f"{p}:{idx}: forbidden empty catch {{}} in production code")
+          if bad:
+              print("\n".join(bad), file=sys.stderr)
+              sys.exit(1)
+          print("TigerStyle hygiene check passed.")
+          PY
 
   build-test:
     strategy:

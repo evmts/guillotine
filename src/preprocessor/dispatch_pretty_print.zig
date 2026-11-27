@@ -5,26 +5,25 @@ const log = @import("../log.zig");
 
 /// Pretty print functionality for the dispatch instruction stream.
 /// Provides human-readable visualization of both original bytecode and optimized dispatch arrays.
-
 /// Debug information structure for dispatch schedule analysis
 pub fn DispatchDebugInfo(comptime FrameType: type) type {
     return struct {
         const Self = @This();
-        
+
         handler_map: std.hash_map.HashMap(*const anyopaque, OpcodeInfo, std.hash_map.AutoContext(*const anyopaque), 80),
         schedule_entries: []ScheduleEntry,
         validation_errors: std.ArrayList(ValidationError),
         pc_to_schedule_map: std.hash_map.HashMap(u32, usize, std.hash_map.AutoContext(u32), 80),
         jumpdest_map: std.hash_map.HashMap(u32, usize, std.hash_map.AutoContext(u32), 80),
         allocator: std.mem.Allocator,
-        
+
         pub const OpcodeInfo = struct {
             opcode: ?Opcode,
             synthetic: ?OpcodeSynthetic,
             name: []const u8,
             is_synthetic: bool,
         };
-        
+
         pub const ItemType = enum {
             opcode_handler,
             jump_dest,
@@ -35,18 +34,18 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             first_block_gas,
             unexpected,
         };
-        
+
         pub const MetadataInfo = union(enum) {
             push_inline: struct { value: u64 },
             push_pointer: struct { value_ptr: *const FrameType.WordType, value: FrameType.WordType },
-            jump_dest: struct { 
+            jump_dest: struct {
                 gas: u32,
                 min_stack: u16,
                 max_stack: u16,
                 target_pc: ?u32,
                 target_idx: ?usize,
             },
-            jump_static: struct { 
+            jump_static: struct {
                 dispatch_ptr: *const anyopaque,
                 target_pc: ?u32,
                 target_idx: ?usize,
@@ -54,7 +53,7 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             pc: struct { value: u32 },
             first_block_gas: struct { gas: u32 },
         };
-        
+
         pub const ExpectedOp = union(enum) {
             regular: struct {
                 opcode: Opcode,
@@ -78,7 +77,7 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             stop: void,
             invalid: void,
         };
-        
+
         pub const ValidationStatus = enum {
             valid,
             handler_mismatch,
@@ -86,7 +85,7 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             unexpected_item,
             missing_item,
         };
-        
+
         pub const ScheduleEntry = struct {
             schedule_index: usize,
             pc: ?u32,
@@ -97,7 +96,7 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             expected_from_bytecode: ?ExpectedOp,
             validation_status: ValidationStatus,
         };
-        
+
         pub const ValidationError = struct {
             schedule_index: usize,
             pc: ?u32,
@@ -108,7 +107,7 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             /// freed with it; false when they are static strings.
             owns_text: bool = false,
         };
-        
+
         pub fn deinit(self: *Self) void {
             self.handler_map.deinit();
             self.allocator.free(self.schedule_entries);
@@ -166,7 +165,7 @@ pub fn pretty_print(
         try bytecode
     else
         bytecode;
-    
+
     // Get debug info first
     var debug_info = try getDebugInfo(allocator, schedule, actual_bytecode, FrameType, ItemType);
     defer debug_info.deinit();
@@ -177,7 +176,7 @@ pub fn pretty_print(
     // Header
     try output.print(allocator, "{s}=== EVM Dispatch Instruction Stream ==={s}\n", .{ Colors.bold, Colors.reset });
     try output.print(allocator, "{s}Original bytecode: {} bytes, Dispatch items: {}{s}\n\n", .{ Colors.dim, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
-    
+
     // Display validation errors if any
     if (debug_info.validation_errors.items.len > 0) {
         try output.print(allocator, "{s}--- VALIDATION ERRORS ---{s}\n", .{ Colors.red, Colors.reset });
@@ -211,7 +210,7 @@ pub fn pretty_print(
                 // Handle PUSH instructions specially
                 switch (opcode) {
                     .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
-                        const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
+                        const push_size = @backingInt(opcode) - @backingInt(Opcode.PUSH1) + 1;
                         var value: u256 = 0;
                         const end_pc = @min(bytecode_pc + 1 + push_size, @as(FrameType.PcType, @intCast(runtime_code.len)));
 
@@ -247,14 +246,14 @@ pub fn pretty_print(
         for (debug_info.schedule_entries) |entry| {
             // Item index
             try output.print(allocator, "{s}[{d:3}]:{s} ", .{ Colors.dim, entry.schedule_index, Colors.reset });
-            
+
             // PC if available
             if (entry.pc) |pc| {
                 try output.print(allocator, "{s}PC=0x{x:0>4}{s} ", .{ Colors.cyan, pc, Colors.reset });
             } else {
                 try output.print(allocator, "{s}        {s} ", .{ Colors.dim, Colors.reset });
             }
-            
+
             // Item type and details
             switch (entry.item_type) {
                 .opcode_handler => {
@@ -324,14 +323,14 @@ pub fn pretty_print(
                     try output.print(allocator, "{s}UNKNOWN{s}", .{ Colors.red, Colors.reset });
                 },
             }
-            
+
             // Show if it's a jumpdest location
             if (entry.pc) |pc| {
                 if (debug_info.jumpdest_map.contains(pc)) {
                     try output.print(allocator, " {s}[JUMPDEST]{s}", .{ Colors.bright_green, Colors.reset });
                 }
             }
-            
+
             try output.print(allocator, "\n", .{});
         }
     } else {
@@ -405,15 +404,15 @@ pub fn getDebugInfo(
     comptime Item: type,
 ) !DispatchDebugInfo(FrameType) {
     // Get schedule items - handle both raw array and struct with items field
-    const schedule_items = if (@TypeOf(dispatch_schedule) == []const Item) 
+    const schedule_items = if (@TypeOf(dispatch_schedule) == []const Item)
         dispatch_schedule
     else if (@hasField(@TypeOf(dispatch_schedule), "items"))
         dispatch_schedule.items
     else
         @as([]const Item, dispatch_schedule);
-    
+
     log.debug("getDebugInfo: Starting analysis of schedule with {} items", .{schedule_items.len});
-    
+
     const DebugInfo = DispatchDebugInfo(FrameType);
     var debug_info = DebugInfo{
         .handler_map = std.hash_map.HashMap(*const anyopaque, DebugInfo.OpcodeInfo, std.hash_map.AutoContext(*const anyopaque), 80).init(allocator),
@@ -424,11 +423,11 @@ pub fn getDebugInfo(
         .allocator = allocator,
     };
     errdefer debug_info.deinit();
-    
+
     // Build reverse handler map from opcode handlers
     const frame_handlers = @import("../frame/frame_handlers.zig");
     const opcode_handlers = frame_handlers.getOpcodeHandlers(FrameType, &.{});
-    
+
     // Map regular opcodes
     for (0..256) |i| {
         const handler_ptr = @as(*const anyopaque, @ptrCast(opcode_handlers[i]));
@@ -441,10 +440,10 @@ pub fn getDebugInfo(
             });
         }
     }
-    
+
     // Map synthetic opcodes
     inline for (comptime std.meta.tags(OpcodeSynthetic)) |synthetic_opcode| {
-        const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(synthetic_opcode));
+        const handler = frame_handlers.getSyntheticHandler(FrameType, synthetic_opcode);
         const handler_ptr = @as(*const anyopaque, @ptrCast(handler));
         try debug_info.handler_map.put(handler_ptr, .{
             .opcode = null,
@@ -453,15 +452,15 @@ pub fn getDebugInfo(
             .is_synthetic = true,
         });
     }
-    
+
     // Allocate schedule entries
     var entries = std.ArrayList(DebugInfo.ScheduleEntry).empty;
     defer entries.deinit(allocator);
-    
+
     // Create bytecode iterator
     var bytecode_iter = bytecode.createIterator();
     var schedule_idx: usize = 0;
-    
+
     // The schedule starts with first_block_gas metadata exactly when the first basic
     // block charges gas or has stack requirements (the rule Dispatch.init applies).
     const first_block = FrameType.Dispatch.calculateFirstBlockInfo(bytecode);
@@ -482,24 +481,24 @@ pub fn getDebugInfo(
             schedule_idx += 1;
         }
     }
-    
+
     // Iterate through bytecode and validate against schedule
     while (true) {
         const bytecode_pc = bytecode_iter.pc;
         const maybe_op = bytecode_iter.next();
         if (maybe_op == null) break;
         const op_data = maybe_op.?;
-        
+
         // Record PC to schedule mapping
         try debug_info.pc_to_schedule_map.put(@intCast(bytecode_pc), schedule_idx);
-        
+
         switch (op_data) {
             .regular => |data| {
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "opcode handler", "end of schedule");
                     break;
                 }
-                
+
                 const item = schedule_items[schedule_idx];
                 if (kindOf(Item, item, .opcode_handler) != .opcode_handler) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected opcode handler", "opcode_handler", @tagName(kindOf(Item, item, .opcode_handler)));
@@ -518,7 +517,7 @@ pub fn getDebugInfo(
                     const handler_info = debug_info.handler_map.get(handler_ptr);
                     // Undefined opcode bytes run the INVALID handler.
                     const expected_opcode = std.enums.fromInt(Opcode, data.opcode) orelse Opcode.INVALID;
-                    
+
                     var validation_status: DebugInfo.ValidationStatus = .valid;
                     if (handler_info) |info| {
                         if (info.opcode != expected_opcode) {
@@ -526,7 +525,7 @@ pub fn getDebugInfo(
                             try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Handler mismatch", @tagName(expected_opcode), info.name);
                         }
                     }
-                    
+
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
@@ -537,7 +536,7 @@ pub fn getDebugInfo(
                         .expected_from_bytecode = .{ .regular = .{
                             .opcode = expected_opcode,
                             .pc = @intCast(bytecode_pc),
-                        }},
+                        } },
                         .validation_status = validation_status,
                     });
                 }
@@ -566,13 +565,13 @@ pub fn getDebugInfo(
                     }
                 }
             },
-            
+
             .push => |data| {
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "push handler", "end of schedule");
                     break;
                 }
-                
+
                 // Expect push handler
                 const handler_item = schedule_items[schedule_idx];
                 if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
@@ -580,7 +579,7 @@ pub fn getDebugInfo(
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
+
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
@@ -589,16 +588,16 @@ pub fn getDebugInfo(
                         .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
                         .metadata = null,
                         .expected_from_bytecode = .{ .push = .{
-                            .opcode = @enumFromInt(0x60 + data.size - 1),
+                            .opcode = @fromBackingInt(@intCast(0x60 + data.size - 1)),
                             .value = data.value,
                             .size = data.size,
                             .pc = @intCast(bytecode_pc),
-                        }},
+                        } },
                         .validation_status = .valid,
                     });
                 }
                 schedule_idx += 1;
-                
+
                 // Expect the push value as inline 64-bit limbs, least significant first.
                 const limbs = FrameType.Dispatch.pushLimbCount(data.size);
                 var limb: u8 = 0;
@@ -633,16 +632,16 @@ pub fn getDebugInfo(
                     schedule_idx += 1;
                 }
             },
-            
+
             .jumpdest => |data| {
                 // Record jumpdest location
                 try debug_info.jumpdest_map.put(@intCast(bytecode_pc), schedule_idx);
-                
+
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "jumpdest handler", "end of schedule");
                     break;
                 }
-                
+
                 // Expect jumpdest handler
                 const handler_item = schedule_items[schedule_idx];
                 if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
@@ -650,7 +649,7 @@ pub fn getDebugInfo(
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
+
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
@@ -661,18 +660,18 @@ pub fn getDebugInfo(
                         .expected_from_bytecode = .{ .jumpdest = .{
                             .pc = @intCast(bytecode_pc),
                             .gas = data.gas_cost,
-                        }},
+                        } },
                         .validation_status = .valid,
                     });
                 }
                 schedule_idx += 1;
-                
+
                 // Expect jump_dest metadata
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "jump_dest metadata", "end of schedule");
                     break;
                 }
-                
+
                 const metadata_item = schedule_items[schedule_idx];
                 if (kindOf(Item, metadata_item, .jump_dest) != .jump_dest) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_dest metadata", "jump_dest", @tagName(kindOf(Item, metadata_item, .jump_dest)));
@@ -684,36 +683,38 @@ pub fn getDebugInfo(
                         .item_type = .jump_dest,
                         .handler_ptr = null,
                         .handler_name = null,
-                        .metadata = .{ .jump_dest = .{
-                            .gas = meta.gas,
-                            .min_stack = 0, // These fields aren't in the current metadata
-                            .max_stack = 0,
-                            .target_pc = null,
-                            .target_idx = null,
-                        }},
+                        .metadata = .{
+                            .jump_dest = .{
+                                .gas = meta.gas,
+                                .min_stack = 0, // These fields aren't in the current metadata
+                                .max_stack = 0,
+                                .target_pc = null,
+                                .target_idx = null,
+                            },
+                        },
                         .expected_from_bytecode = null,
                         .validation_status = .valid,
                     });
                 }
                 schedule_idx += 1;
             },
-            
+
             .push_jump_fusion, .push_jumpi_fusion => {
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "fusion handler", "end of schedule");
                     break;
                 }
-                
+
                 const handler_item = schedule_items[schedule_idx];
                 if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(kindOf(Item, handler_item, .opcode_handler)));
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
+
                     const is_jumpi = op_data == .push_jumpi_fusion;
                     const expected_synthetic = if (is_jumpi) OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION else OpcodeSynthetic.JUMP_TO_STATIC_LOCATION;
-                    
+
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
@@ -725,18 +726,18 @@ pub fn getDebugInfo(
                             .opcodes = if (is_jumpi) &[_]Opcode{ .PUSH1, .SWAP1, .JUMPI } else &[_]Opcode{ .PUSH1, .JUMP },
                             .synthetic = expected_synthetic,
                             .pc = @intCast(bytecode_pc),
-                        }},
+                        } },
                         .validation_status = .valid,
                     });
                 }
                 schedule_idx += 1;
-                
+
                 // Expect jump_static metadata
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "jump_static metadata", "end of schedule");
                     break;
                 }
-                
+
                 const metadata_item = schedule_items[schedule_idx];
                 if (kindOf(Item, metadata_item, .jump_static) != .jump_static) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_static metadata", "jump_static", @tagName(kindOf(Item, metadata_item, .jump_static)));
@@ -745,7 +746,7 @@ pub fn getDebugInfo(
                     // Try to find target schedule index from dispatch pointer
                     var target_idx: ?usize = null;
                     var target_pc: ?u32 = null;
-                    
+
                     // Search for the target in schedule
                     const target_ptr = @intFromPtr(meta.dispatch);
                     const schedule_base = @intFromPtr(schedule_items.ptr);
@@ -760,7 +761,7 @@ pub fn getDebugInfo(
                             }
                         }
                     }
-                    
+
                     // A pushed target wider than 32 bits is no JUMPDEST: it has no PC,
                     // exactly like a schedule target that is not in the PC map.
                     const pushed_target = switch (op_data) {
@@ -769,7 +770,7 @@ pub fn getDebugInfo(
                         else => unreachable,
                     };
                     const expected_target: ?u32 = std.math.cast(u32, pushed_target);
-                    
+
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
@@ -780,27 +781,25 @@ pub fn getDebugInfo(
                             .dispatch_ptr = meta.dispatch,
                             .target_pc = target_pc,
                             .target_idx = target_idx,
-                        }},
+                        } },
                         .expected_from_bytecode = null,
                         .validation_status = if (target_pc == expected_target) .valid else .metadata_mismatch,
                     });
-                    
+
                     if (target_pc != expected_target) {
                         try addFormattedValidationError(&debug_info, schedule_idx, bytecode_pc, "Jump target mismatch", "PC=0x{x}", pushed_target, target_pc orelse 0);
                     }
                 }
                 schedule_idx += 1;
             },
-            
+
             // Handle other fusion types
-            .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion,
-            .push_and_fusion, .push_or_fusion, .push_xor_fusion,
-            .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion, .push_add_dup1 => {
+            .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion, .push_and_fusion, .push_or_fusion, .push_xor_fusion, .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion, .push_add_dup1 => {
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "fusion handler", "end of schedule");
                     break;
                 }
-                
+
                 const handler_item = schedule_items[schedule_idx];
                 if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(kindOf(Item, handler_item, .opcode_handler)));
@@ -830,7 +829,7 @@ pub fn getDebugInfo(
                     });
                 }
                 schedule_idx += 1;
-                
+
                 // Expect the fused push value: inline when it fits 64 bits, otherwise a
                 // pointer into the schedule's value arena.
                 if (schedule_idx < schedule_items.len) {
@@ -873,15 +872,15 @@ pub fn getDebugInfo(
                     schedule_idx += 1;
                 }
             },
-            
+
             .stop, .invalid => {
                 if (schedule_idx >= schedule_items.len) break;
-                
+
                 const handler_item = schedule_items[schedule_idx];
                 if (kindOf(Item, handler_item, .opcode_handler) == .opcode_handler) {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
+
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
@@ -895,7 +894,7 @@ pub fn getDebugInfo(
                 }
                 schedule_idx += 1;
             },
-            
+
             // PC and ISZERO_JUMPI occupy a handler and one metadata item.
             .pc, .iszero_jumpi => schedule_idx += 2,
 
@@ -945,7 +944,7 @@ pub fn getDebugInfo(
             schedule_idx += 2;
         }
     }
-    
+
     // Add any remaining schedule items
     while (schedule_idx < schedule_items.len) {
         const item = schedule_items[schedule_idx];
@@ -978,14 +977,11 @@ pub fn getDebugInfo(
         try entries.append(allocator, entry);
         schedule_idx += 1;
     }
-    
+
     debug_info.schedule_entries = try entries.toOwnedSlice(allocator);
-    
-    log.debug("getDebugInfo: Completed analysis. Found {} entries, {} errors", .{ 
-        debug_info.schedule_entries.len,
-        debug_info.validation_errors.items.len 
-    });
-    
+
+    log.debug("getDebugInfo: Completed analysis. Found {} entries, {} errors", .{ debug_info.schedule_entries.len, debug_info.validation_errors.items.len });
+
     return debug_info;
 }
 

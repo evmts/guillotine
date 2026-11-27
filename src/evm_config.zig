@@ -10,7 +10,6 @@ const Address = primitives.Address;
 const SafetyCounter = @import("internal/safety_counter.zig").SafetyCounter;
 const Mode = @import("internal/safety_counter.zig").Mode;
 
-
 /// Custom precompile implementation
 pub const PrecompileOverride = struct {
     address: Address,
@@ -450,21 +449,21 @@ test "EvmConfig - custom opcode handlers" {
 
     // Test with overrides
     const overrides = [_]frame_handlers.HandlerOverride(TestFrame){
-        .{ .opcode = @intFromEnum(Opcode.ADD), .handler = &custom_add },
+        .{ .opcode = @backingInt(Opcode.ADD), .handler = &custom_add },
         .{ .opcode = 0xFE, .handler = &custom_invalid }, // Invalid opcode
     };
 
     const handlers = frame_handlers.getOpcodeHandlers(TestFrame, &overrides);
 
     // Verify ADD was overridden
-    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &custom_add), handlers[@intFromEnum(Opcode.ADD)]);
+    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &custom_add), handlers[@backingInt(Opcode.ADD)]);
 
     // Verify invalid opcode 0xFE now has our custom handler
     try testing.expectEqual(@as(TestFrame.OpcodeHandler, &custom_invalid), handlers[0xFE]);
 
     // Verify other opcodes are not affected (SUB should still have its default)
-    try testing.expect(handlers[@intFromEnum(Opcode.SUB)] != &custom_add);
-    try testing.expect(handlers[@intFromEnum(Opcode.SUB)] != &custom_invalid);
+    try testing.expect(handlers[@backingInt(Opcode.SUB)] != &custom_add);
+    try testing.expect(handlers[@backingInt(Opcode.SUB)] != &custom_invalid);
 }
 
 test "EvmConfig - empty opcode overrides" {
@@ -528,15 +527,15 @@ test "EvmConfig - multiple opcode overrides" {
     }.h;
 
     const overrides = [_]frame_handlers.HandlerOverride(TestFrame){
-        .{ .opcode = @intFromEnum(Opcode.ADD), .handler = &handler1 },
-        .{ .opcode = @intFromEnum(Opcode.MUL), .handler = &handler2 },
+        .{ .opcode = @backingInt(Opcode.ADD), .handler = &handler1 },
+        .{ .opcode = @backingInt(Opcode.MUL), .handler = &handler2 },
         .{ .opcode = 0xFC, .handler = &handler3 }, // Invalid opcode
     };
 
     const handlers = frame_handlers.getOpcodeHandlers(TestFrame, &overrides);
 
-    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &handler1), handlers[@intFromEnum(Opcode.ADD)]);
-    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &handler2), handlers[@intFromEnum(Opcode.MUL)]);
+    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &handler1), handlers[@backingInt(Opcode.ADD)]);
+    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &handler2), handlers[@backingInt(Opcode.MUL)]);
     try testing.expectEqual(@as(TestFrame.OpcodeHandler, &handler3), handlers[0xFC]);
 }
 

@@ -2553,7 +2553,6 @@ test "Database transaction error handling - invalid snapshot" {
     try testing.expectError(Database.Error.SnapshotNotFound, db.rollback_transaction(999));
 }
 
-
 test "Database transaction - account write commits" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);

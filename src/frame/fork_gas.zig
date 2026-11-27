@@ -61,6 +61,20 @@ pub const SstoreCost = struct {
     refund: i64,
 };
 
+/// Named arguments for `sstoreCostFor`, preventing positional swaps between
+/// `original`, `current`, and `new` storage values.
+pub const SstoreArgs = struct {
+    original: u256,
+    current: u256,
+    new: u256,
+    is_cold: bool,
+};
+
+/// Gas and refund of one SSTORE with named arguments (zero overhead vs positional).
+pub inline fn sstoreCostFor(hardfork: Hardfork, args: SstoreArgs) SstoreCost {
+    return sstoreCost(hardfork, args.original, args.current, args.new, args.is_cold);
+}
+
 /// Gas and refund of one SSTORE.
 ///
 /// `original` is the slot value at the start of the transaction, `current` the value

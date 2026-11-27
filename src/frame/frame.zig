@@ -66,7 +66,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             SelfDestruct,
         };
 
-
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         /// Takes cursor pointer with jump table available through dispatch metadata when needed
         pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
@@ -147,12 +146,12 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         pub const MemorySyntheticHandlers = @import("../instructions/handlers_memory_synthetic.zig").Handlers(Self);
         pub const JumpSyntheticHandlers = @import("../instructions/handlers_jump_synthetic.zig").Handlers(Self);
 
-        // CACHE LINE 1
-        stack: Stack, // 16B
+        // CACHE LINE 1 (pinned at comptime below)
+        stack: Stack, // 16B on 64-bit
         gas_remaining: GasType, // 8B
         evm_ptr: *anyopaque, // 8B
         database: *anyopaque, // 8B - Direct database pointer for hot path (storage ops)
-        memory: Memory, // 16B -
+        memory: Memory, // 16B on 64-bit
         contract_address: Address, // 20B
         caller: Address, // 20B
 
@@ -169,6 +168,23 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         instruction_counter: config.createLoopSafetyCounter(),
         // Output data for RETURN and REVERT operations
         output_data: []const u8 = &[_]u8{},
+
+        comptime {
+            if (@sizeOf(usize) == 8) {
+                if (@sizeOf(Stack) != 16) {
+                    @compileError(std.fmt.comptimePrint(
+                        "Frame hot Stack must be 16 bytes on 64-bit, found {d}",
+                        .{@sizeOf(Stack)},
+                    ));
+                }
+                if (@sizeOf(Memory) != 16) {
+                    @compileError(std.fmt.comptimePrint(
+                        "Frame hot Memory must be 16 bytes on 64-bit, found {d}",
+                        .{@sizeOf(Memory)},
+                    ));
+                }
+            }
+        }
 
         /// Initialize a new frame for EVM bytecode execution.
         ///
@@ -313,7 +329,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                         return Error.StackOverflow;
                     },
                 }
-                
+
                 start_index = 1;
             }
 

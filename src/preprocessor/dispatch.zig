@@ -134,10 +134,10 @@ pub fn Preprocessor(FrameType: type) type {
 
             // Validate handler pointer matches expected opcode handler
             const expected_handler = if (opcode.isRegular())
-                FrameType.opcode_handlers[@intFromEnum(opcode.toOpcode())]
+                FrameType.opcode_handlers[@backingInt(opcode.toOpcode())]
             else blk: {
                 const frame_handlers = @import("../frame/frame_handlers.zig");
-                break :blk frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(opcode.toSynthetic()));
+                break :blk frame_handlers.getSyntheticHandler(FrameType, opcode.toSynthetic());
             };
 
             tracerAssert(frame, self.cursor[0].opcode_handler == expected_handler, "Opcode handler mismatch");
@@ -158,7 +158,7 @@ pub fn Preprocessor(FrameType: type) type {
 
                 // Opcodes with multi-limb inline push metadata (PUSH9-PUSH32)
                 .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
-                    const limbs = comptime pushLimbCount(@intCast(@intFromEnum(opcode) - @intFromEnum(UnifiedOpcode.PUSH1) + 1));
+                    const limbs = comptime pushLimbCount(@intCast(@backingInt(opcode) - @backingInt(UnifiedOpcode.PUSH1) + 1));
                     inline for (1..@as(usize, limbs) + 1) |limb| {
                         tracerAssert(frame, self.cursor[limb] == .push_inline, "PUSH opcode: expected .push_inline limb metadata");
                     }
@@ -454,7 +454,7 @@ pub fn Preprocessor(FrameType: type) type {
             const last_opcode = try lastOpcodeInRange(bytecode, instr_pc, next_pc) orelse return false;
             return @TypeOf(bytecode.*).Iterator.endsBlockWithFallthrough(last_opcode) and
                 next_pc < bytecode.len() and
-                bytecode.get_unsafe(@intCast(next_pc)) != @intFromEnum(Opcode.JUMPDEST);
+                bytecode.get_unsafe(@intCast(next_pc)) != @backingInt(Opcode.JUMPDEST);
         }
 
         const UnresolvedJump = struct {
@@ -524,14 +524,14 @@ pub fn Preprocessor(FrameType: type) type {
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[data.opcode] });
                     },
                     .pc => |data| {
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.PC)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.PC)] });
                         try schedule_items.append(allocator, .{ .pc = .{ .value = data.value } });
                     },
                     .jump => {
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.JUMP)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.JUMP)] });
                     },
                     .jumpi => {
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.JUMPI)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.JUMPI)] });
                     },
                     .push => |data| {
                         try processPushOpcode(&schedule_items, allocator, opcode_handlers, data);
@@ -546,7 +546,7 @@ pub fn Preprocessor(FrameType: type) type {
                             .schedule_index = jumpdest_schedule_idx,
                         });
 
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.JUMPDEST)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.JUMPDEST)] });
                         try schedule_items.append(allocator, .{ .jump_dest = .{
                             .gas = data.gas_cost,
                             .min_stack = data.min_stack,
@@ -593,17 +593,17 @@ pub fn Preprocessor(FrameType: type) type {
                         try Self.handleMemoryFusion(&schedule_items, allocator, arena_allocator, data.value, .push_mstore8);
                     },
                     .stop => {
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.STOP)] });
                     },
                     .invalid => {
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.INVALID)] });
                     },
                     .iszero_jumpi => |ij| {
                         // The target is a constant, so it resolves at build time exactly
                         // like PUSH+JUMPI: the metadata holds the JUMPDEST's schedule
                         // cursor, or the invalid-jump item when the target is not a JUMPDEST.
                         const frame_handlers = @import("../frame/frame_handlers.zig");
-                        const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.ISZERO_JUMPI));
+                        const handler = frame_handlers.getSyntheticHandler(FrameType, .ISZERO_JUMPI);
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                         const dest_pc: ?FrameType.PcType = if (ij.target > std.math.maxInt(FrameType.PcType)) null else @intCast(ij.target);
                         const meta_index = schedule_items.items.len;
@@ -626,7 +626,7 @@ pub fn Preprocessor(FrameType: type) type {
                 if (try blockBeginFollows(iter.bytecode, instr_pc, next_pc)) {
                     const block_info = @TypeOf(iter).calculateBlockInfo(iter.bytecode, @intCast(next_pc), 0);
                     const frame_handlers = @import("../frame/frame_handlers.zig");
-                    const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.BLOCK_BEGIN));
+                    const handler = frame_handlers.getSyntheticHandler(FrameType, .BLOCK_BEGIN);
                     try schedule_items.append(allocator, .{ .opcode_handler = handler });
                     try schedule_items.append(allocator, .{ .jump_dest = .{
                         .gas = block_info.gas,
@@ -637,7 +637,7 @@ pub fn Preprocessor(FrameType: type) type {
             }
 
             // Code that runs off its end executes an implicit STOP.
-            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.STOP)] });
 
             // Static jumps whose target is not a JUMPDEST resolve to this item. Invalid
             // targets in unreachable code are legal bytecode, so the error is raised only
@@ -647,11 +647,11 @@ pub fn Preprocessor(FrameType: type) type {
             const invalid_jump_index = schedule_items.items.len;
             {
                 const frame_handlers = @import("../frame/frame_handlers.zig");
-                try schedule_items.append(allocator, .{ .opcode_handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.INVALID_JUMP_TARGET)) });
+                try schedule_items.append(allocator, .{ .opcode_handler = frame_handlers.getSyntheticHandler(FrameType, .INVALID_JUMP_TARGET) });
             }
 
-            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
-            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.STOP)] });
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.STOP)] });
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
 
@@ -682,7 +682,7 @@ pub fn Preprocessor(FrameType: type) type {
             schedule_allocator: std.mem.Allocator,
             arena_allocator: std.mem.Allocator,
             value: FrameType.WordType,
-            fusion_type: FusionType,
+            fusion_type: ValueFusionType,
         ) !void {
             const synthetic_opcode = getSyntheticOpcode(fusion_type, value <= std.math.maxInt(u64));
             const frame_handlers = @import("../frame/frame_handlers.zig");
@@ -705,7 +705,7 @@ pub fn Preprocessor(FrameType: type) type {
             schedule_allocator: std.mem.Allocator,
             arena_allocator: std.mem.Allocator,
             value: FrameType.WordType,
-            fusion_type: FusionType,
+            fusion_type: ValueFusionType,
         ) !void {
             // Always emit the fused handler (never silently drop consumed opcodes when
             // `value` is near maxInt(usize); the runtime handler checks memory bounds
@@ -736,7 +736,7 @@ pub fn Preprocessor(FrameType: type) type {
             unresolved_jumps: *ArrayList(UnresolvedJump, null),
             allocator: std.mem.Allocator,
             value: FrameType.WordType,
-            fusion_type: FusionType,
+            fusion_type: JumpFusionType,
             tracer: anytype,
             jump_pc: u32,
         ) !void {
@@ -749,10 +749,9 @@ pub fn Preprocessor(FrameType: type) type {
             } else @intCast(value);
 
             const frame_handlers = @import("../frame/frame_handlers.zig");
-            const static_opcode: u8 = switch (fusion_type) {
-                .push_jump => @intFromEnum(OpcodeSynthetic.JUMP_TO_STATIC_LOCATION),
-                .push_jumpi => @intFromEnum(OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION),
-                else => unreachable,
+            const static_opcode: OpcodeSynthetic = switch (fusion_type) {
+                .push_jump => .JUMP_TO_STATIC_LOCATION,
+                .push_jumpi => .JUMPI_TO_STATIC_LOCATION,
             };
             const static_handler = frame_handlers.getSyntheticHandler(FrameType, static_opcode);
             try schedule_items.append(allocator, .{ .opcode_handler = static_handler });
@@ -813,7 +812,7 @@ pub fn Preprocessor(FrameType: type) type {
             }
         }
 
-        const FusionType = enum {
+        const ValueFusionType = enum {
             push_add,
             push_mul,
             push_sub,
@@ -822,28 +821,29 @@ pub fn Preprocessor(FrameType: type) type {
             push_or,
             push_xor,
             push_add_dup1,
-            push_jump,
-            push_jumpi,
             push_mload,
             push_mstore,
             push_mstore8,
         };
 
-        fn getSyntheticOpcode(fusion_type: FusionType, is_inline: bool) u8 {
+        const JumpFusionType = enum {
+            push_jump,
+            push_jumpi,
+        };
+
+        fn getSyntheticOpcode(fusion_type: ValueFusionType, is_inline: bool) OpcodeSynthetic {
             return switch (fusion_type) {
-                .push_add => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER),
-                .push_mul => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_MUL_POINTER),
-                .push_sub => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_SUB_POINTER),
-                .push_div => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_DIV_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_DIV_POINTER),
-                .push_and => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_AND_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_AND_POINTER),
-                .push_or => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_OR_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_OR_POINTER),
-                .push_xor => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_XOR_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER),
-                .push_add_dup1 => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1_POINTER),
-                .push_jump => unreachable,
-                .push_jumpi => unreachable,
-                .push_mload => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER),
-                .push_mstore => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_POINTER),
-                .push_mstore8 => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER),
+                .push_add => if (is_inline) .PUSH_ADD_INLINE else .PUSH_ADD_POINTER,
+                .push_mul => if (is_inline) .PUSH_MUL_INLINE else .PUSH_MUL_POINTER,
+                .push_sub => if (is_inline) .PUSH_SUB_INLINE else .PUSH_SUB_POINTER,
+                .push_div => if (is_inline) .PUSH_DIV_INLINE else .PUSH_DIV_POINTER,
+                .push_and => if (is_inline) .PUSH_AND_INLINE else .PUSH_AND_POINTER,
+                .push_or => if (is_inline) .PUSH_OR_INLINE else .PUSH_OR_POINTER,
+                .push_xor => if (is_inline) .PUSH_XOR_INLINE else .PUSH_XOR_POINTER,
+                .push_add_dup1 => if (is_inline) .PUSH_ADD_DUP1_INLINE else .PUSH_ADD_DUP1_POINTER,
+                .push_mload => if (is_inline) .PUSH_MLOAD_INLINE else .PUSH_MLOAD_POINTER,
+                .push_mstore => if (is_inline) .PUSH_MSTORE_INLINE else .PUSH_MSTORE_POINTER,
+                .push_mstore8 => if (is_inline) .PUSH_MSTORE8_INLINE else .PUSH_MSTORE8_POINTER,
             };
         }
 
@@ -928,7 +928,7 @@ pub fn Preprocessor(FrameType: type) type {
             /// must end with. Constant time; needs no item tags.
             pub fn endsWithStops(self: *const DispatchSchedule) bool {
                 if (self.items.len < 2) return false;
-                const stop_handler = FrameType.opcode_handlers[@intFromEnum(Opcode.STOP)];
+                const stop_handler = FrameType.opcode_handlers[@backingInt(Opcode.STOP)];
                 if (comptime item_tagged) {
                     if (self.items[self.items.len - 1] != .opcode_handler) return false;
                     if (self.items[self.items.len - 2] != .opcode_handler) return false;

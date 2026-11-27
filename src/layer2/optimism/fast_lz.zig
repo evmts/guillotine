@@ -18,13 +18,18 @@ const std = @import("std");
 /// - https://github.com/Vectorized/solady/blob/5315d937d79b335c668896d7533ac603adac5315/js/solady.js
 /// - https://github.com/ethereum-optimism/op-geth/blob/647c346e2bef36219cc7b47d76b1cb87e7ca29e4/core/types/rollup_cost.go#L411
 pub fn flzCompressLen(input: []const u8) u32 {
-    // Early return for small inputs - algorithm requires at least 13 bytes
+    // Early return for small inputs - algorithm requires at least 13 bytes.
     if (input.len < 13) {
         return literals(@intCast(input.len), 0);
     }
+    if (input.len > std.math.maxInt(u32)) {
+        @branchHint(.unlikely);
+        return std.math.maxInt(u32);
+    }
 
     var idx: u32 = 2;
-    const idx_limit: u32 = @as(u32, @intCast(input.len)) - 13;
+    const input_len_u32: u32 = @intCast(input.len);
+    const idx_limit: u32 = input_len_u32 - 13;
 
     var anchor: u32 = 0;
     var size: u32 = 0;
@@ -60,7 +65,11 @@ pub fn flzCompressLen(input: []const u8) u32 {
             size = literals(idx - anchor, size);
         }
 
-        const len = cmp(input, r + 3, idx + 3, idx_limit + 9);
+        const len = cmp(input, .{
+            .prev_offset = r + 3,
+            .curr_offset = idx + 3,
+            .limit = idx_limit + 9,
+        });
         size = flzMatch(len, size);
 
         idx = setNextHash(&htab, input, idx + len);
@@ -68,8 +77,14 @@ pub fn flzCompressLen(input: []const u8) u32 {
         anchor = idx;
     }
 
-    return literals(@as(u32, @intCast(input.len)) - anchor, size);
+    return literals(input_len_u32 - anchor, size);
 }
+
+const MatchRange = struct {
+    prev_offset: u32,
+    curr_offset: u32,
+    limit: u32,
+};
 
 fn literals(r: u32, size: u32) u32 {
     const new_size = size + 0x21 * (r / 0x20);
@@ -82,13 +97,15 @@ fn literals(r: u32, size: u32) u32 {
 }
 
 /// Compare bytes at two positions and return match length.
-/// SAFETY: Caller must ensure p, q, and r are valid for the algorithm's invariants.
+/// SAFETY: Caller must ensure range offsets are valid for the algorithm's invariants.
 /// The algorithm guarantees this through idx_limit = input.len - 13.
-fn cmp(input: []const u8, p: u32, q: u32, r: u32) u32 {
+inline fn cmp(input: []const u8, range: MatchRange) u32 {
     var l: u32 = 0;
-    var max_len = r - q;
+    var max_len = range.limit - range.curr_offset;
     while (l < max_len) {
-        if (input[@as(usize, @intCast(p + l))] != input[@as(usize, @intCast(q + l))]) {
+        const a = input[@as(usize, range.prev_offset + l)];
+        const b = input[@as(usize, range.curr_offset + l)];
+        if (a != b) {
             max_len = 0;
         }
         l += 1;

@@ -125,18 +125,18 @@ test "Branch node - multiple children" {
     defer builder.deinit();
 
     // Insert keys that will create a branch node
-    try builder.insert(&[_]u8{ 0x10 }, "value0");
-    try builder.insert(&[_]u8{ 0x20 }, "value1");
-    try builder.insert(&[_]u8{ 0x30 }, "value2");
+    try builder.insert(&[_]u8{0x10}, "value0");
+    try builder.insert(&[_]u8{0x20}, "value1");
+    try builder.insert(&[_]u8{0x30}, "value2");
 
     // All values should be retrievable
-    const value0 = try builder.get(&[_]u8{ 0x10 });
+    const value0 = try builder.get(&[_]u8{0x10});
     try testing.expectEqualStrings("value0", value0.?);
 
-    const value1 = try builder.get(&[_]u8{ 0x20 });
+    const value1 = try builder.get(&[_]u8{0x20});
     try testing.expectEqualStrings("value1", value1.?);
 
-    const value2 = try builder.get(&[_]u8{ 0x30 });
+    const value2 = try builder.get(&[_]u8{0x30});
     try testing.expectEqualStrings("value2", value2.?);
 }
 
@@ -171,22 +171,22 @@ test "Branch node - delete one child" {
     var builder = HashBuilder.init(allocator);
     defer builder.deinit();
 
-    try builder.insert(&[_]u8{ 0x10 }, "value0");
-    try builder.insert(&[_]u8{ 0x20 }, "value1");
-    try builder.insert(&[_]u8{ 0x30 }, "value2");
+    try builder.insert(&[_]u8{0x10}, "value0");
+    try builder.insert(&[_]u8{0x20}, "value1");
+    try builder.insert(&[_]u8{0x30}, "value2");
 
     // Delete one child
-    try builder.delete(&[_]u8{ 0x20 });
+    try builder.delete(&[_]u8{0x20});
 
     // Other children should still exist
-    const value0 = try builder.get(&[_]u8{ 0x10 });
+    const value0 = try builder.get(&[_]u8{0x10});
     try testing.expectEqualStrings("value0", value0.?);
 
-    const value2 = try builder.get(&[_]u8{ 0x30 });
+    const value2 = try builder.get(&[_]u8{0x30});
     try testing.expectEqualStrings("value2", value2.?);
 
     // Deleted child should not exist
-    const deleted = try builder.get(&[_]u8{ 0x20 });
+    const deleted = try builder.get(&[_]u8{0x20});
     try testing.expect(deleted == null);
 }
 

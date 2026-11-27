@@ -209,7 +209,7 @@ pub const EMPTY_REQUESTS_HASH: [32]u8 = .{
 /// Encode a request as `request_type ++ request_data`. The caller owns the result.
 pub fn encodeRequest(allocator: std.mem.Allocator, request_type: RequestType, request_data: []const u8) std.mem.Allocator.Error![]u8 {
     const encoded = try allocator.alloc(u8, request_data.len + 1);
-    encoded[0] = @intFromEnum(request_type);
+    encoded[0] = @backingInt(request_type);
     @memcpy(encoded[1..], request_data);
     return encoded;
 }
@@ -561,7 +561,12 @@ pub const Eips = struct {
     ///
     /// Returns: SstoreGasCost with gas cost and signed change to the refund counter
     pub fn sstore_gas_cost(self: Self, current: u256, new: u256, original: u256, is_cold: bool) SstoreGasCost {
-        return @import("../frame/fork_gas.zig").sstoreCost(self.hardfork, original, current, new, is_cold);
+        return @import("../frame/fork_gas.zig").sstoreCostFor(self.hardfork, .{
+            .original = original,
+            .current = current,
+            .new = new,
+            .is_cold = is_cold,
+        });
     }
 
     pub const SstoreGasCost = @import("../frame/fork_gas.zig").SstoreCost;
@@ -2028,9 +2033,9 @@ test "EIP-7685 requests hash and encoding" {
     const type_only = [_][]const u8{ &.{0x00}, &.{0x01}, &.{0x02} };
     try std.testing.expectEqualSlices(u8, &EMPTY_REQUESTS_HASH, &(try computeRequestsHash(&type_only)));
 
-    try std.testing.expectEqual(@as(u8, 0x00), @intFromEnum(RequestType.deposit));
-    try std.testing.expectEqual(@as(u8, 0x01), @intFromEnum(RequestType.withdrawal));
-    try std.testing.expectEqual(@as(u8, 0x02), @intFromEnum(RequestType.consolidation));
+    try std.testing.expectEqual(@as(u8, 0x00), @backingInt(RequestType.deposit));
+    try std.testing.expectEqual(@as(u8, 0x01), @backingInt(RequestType.withdrawal));
+    try std.testing.expectEqual(@as(u8, 0x02), @backingInt(RequestType.consolidation));
 
     const deposit = try encodeRequest(allocator, .deposit, &.{ 0xaa, 0xbb });
     defer allocator.free(deposit);

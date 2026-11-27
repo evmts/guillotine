@@ -22,205 +22,108 @@ pub fn Handlers(FrameType: type) type {
         const dispatch_next = @import("dispatch_next.zig");
 
         /// KECCAK256 opcode (0x20) - Compute keccak hash
+        inline fn emptyKeccakWord() WordType {
+            return switch (@bitSizeOf(WordType)) {
+                256 => @as(WordType, @truncate(@as(u256, 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470))),
+                64 => @as(WordType, @as(u64, 0x0eab42de4c3ceb92)),
+                32 => @as(WordType, @as(u32, 0xf71837502)),
+                else => @as(WordType, @truncate(@as(u256, 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470))),
+            };
+        }
+
+        inline fn mapKeccakError(self: *FrameType, err: anytype) Error {
+            @branchHint(.cold);
+            self.afterComplete(.KECCAK256);
+            return switch (err) {
+                keccak_asm.KeccakError.InvalidInput => Error.OutOfBounds,
+                else => Error.AllocationError,
+            };
+        }
+
+        inline fn hashKeccakWord(self: *FrameType, data: []const u8) Error!WordType {
+            return switch (@bitSizeOf(WordType)) {
+                256 => blk: {
+                    var hash_bytes: [32]u8 = undefined;
+                    keccak_asm.keccak256(data, &hash_bytes) catch |err| return mapKeccakError(self, err);
+                    break :blk @as(WordType, std.mem.readInt(u256, &hash_bytes, .big));
+                },
+                64 => blk: {
+                    var hash_bytes: [64]u8 = undefined;
+                    keccak_asm.keccak512(data, &hash_bytes) catch |err| return mapKeccakError(self, err);
+                    break :blk @as(WordType, std.mem.readInt(u64, hash_bytes[0..8], .big));
+                },
+                32 => blk: {
+                    var hash_bytes: [28]u8 = undefined;
+                    keccak_asm.keccak224(data, &hash_bytes) catch |err| return mapKeccakError(self, err);
+                    break :blk @as(WordType, std.mem.readInt(u32, hash_bytes[0..4], .big));
+                },
+                else => blk: {
+                    var hash_bytes: [32]u8 = undefined;
+                    keccak_asm.keccak256(data, &hash_bytes) catch |err| return mapKeccakError(self, err);
+                    break :blk @as(WordType, @truncate(std.mem.readInt(u256, &hash_bytes, .big)));
+                },
+            };
+        }
+
         /// Pops offset and size from stack, reads data from memory, and pushes hash.
         /// Stack: [offset, size] → [hash]
-        ///
-        /// The actual Keccak variant used depends on WordType:
-        /// - For standard EVM (u256), uses Keccak-256
-        /// - For smaller word types, may use different variants or truncate
         pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.KECCAK256, cursor);
             self.validateOpcodeHandler(.KECCAK256, cursor);
-            const offset = self.stack.pop_unsafe(); // Top of stack is offset
-            const size = self.stack.pop_unsafe(); // Second is size
+            const offset = self.stack.pop_unsafe();
+            const size = self.stack.pop_unsafe();
 
-            // Handle empty data case
             if (size == 0) {
                 @branchHint(.unlikely);
-                // Empty input costs only the 30 gas base, which the basic block
-                // already charged (OPCODE_INFO[KECCAK256].gas_cost). No memory is touched.
-
-                // Hash of empty data depends on Keccak variant
-                const empty_hash = switch (@bitSizeOf(WordType)) {
-                    256 => blk: {
-                        // Standard Keccak-256("")
-                        const hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                        break :blk @as(WordType, @truncate(hash));
-                    },
-                    64 => blk: {
-                        // Keccak-512("") - first 64 bits
-                        const hash: u64 = 0x0eab42de4c3ceb92;
-                        break :blk @as(WordType, hash);
-                    },
-                    32 => blk: {
-                        // Keccak-224("") - first 32 bits
-                        const hash: u32 = 0xf71837502;
-                        break :blk @as(WordType, hash);
-                    },
-                    else => blk: {
-                        // For other sizes, use Keccak-256 truncated
-                        const hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                        break :blk @as(WordType, @truncate(hash));
-                    },
-                };
-                self.stack.push_unsafe(empty_hash);
+                self.stack.push_unsafe(emptyKeccakWord());
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
             }
 
-            // Hashing a non-empty region beyond usize could never pay for its memory. This
-            // check follows the empty case because an empty region ignores its offset.
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
+                @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
             }
-
-            const offset_usize = @as(usize, @intCast(offset));
-            const size_usize = @as(usize, @intCast(size));
-
-            // Check for overflow
+            const offset_usize: usize = @intCast(offset);
+            const size_usize: usize = @intCast(size);
             const end = std.math.add(usize, offset_usize, size_usize) catch {
-                @branchHint(.unlikely);
+                @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
             };
-
-            // Check if end fits in u32 before ensuring memory capacity
             if (end > std.math.maxInt(u32)) {
+                @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
             }
 
-            // KECCAK256 costs 30 + 6 * words + memory expansion. The 30 gas base is
-            // static and already charged with the basic block (OPCODE_INFO[KECCAK256].gas_cost);
-            // the handler charges only the dynamic part.
             const words: u64 = (@as(u64, size_usize) + 31) / 32;
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end)));
-            // memory_expansion_cost saturates to maxInt(u64) for absurd sizes, so add saturating.
+            const memory_expansion_cost = self.memory.get_expansion_cost(@intCast(end));
             const gas_cost = (words * GasConstants.Keccak256WordGas) +| memory_expansion_cost;
             const gas_charge = std.math.cast(FrameType.GasType, gas_cost) orelse {
-                @branchHint(.unlikely);
+                @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfGas;
             };
-
-            // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= gas_charge;
             if (self.gas_remaining < 0) {
+                @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfGas;
             }
 
-            // Ensure memory is available
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(end))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.KECCAK256);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.KECCAK256);
-                    return Error.AllocationError;
-                },
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @intCast(end)) catch |err| {
+                @branchHint(.cold);
+                self.afterComplete(.KECCAK256);
+                return if (err == memory_mod.MemoryError.MemoryOverflow) Error.OutOfBounds else Error.AllocationError;
             };
-
-            // Get data from memory
-            const data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
+            const data = self.memory.get_slice(@intCast(offset_usize), @intCast(size_usize)) catch {
+                @branchHint(.cold);
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
             };
 
-            // Compute hash using appropriate Keccak variant based on WordType
-            const result_word = switch (@bitSizeOf(WordType)) {
-                256 => blk: {
-                    // Standard Keccak-256 for u256
-                    var hash_bytes: [32]u8 = undefined;
-                    keccak_asm.keccak256(data, &hash_bytes) catch |err| switch (err) {
-                        keccak_asm.KeccakError.InvalidInput => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.OutOfBounds;
-                        },
-                        keccak_asm.KeccakError.MemoryError => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                        else => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                    };
-
-                    const hash_u256 = std.mem.readInt(u256, &hash_bytes, .big);
-                    break :blk @as(WordType, hash_u256);
-                },
-                64 => blk: {
-                    // Keccak-512 for u64 (can hold full 64 bytes)
-                    var hash_bytes: [64]u8 = undefined;
-                    keccak_asm.keccak512(data, &hash_bytes) catch |err| switch (err) {
-                        keccak_asm.KeccakError.InvalidInput => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.OutOfBounds;
-                        },
-                        keccak_asm.KeccakError.MemoryError => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                        else => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                    };
-
-                    // Take first 8 bytes for u64
-                    const hash_u64 = std.mem.readInt(u64, hash_bytes[0..8], .big);
-                    break :blk @as(WordType, hash_u64);
-                },
-                32 => blk: {
-                    // Keccak-224 for u32 (28 bytes output)
-                    var hash_bytes: [28]u8 = undefined;
-                    keccak_asm.keccak224(data, &hash_bytes) catch |err| switch (err) {
-                        keccak_asm.KeccakError.InvalidInput => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.OutOfBounds;
-                        },
-                        keccak_asm.KeccakError.MemoryError => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                        else => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                    };
-
-                    // Take first 4 bytes for u32
-                    const hash_u32 = std.mem.readInt(u32, hash_bytes[0..4], .big);
-                    break :blk @as(WordType, hash_u32);
-                },
-                else => blk: {
-                    // For other sizes, use Keccak-256 and truncate
-                    var hash_bytes: [32]u8 = undefined;
-                    keccak_asm.keccak256(data, &hash_bytes) catch |err| switch (err) {
-                        keccak_asm.KeccakError.InvalidInput => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.OutOfBounds;
-                        },
-                        keccak_asm.KeccakError.MemoryError => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                        else => {
-                            self.afterComplete(.KECCAK256);
-                            return Error.AllocationError;
-                        },
-                    };
-
-                    const hash_u256 = std.mem.readInt(u256, &hash_bytes, .big);
-                    break :blk @as(WordType, @truncate(hash_u256));
-                },
-            };
-
-            self.stack.push_unsafe(result_word);
-
+            self.stack.push_unsafe(try hashKeccakWord(self, data));
             return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
         }
     };

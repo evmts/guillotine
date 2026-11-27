@@ -34,7 +34,7 @@ pub const Cond = enum(u4) {
     al = 14,
 
     pub fn invert(self: Cond) Cond {
-        return @enumFromInt(@intFromEnum(self) ^ 1);
+        return @fromBackingInt(@intCast(@backingInt(self) ^ 1));
     }
 };
 
@@ -241,11 +241,11 @@ pub const Emitter = struct {
         try self.emit(0xD3400000 | @as(u32, shift) << 16 | 63 << 10 | @as(u32, rn) << 5 | rd);
     }
     pub fn csel(self: *Emitter, rd: Reg, rn: Reg, rm: Reg, cond: Cond) Error!void {
-        try self.emit(0x9A800000 | @as(u32, rm) << 16 | @as(u32, @intFromEnum(cond)) << 12 | @as(u32, rn) << 5 | rd);
+        try self.emit(0x9A800000 | @as(u32, rm) << 16 | @as(u32, @backingInt(cond)) << 12 | @as(u32, rn) << 5 | rd);
     }
     /// CSET Xd, cond (CSINC Xd, XZR, XZR, !cond).
     pub fn cset(self: *Emitter, rd: Reg, cond: Cond) Error!void {
-        try self.emit(0x9A800400 | @as(u32, xzr) << 16 | @as(u32, @intFromEnum(cond.invert())) << 12 | @as(u32, xzr) << 5 | rd);
+        try self.emit(0x9A800400 | @as(u32, xzr) << 16 | @as(u32, @backingInt(cond.invert())) << 12 | @as(u32, xzr) << 5 | rd);
     }
 
     // ---------------------------------------------------------- load / store
@@ -346,7 +346,7 @@ pub const Emitter = struct {
         try self.emit(0x94000000);
     }
     pub fn bcondPlaceholder(self: *Emitter, cond: Cond) Error!void {
-        try self.emit(0x54000000 | @as(u32, @intFromEnum(cond)));
+        try self.emit(0x54000000 | @as(u32, @backingInt(cond)));
     }
     pub fn cbzPlaceholder(self: *Emitter, rt: Reg) Error!void {
         try self.emit(0xB4000000 | @as(u32, rt));

@@ -15,10 +15,10 @@ const Eips = @import("eips.zig").Eips;
 const std = @import("std");
 
 test "hardfork enum ordering" {
-    try std.testing.expect(@intFromEnum(Hardfork.FRONTIER) < @intFromEnum(Hardfork.HOMESTEAD));
-    try std.testing.expect(@intFromEnum(Hardfork.HOMESTEAD) < @intFromEnum(Hardfork.BYZANTIUM));
-    try std.testing.expect(@intFromEnum(Hardfork.BYZANTIUM) < @intFromEnum(Hardfork.CANCUN));
-    try std.testing.expect(@intFromEnum(Hardfork.CANCUN) < @intFromEnum(Hardfork.PRAGUE));
+    try std.testing.expect(@backingInt(Hardfork.FRONTIER) < @backingInt(Hardfork.HOMESTEAD));
+    try std.testing.expect(@backingInt(Hardfork.HOMESTEAD) < @backingInt(Hardfork.BYZANTIUM));
+    try std.testing.expect(@backingInt(Hardfork.BYZANTIUM) < @backingInt(Hardfork.CANCUN));
+    try std.testing.expect(@backingInt(Hardfork.CANCUN) < @backingInt(Hardfork.PRAGUE));
 }
 
 test "hardfork default is osaka" {
@@ -67,7 +67,7 @@ test "hardfork OSAKA ordering" {
     try std.testing.expect(Hardfork.PRAGUE.isBefore(Hardfork.OSAKA));
     try std.testing.expect(Hardfork.OSAKA.isAtLeast(Hardfork.PRAGUE));
     try std.testing.expect(Hardfork.OSAKA.isAtLeast(Hardfork.CANCUN));
-    try std.testing.expect(@intFromEnum(Hardfork.OSAKA) > @intFromEnum(Hardfork.PRAGUE));
+    try std.testing.expect(@backingInt(Hardfork.OSAKA) > @backingInt(Hardfork.PRAGUE));
 }
 
 test "hardfork mainnet activation blocks" {

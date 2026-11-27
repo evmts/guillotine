@@ -212,4 +212,3 @@ test "jump_to_static_location - performance comparison" {
     const result = TestFrame.JumpSyntheticHandlers.jump_to_static_location(&frame, &cursor);
     try testing.expectError(TestFrame.Error.STOP, result);
 }
-

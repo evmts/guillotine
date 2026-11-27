@@ -25,7 +25,8 @@ test "Bytecode.init and basic getters" {
     try std.testing.expectEqual(@as(?u8, 0x40), bytecode.get(1));
     try std.testing.expectEqual(@as(?u8, null), bytecode.get(4)); // Out of bounds
     try std.testing.expectEqual(@as(?u8, 0x60), bytecode.getOpcode(0));
-}test "Bytecode.isValidJumpDest" {
+}
+test "Bytecode.isValidJumpDest" {
     const allocator = std.testing.allocator;
     const code = [_]u8{ 0x60, 0x03, 0x56, 0x5b, 0x00 };
     var bytecode = try BytecodeDefault.init(allocator, &code);
@@ -108,7 +109,7 @@ test "snailtracer bytecode JUMP to 0x2e0 validation" {
         // Check for PUSH2 instructions that might push 0x02e0
         if (op == 0x61 and pc + 2 < bytecode.len()) { // PUSH2
             const val = (@as(u16, bytecode.get_unsafe(@intCast(pc + 1))) << 8) |
-                        @as(u16, bytecode.get_unsafe(@intCast(pc + 2)));
+                @as(u16, bytecode.get_unsafe(@intCast(pc + 2)));
             if (val == 0x02e0) {
                 std.log.warn("Found PUSH2 0x02e0 at PC=0x{x}", .{pc});
                 // Check if it's followed by a JUMP
@@ -256,7 +257,6 @@ test "Bytecode validation - PUSH32 extends past end" {
     try std.testing.expectEqual(expected, bytecode.pushValuePadded(0, 32));
 }
 
-
 test "Bytecode validation - Jump to valid JUMPDEST" {
     const allocator = std.testing.allocator;
     // PUSH1 0x04 JUMP JUMPDEST STOP
@@ -265,7 +265,6 @@ test "Bytecode validation - Jump to valid JUMPDEST" {
     defer bytecode.deinit();
     try std.testing.expect(bytecode.isValidJumpDest(4)); // JUMPDEST at PC 4
 }
-
 
 test "Bytecode validation - empty bytecode is valid" {
     const allocator = std.testing.allocator;
@@ -283,7 +282,6 @@ test "Bytecode validation - only STOP is valid" {
     try std.testing.expectEqual(@as(usize, 1), bytecode.len());
 }
 
-
 test "Bytecode.getStats - basic stats" {
     const allocator = std.testing.allocator;
     // PUSH1 0x05 PUSH1 0x03 ADD STOP
@@ -300,9 +298,9 @@ test "Bytecode.getStats - basic stats" {
     }
 
     // Check opcode counts
-    try std.testing.expectEqual(@as(u32, 2), stats.opcode_counts[@intFromEnum(Opcode.PUSH1)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.ADD)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
+    try std.testing.expectEqual(@as(u32, 2), stats.opcode_counts[@backingInt(Opcode.PUSH1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.ADD)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.STOP)]);
 
     // Check push values
     try std.testing.expectEqual(@as(usize, 2), stats.push_values.len);
@@ -619,12 +617,12 @@ test "Bytecode.getStats - all opcode types counted" {
     }
 
     // Verify counts
-    try std.testing.expectEqual(@as(u32, 3), stats.opcode_counts[@intFromEnum(Opcode.PUSH1)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.DUP1)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.ADD)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.MSTORE)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.MLOAD)]);
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
+    try std.testing.expectEqual(@as(u32, 3), stats.opcode_counts[@backingInt(Opcode.PUSH1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.DUP1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.ADD)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.MSTORE)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.MLOAD)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.STOP)]);
 }
 
 test "Bytecode.countBitsInRange - basic functionality" {
@@ -809,7 +807,7 @@ test "Bytecode edge cases - very short bytecode" {
         allocator.free(stats.jumps);
     }
 
-    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@backingInt(Opcode.STOP)]);
 }
 
 test "Bytecode edge cases - bytecode at vector boundaries" {
@@ -1026,7 +1024,7 @@ test "Bytecode complex PUSH patterns" {
     // The number of PUSH opcodes detected should match recorded push_values
     var total_pushes: u32 = 0;
     for (1..33) |i| {
-        total_pushes += stats.opcode_counts[@intFromEnum(Opcode.PUSH1) + i - 1];
+        total_pushes += stats.opcode_counts[@backingInt(Opcode.PUSH1) + i - 1];
     }
     try std.testing.expect(total_pushes > 0);
     try std.testing.expectEqual(@as(usize, total_pushes), stats.push_values.len);
@@ -1197,8 +1195,7 @@ test "Bytecode malformed metadata - truncated data" {
         0x00, 0x00,
         0x00, 0x00,
         0x00, 0x00,
-        0x00,
-        0x00,
+        0x00, 0x00,
         // Missing second half of hash and rest of data
         0x00, 0x18, // metadata length: 24 bytes (actual but truncated content)
     };
@@ -2094,11 +2091,11 @@ test "Bytecode bitmap generation - simple opcodes" {
 
     // Test basic opcodes: ADD, MUL, PUSH1, STOP
     const code = [_]u8{
-        @intFromEnum(Opcode.ADD), // 0: operation start
-        @intFromEnum(Opcode.MUL), // 1: operation start
-        @intFromEnum(Opcode.PUSH1), // 2: operation start
+        @backingInt(Opcode.ADD), // 0: operation start
+        @backingInt(Opcode.MUL), // 1: operation start
+        @backingInt(Opcode.PUSH1), // 2: operation start
         0x42, // 3: push data
-        @intFromEnum(Opcode.STOP), // 4: operation start
+        @backingInt(Opcode.STOP), // 4: operation start
     };
 
     var bytecode = try BytecodeDefault.init(allocator, &code);
@@ -2130,10 +2127,10 @@ test "Bytecode bitmap generation - multiple PUSH opcodes" {
 
     // Test various PUSH opcodes
     const code = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0xAA, // 0-1
-        @intFromEnum(Opcode.PUSH2), 0xBB, 0xCC, // 2-4
-        @intFromEnum(Opcode.PUSH4), 0x11, 0x22, 0x33, 0x44, // 5-9
-        @intFromEnum(Opcode.ADD), // 10
+        @backingInt(Opcode.PUSH1), 0xAA, // 0-1
+        @backingInt(Opcode.PUSH2), 0xBB, 0xCC, // 2-4
+        @backingInt(Opcode.PUSH4), 0x11, 0x22, 0x33, 0x44, // 5-9
+        @backingInt(Opcode.ADD), // 10
     };
 
     var bytecode = try BytecodeDefault.init(allocator, &code);
@@ -2165,14 +2162,14 @@ test "Bytecode bitmap generation - JUMPDEST validation" {
 
     // Test JUMPDEST in various positions
     const code = [_]u8{
-        @intFromEnum(Opcode.JUMPDEST), // 0: valid JUMPDEST
-        @intFromEnum(Opcode.PUSH2), // 1: PUSH2
+        @backingInt(Opcode.JUMPDEST), // 0: valid JUMPDEST
+        @backingInt(Opcode.PUSH2), // 1: PUSH2
         0x00, // 2: push data
-        @intFromEnum(Opcode.JUMPDEST), // 3: JUMPDEST inside push data (invalid)
-        @intFromEnum(Opcode.JUMPDEST), // 4: valid JUMPDEST
-        @intFromEnum(Opcode.PUSH1), // 5: PUSH1
-        @intFromEnum(Opcode.JUMPDEST), // 6: push data that happens to be JUMPDEST value
-        @intFromEnum(Opcode.JUMPDEST), // 7: valid JUMPDEST
+        @backingInt(Opcode.JUMPDEST), // 3: JUMPDEST inside push data (invalid)
+        @backingInt(Opcode.JUMPDEST), // 4: valid JUMPDEST
+        @backingInt(Opcode.PUSH1), // 5: PUSH1
+        @backingInt(Opcode.JUMPDEST), // 6: push data that happens to be JUMPDEST value
+        @backingInt(Opcode.JUMPDEST), // 7: valid JUMPDEST
     };
 
     var bytecode = try BytecodeDefault.init(allocator, &code);
@@ -2209,10 +2206,10 @@ test "Bytecode bitmap generation - fusion candidates with fusions enabled" {
 
     // Test fusion patterns: PUSH + ADD, PUSH + MUL
     const code = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x05, @intFromEnum(Opcode.ADD), // 0-2: PUSH1+ADD fusion
-        @intFromEnum(Opcode.PUSH2), 0x00, 0x10, @intFromEnum(Opcode.MUL), // 3-6: PUSH2+MUL fusion
-        @intFromEnum(Opcode.PUSH1), 0x20, // 7-8: PUSH1 without fusion
-        @intFromEnum(Opcode.STOP), // 9: STOP
+        @backingInt(Opcode.PUSH1), 0x05, @backingInt(Opcode.ADD), // 0-2: PUSH1+ADD fusion
+        @backingInt(Opcode.PUSH2), 0x00, 0x10, @backingInt(Opcode.MUL), // 3-6: PUSH2+MUL fusion
+        @backingInt(Opcode.PUSH1), 0x20, // 7-8: PUSH1 without fusion
+        @backingInt(Opcode.STOP), // 9: STOP
     };
 
     var bytecode = try BytecodeType.init(allocator, &code);
@@ -2236,8 +2233,8 @@ test "Bytecode bitmap generation - fusion candidates with fusions disabled" {
 
     // Same test pattern as above
     const code = [_]u8{
-        @intFromEnum(Opcode.PUSH1), 0x05, @intFromEnum(Opcode.ADD), // 0-2: Would be fusion if enabled
-        @intFromEnum(Opcode.PUSH2), 0x00, 0x10, @intFromEnum(Opcode.MUL), // 3-6: Would be fusion if enabled
+        @backingInt(Opcode.PUSH1), 0x05, @backingInt(Opcode.ADD), // 0-2: Would be fusion if enabled
+        @backingInt(Opcode.PUSH2), 0x00, 0x10, @backingInt(Opcode.MUL), // 3-6: Would be fusion if enabled
     };
 
     var bytecode = try BytecodeType.init(allocator, &code);
@@ -2257,7 +2254,7 @@ test "Bytecode bitmap generation - cross-byte boundaries" {
     // Create bytecode that crosses bitmap byte boundaries (8 bits per byte)
     var code: [10]u8 = undefined;
     for (0..10) |i| {
-        code[i] = if (i == 7 or i == 8) @intFromEnum(Opcode.JUMPDEST) else @intFromEnum(Opcode.ADD);
+        code[i] = if (i == 7 or i == 8) @backingInt(Opcode.JUMPDEST) else @backingInt(Opcode.ADD);
     }
 
     var bytecode = try BytecodeDefault.init(allocator, &code);
@@ -2278,11 +2275,11 @@ test "Bytecode bitmap generation - PUSH32 edge case" {
 
     // PUSH32 with 32 bytes of data
     var code: [34]u8 = undefined;
-    code[0] = @intFromEnum(Opcode.PUSH32);
+    code[0] = @backingInt(Opcode.PUSH32);
     for (1..33) |i| {
         code[i] = @intCast(i); // Push data bytes
     }
-    code[33] = @intFromEnum(Opcode.JUMPDEST); // Valid JUMPDEST after PUSH32
+    code[33] = @backingInt(Opcode.JUMPDEST); // Valid JUMPDEST after PUSH32
 
     var bytecode = try BytecodeDefault.init(allocator, &code);
     defer bytecode.deinit();
@@ -2312,7 +2309,7 @@ test "Bytecode bitmap generation - empty and single byte" {
     try std.testing.expectEqual(@as(BytecodeDefault.PcType, 0), empty_bytecode.len());
 
     // Test single byte
-    const single_code = [_]u8{@intFromEnum(Opcode.STOP)};
+    const single_code = [_]u8{@backingInt(Opcode.STOP)};
     var single_bytecode = try BytecodeDefault.init(allocator, &single_code);
     defer single_bytecode.deinit();
 
@@ -2322,79 +2319,79 @@ test "Bytecode bitmap generation - empty and single byte" {
 
 test "PUSH+JUMP: PUSH32 containing JUMP byte should not cause validation error" {
     const allocator = std.testing.allocator;
-    
+
     // PUSH32 with data that contains 0x56 (JUMP opcode value) followed by actual code
     const bytecode = [_]u8{
         0x7f, // PUSH32
         // 32 bytes of data, including 0x56 at various positions
-        0x11, 0x22, 0x33, 0x44, 0x56, 0x66, 0x77, 0x88,  // 0x56 at position 5
+        0x11, 0x22, 0x33, 0x44, 0x56, 0x66, 0x77, 0x88, // 0x56 at position 5
         0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-        0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x56,  // 0x56 at position 32
+        0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x56, // 0x56 at position 32
         0x00, // STOP (at position 33)
     };
-    
+
     // This should succeed - the 0x56 bytes inside PUSH32 data should NOT be treated as JUMP opcodes
     var bc = BytecodeDefault.init(allocator, &bytecode) catch |err| {
         log.debug("PUSH+JUMP test failed: PUSH32 containing 0x56 incorrectly rejected: {}\n", .{err});
         return err;
     };
     defer bc.deinit();
-    
+
     try std.testing.expect(bc.runtime_code.len == bytecode.len);
-    
+
     // Verify that position 5 is marked as push data, not an opcode
     try std.testing.expect(bc.packed_bitmap[5].is_push_data);
-    
+
     // Verify that position 33 (STOP) is an opcode start
     try std.testing.expect(bc.packed_bitmap[33].is_op_start);
 }
 
 test "PUSH+JUMP: complex bytecode with mixed PUSH and JUMP patterns" {
     const allocator = std.testing.allocator;
-    
+
     // Complex pattern:
     // PUSH1 0x08, JUMP, PUSH2 with 0x56 in data, JUMPDEST, STOP
     const bytecode = [_]u8{
-        0x60, 0x08,        // PUSH1 8 (valid jump to JUMPDEST)
-        0x56,              // JUMP (actual JUMP opcode at position 2)
-        0x61, 0x56, 0x78,  // PUSH2 0x5678 (contains 0x56 as data at position 4)
-        0x00,              // STOP at position 6
-        0x00,              // STOP at position 7
-        0x5b,              // JUMPDEST at position 8
-        0x00,              // STOP at position 9
+        0x60, 0x08, // PUSH1 8 (valid jump to JUMPDEST)
+        0x56, // JUMP (actual JUMP opcode at position 2)
+        0x61, 0x56, 0x78, // PUSH2 0x5678 (contains 0x56 as data at position 4)
+        0x00, // STOP at position 6
+        0x00, // STOP at position 7
+        0x5b, // JUMPDEST at position 8
+        0x00, // STOP at position 9
     };
-    
+
     var bc = BytecodeDefault.init(allocator, &bytecode) catch |err| {
         log.debug("PUSH+JUMP test failed: Complex pattern incorrectly rejected: {}\n", .{err});
         return err;
     };
     defer bc.deinit();
-    
+
     try std.testing.expect(bc.runtime_code.len == bytecode.len);
-    
+
     // Position 2 should be a real JUMP opcode
     try std.testing.expect(bc.packed_bitmap[2].is_op_start);
-    
-    // Position 4 should be push data (even though it's 0x56) 
+
+    // Position 4 should be push data (even though it's 0x56)
     try std.testing.expect(bc.packed_bitmap[4].is_push_data);
-    
+
     // Position 8 should be JUMPDEST
     try std.testing.expect(bc.packed_bitmap[8].is_jumpdest);
 }
 
 test "PUSH+JUMP: unreachable PUSH+JUMP pattern should be valid" {
     const allocator = std.testing.allocator;
-    
+
     // Bytecode with unreachable code that contains PUSH+JUMP
     const bytecode = [_]u8{
-        0x00,        // STOP - execution ends here
+        0x00, // STOP - execution ends here
         // Unreachable code below:
-        0x60, 0x10,  // PUSH1 16 (target doesn't exist)
-        0x56,        // JUMP
-        0x00,        // STOP
+        0x60, 0x10, // PUSH1 16 (target doesn't exist)
+        0x56, // JUMP
+        0x00, // STOP
     };
-    
+
     // This should succeed even though the jump target (16) doesn't exist,
     // because the PUSH+JUMP is unreachable
     var bc = BytecodeDefault.init(allocator, &bytecode) catch |err| {
@@ -2402,6 +2399,6 @@ test "PUSH+JUMP: unreachable PUSH+JUMP pattern should be valid" {
         return err;
     };
     defer bc.deinit();
-    
+
     try std.testing.expect(bc.runtime_code.len == bytecode.len);
 }

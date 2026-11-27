@@ -537,13 +537,13 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         /// Returns null if the PC doesn't point to a PUSH instruction of the correct size
         pub fn readPushValue(self: Self, pc: PcType, comptime size: comptime_int) ?@Int(.unsigned, size * 8) {
             const opcode = self.get(pc) orelse return null;
-            const expected_push = 0x60 + (size - 1);  // PUSH1 = 0x60, PUSH2 = 0x61, etc.
+            const expected_push = 0x60 + (size - 1); // PUSH1 = 0x60, PUSH2 = 0x61, etc.
             if (opcode != expected_push) return null;
-            
+
             var value: @Int(.unsigned, size * 8) = 0;
             const end_pc = @min(pc + 1 + size, self.len());
             if (pc + 1 + size > self.len()) return null;
-            
+
             for (pc + 1..end_pc) |i| {
                 value = std.math.shl(@TypeOf(value), value, 8) | self.get_unsafe(@intCast(i));
             }
@@ -553,15 +553,15 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         /// Read a PUSH value at the given PC with dynamic size (returns u256)
         pub fn readPushValueN(self: Self, pc: PcType, size: u8) ?u256 {
             const opcode = self.get(pc) orelse return null;
-            const expected_push = 0x60 + (size - 1);  // PUSH1 = 0x60, PUSH2 = 0x61, etc.
-            if (opcode != expected_push and opcode != 0x5F) return null;  // Also allow PUSH0
-            
-            if (opcode == 0x5F) return 0;  // PUSH0
-            
+            const expected_push = 0x60 + (size - 1); // PUSH1 = 0x60, PUSH2 = 0x61, etc.
+            if (opcode != expected_push and opcode != 0x5F) return null; // Also allow PUSH0
+
+            if (opcode == 0x5F) return 0; // PUSH0
+
             var value: u256 = 0;
             const end_pc = @min(pc + 1 + size, self.len());
             if (pc + 1 + size > self.len()) return null;
-            
+
             for (pc + 1..end_pc) |i| {
                 value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
             }
@@ -608,11 +608,11 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const op = self.runtime_code[i];
                 // https://ziglang.org/documentation/master/#intFromEnum
                 // @intFromEnum converts an enum value to its integer representation
-                if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
-                    const n = op - (@intFromEnum(Opcode.PUSH1) - 1);
+                if (op >= @backingInt(Opcode.PUSH1) and op <= @backingInt(Opcode.PUSH32)) {
+                    const n = op - (@backingInt(Opcode.PUSH1) - 1);
                     i += 1 + n;
                 } else {
-                    if (op == @intFromEnum(Opcode.JUMPDEST)) {
+                    if (op == @backingInt(Opcode.JUMPDEST)) {
                         callback(context, i);
                     }
                     i += 1;
@@ -709,7 +709,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 opcode_count += 1;
 
                 // Check if it's a JUMPDEST (and not push data)
-                if (op == @intFromEnum(Opcode.JUMPDEST)) {
+                if (op == @backingInt(Opcode.JUMPDEST)) {
                     self.packed_bitmap[i].is_jumpdest = true;
                     jumpdest_count += 1;
                     if (tracer) |t| {
@@ -722,14 +722,14 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 // Check for fusion candidates if enabled
                 if (comptime fusions_enabled) {
                     // Check for ISZERO+PUSH+JUMPI pattern
-                    if (op == @intFromEnum(Opcode.ISZERO)) {
+                    if (op == @backingInt(Opcode.ISZERO)) {
                         const push_pc = i + 1;
                         if (push_pc < validate_up_to) {
                             const push_op = self.runtime_code[push_pc];
-                            if (push_op >= @intFromEnum(Opcode.PUSH1) and push_op <= @intFromEnum(Opcode.PUSH32)) {
-                                const push_size: PcType = push_op - (@intFromEnum(Opcode.PUSH1) - 1);
+                            if (push_op >= @backingInt(Opcode.PUSH1) and push_op <= @backingInt(Opcode.PUSH32)) {
+                                const push_size: PcType = push_op - (@backingInt(Opcode.PUSH1) - 1);
                                 const jumpi_pc = push_pc + 1 + push_size;
-                                if (jumpi_pc < validate_up_to and self.runtime_code[jumpi_pc] == @intFromEnum(Opcode.JUMPI)) {
+                                if (jumpi_pc < validate_up_to and self.runtime_code[jumpi_pc] == @backingInt(Opcode.JUMPI)) {
                                     // Mark ISZERO as fusion candidate for ISZERO+PUSH+JUMPI pattern
                                     self.packed_bitmap[i].is_fusion_candidate = true;
                                     if (tracer) |t| {
@@ -739,10 +739,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             }
                         }
                     }
-                    
+
                     // Check if this is a PUSH that could be part of a fusion
-                    if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
-                        const push_size: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
+                    if (op >= @backingInt(Opcode.PUSH1) and op <= @backingInt(Opcode.PUSH32)) {
+                        const push_size: PcType = op - (@backingInt(Opcode.PUSH1) - 1);
                         const next_op_idx = i + 1 + push_size;
 
                         // Ensure we can read the next opcode
@@ -750,7 +750,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             const next_op = self.runtime_code[next_op_idx];
                             // Check for fusable patterns
                             const is_fusable = switch (next_op) {
-                                @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI), @intFromEnum(Opcode.MLOAD), @intFromEnum(Opcode.MSTORE), @intFromEnum(Opcode.MSTORE8) => true,
+                                @backingInt(Opcode.ADD), @backingInt(Opcode.MUL), @backingInt(Opcode.SUB), @backingInt(Opcode.DIV), @backingInt(Opcode.AND), @backingInt(Opcode.OR), @backingInt(Opcode.XOR), @backingInt(Opcode.JUMP), @backingInt(Opcode.JUMPI), @backingInt(Opcode.MLOAD), @backingInt(Opcode.MSTORE), @backingInt(Opcode.MSTORE8) => true,
                                 else => false,
                             };
 
@@ -762,10 +762,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 }
 
                 // Handle PUSH instructions
-                if (@intFromEnum(opcode_enum) >= @intFromEnum(Opcode.PUSH1) and
-                    @intFromEnum(opcode_enum) <= @intFromEnum(Opcode.PUSH32))
+                if (@backingInt(opcode_enum) >= @backingInt(Opcode.PUSH1) and
+                    @backingInt(opcode_enum) <= @backingInt(Opcode.PUSH32))
                 {
-                    const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
+                    const n: PcType = op - (@backingInt(Opcode.PUSH1) - 1);
 
                     // A PUSH whose immediate bytes run past the end of the code is valid:
                     // the missing bytes read as zero. Only the bytes that exist are marked
@@ -799,7 +799,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             const next_op = self.runtime_code[push_end];
 
                             // Case 1: PUSH + JUMP (for fusion optimization)
-                            if (next_op == @intFromEnum(Opcode.JUMP)) {
+                            if (next_op == @backingInt(Opcode.JUMP)) {
                                 if (tracer) |t| {
                                     t.debug("Detected PUSH + JUMP fusion opportunity at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
                                 }
@@ -808,7 +808,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             }
 
                             // Case 2: PUSH + JUMPI (check if previous was also a PUSH)
-                            else if (push_end < validate_up_to and next_op == @intFromEnum(Opcode.JUMPI) and
+                            else if (push_end < validate_up_to and next_op == @backingInt(Opcode.JUMPI) and
                                 last_push_value != null and
                                 last_push_end == i)
                             {
@@ -829,7 +829,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     i = push_end;
                 } else {
                     // Reset state when we see non-PUSH opcodes (unless it's JUMPI)
-                    if (op != @intFromEnum(Opcode.JUMPI) and op != @intFromEnum(Opcode.JUMP)) {
+                    if (op != @backingInt(Opcode.JUMPI) and op != @backingInt(Opcode.JUMP)) {
                         last_push_value = null;
                         last_push_end = 0;
                     }
@@ -847,7 +847,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 t.onBytecodeAnalysisComplete(validate_up_to, opcode_count, jumpdest_count);
             }
         }
-
 
         /// Pretty print bytecode with human-readable formatting, colors, and metadata
         pub fn pretty_print(self: Self, allocator: std.mem.Allocator) ![]u8 {
@@ -1180,7 +1179,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             push_value = 0;
                         },
                         .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
-                            const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
+                            const push_size = @backingInt(opcode) - @backingInt(Opcode.PUSH1) + 1;
                             try output.print(allocator, "{s}{s:<14}{s}", .{ InstructionColors.push, @tagName(opcode), Colors.reset });
 
                             // Extract push value for details column
@@ -1668,8 +1667,6 @@ test "Jump destination validation - valid JUMPDEST" {
     try testing.expect(bytecode.isValidJumpDest(2) == false); // JUMP is not a JUMPDEST
 }
 
-
-
 test "Jump destination validation - JUMPI pattern" {
     const allocator = testing.allocator;
 
@@ -1880,7 +1877,6 @@ test "Complex jump patterns - multiple JUMPDESTs" {
     try testing.expect(bytecode.isValidJumpDest(0) == false); // PUSH1 is not a JUMPDEST
 }
 
-
 test "Bitmap utility functions - countBitsInRange" {
     // Test the bitmap counting utility
     const bitmap = [_]u8{ 0b10101010, 0b11110000, 0b00001111 };
@@ -1942,12 +1938,12 @@ pub fn countBitsInRange(bitmap: []const u8, start: usize, end: usize) usize {
     var count: usize = 0;
     const start_byte = start / 8;
     const end_byte = (end + 7) / 8;
-    
+
     for (start_byte..@min(end_byte, bitmap.len)) |i| {
         const byte = bitmap[i];
         const start_bit = if (i == start_byte) start % 8 else 0;
         const end_bit = if (i == end_byte - 1) end % 8 else 8;
-        
+
         for (start_bit..end_bit) |bit| {
             if ((byte >> @intCast(bit)) & 1 == 1) {
                 count += 1;
@@ -1961,11 +1957,11 @@ pub fn countBitsInRange(bitmap: []const u8, start: usize, end: usize) usize {
 pub fn findNextSetBit(bitmap: []const u8, start: usize) ?usize {
     const start_byte = start / 8;
     const start_bit = start % 8;
-    
+
     for (start_byte..bitmap.len) |i| {
         const byte = bitmap[i];
         const first_bit = if (i == start_byte) start_bit else 0;
-        
+
         for (first_bit..8) |bit| {
             if ((byte >> @intCast(bit)) & 1 == 1) {
                 return i * 8 + bit;
@@ -2016,7 +2012,6 @@ test "Boundary conditions - jump to last instruction" {
 
     try testing.expect(bytecode.isValidJumpDest(3) == true);
 }
-
 
 test "Invalid jump - jumping to non-JUMPDEST opcode" {
     const allocator = testing.allocator;
