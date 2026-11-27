@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guillotine Backpressure Audit Report</title>
+  <meta name="description" content="Chrome-Lighthouse-style backpressure, TigerStyle safety, formal verification, and Smithers Cloud trust audit report for evmts/guillotine." />
+  <style>
+    :root {
+      --bg: #f8f9fb;
+      --surface: #ffffff;
+      --surface-2: #f1f4f8;
+      --border: #dfe4ec;
+      --text: #111827;
+      --muted: #556070;
+      --pass: #0cce6b;
+      --pass-text: #007a3d;
+      --pass-bg: #e7f9ef;
+      --avg: #ffa400;
+      --avg-text: #a15c00;
+      --avg-bg: #fff5e0;
+      --fail: #ff4e42;
+      --fail-text: #c62828;
+      --fail-bg: #ffebea;
+      --accent: #2563eb;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+    }
+    [data-theme="dark"] {
+      --bg: #0d1016;
+      --surface: #151922;
+      --surface-2: #1c222e;
+      --border: #2a3242;
+      --text: #f3f5f8;
+      --muted: #98a4b8;
+      --pass: #22d67c;
+      --pass-text: #4ade80;
+      --pass-bg: rgba(34, 214, 124, 0.14);
+      --avg: #fbbf24;
+      --avg-text: #fcd34d;
+      --avg-bg: rgba(251, 191, 36, 0.14);
+      --fail: #f87171;
+      --fail-text: #fca5a5;
+      --fail-bg: rgba(248, 113, 113, 0.14);
+      --accent: #60a5fa;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 28px rgba(0, 0, 0, 0.28);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+    }
+    .topbar-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .brand-dot {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #0cce6b, #2563eb);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .brand-meta {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .nav-pill, .btn-toggle {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 140ms ease, transform 140ms ease;
+    }
+    .nav-pill:hover, .btn-toggle:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .container {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px 20px 64px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 22px 24px;
+    }
+    .hero-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .hero-title h1 {
+      margin: 0 0 6px;
+      font-size: 26px;
+      letter-spacing: -0.02em;
+    }
+    .hero-title p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 660px;
+      font-size: 14px;
+    }
+    .composite-wrap {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 16px;
+      border-radius: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .composite-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .composite-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+    .composite-stats { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .gauge-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 14px;
+      margin-top: 20px;
+    }
+    .lh-gauge-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 14px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      transition: border-color 140ms ease, transform 140ms ease;
+    }
+    .lh-gauge-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .lh-gauge-label { margin-top: 8px; font-weight: 700; font-size: 13px; }
+    .lh-gauge-sub { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+    .lh-gauge-svg { display: block; }
+    .lh-gauge-base { fill: none; stroke: var(--border); stroke-width: 8; opacity: 0.55; }
+    .lh-gauge-arc { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 600ms cubic-bezier(0.22, 1, 0.36, 1); }
+    .lh-gauge-num { font-family: var(--mono); font-size: 29px; font-weight: 800; fill: var(--text); }
+    .lh-band-pass .lh-gauge-arc { stroke: var(--pass); }
+    .lh-band-pass .lh-gauge-base { stroke: var(--pass-bg); opacity: 1; }
+    .lh-band-pass .lh-gauge-num { fill: var(--pass-text); }
+    .lh-band-average .lh-gauge-arc { stroke: var(--avg); }
+    .lh-band-average .lh-gauge-base { stroke: var(--avg-bg); opacity: 1; }
+    .lh-band-average .lh-gauge-num { fill: var(--avg-text); }
+    .lh-band-fail .lh-gauge-arc { stroke: var(--fail); }
+    .lh-band-fail .lh-gauge-base { stroke: var(--fail-bg); opacity: 1; }
+    .lh-band-fail .lh-gauge-num { fill: var(--fail-text); }
+    .scale-legend {
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .lh-shape { display: inline-block; flex: 0 0 auto; }
+    .lh-shape-pass { width: 11px; height: 11px; border-radius: 50%; background: var(--pass); }
+    .lh-shape-average { width: 11px; height: 11px; border-radius: 2px; background: var(--avg); }
+    .lh-shape-fail {
+      width: 0; height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 11px solid var(--fail);
+    }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .section-head h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+    .section-head span { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 20px;
+    }
+    .opp-list { display: flex; flex-direction: column; gap: 10px; }
+    .opp-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1.4fr) minmax(100px, 1fr) 72px;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .opp-row:hover { border-color: var(--accent); }
+    .opp-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .opp-cat { font-family: var(--mono); font-size: 10px; text-transform: uppercase; color: var(--muted); }
+    .opp-name { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .opp-bar-wrap { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+    .opp-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--avg), var(--fail)); }
+    .opp-gain { text-align: right; font-family: var(--mono); font-weight: 700; font-size: 12px; color: var(--avg-text); }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+    }
+    .kpi-box {
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .kpi-val { font-family: var(--mono); font-size: 19px; font-weight: 800; margin-top: 4px; }
+    .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .trust-table-wrap { overflow-x: auto; }
+    table.trust-table, table.item-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    table.trust-table th, table.trust-table td,
+    table.item-table th, table.item-table td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    table.trust-table th, table.item-table th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      background: var(--surface-2);
+    }
+    .trust-cap { font-weight: 600; }
+    .trust-pill {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--mono);
+    }
+    .trust-allowed { background: var(--pass-bg); color: var(--pass-text); }
+    .trust-limited { background: var(--avg-bg); color: var(--avg-text); }
+    .trust-blocked { background: var(--fail-bg); color: var(--fail-text); }
+    .changes-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .change-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .delta-tag { padding: 2px 6px; border-radius: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .delta-better { background: var(--pass-bg); color: var(--pass-text); }
+    .delta-worse { background: var(--fail-bg); color: var(--fail-text); }
+    .delta-new { background: var(--avg-bg); color: var(--avg-text); }
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      flex: 1 1 260px;
+      padding: 9px 13px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+      font-family: var(--mono);
+    }
+    .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-btn {
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .cat-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .cat-header {
+      padding: 18px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+      flex-wrap: wrap;
+    }
+    .cat-header-left { display: flex; align-items: center; gap: 14px; }
+    .cat-header h2 { margin: 0 0 2px; font-size: 18px; }
+    .cat-desc { margin: 0; font-size: 13px; color: var(--muted); }
+    .cat-score-chip {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 800;
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+    .audit-list { display: flex; flex-direction: column; }
+    .audit-item { border-bottom: 1px solid var(--border); }
+    .audit-item:last-child { border-bottom: none; }
+    .audit-item.hidden { display: none; }
+    .audit-summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .audit-summary::-webkit-details-marker { display: none; }
+    .audit-left { display: flex; align-items: flex-start; gap: 12px; flex: 1 1 360px; }
+    .audit-left .lh-shape { margin-top: 5px; }
+    .audit-title { font-weight: 700; font-size: 14px; }
+    .audit-slug { font-family: var(--mono); font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+    .audit-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .audit-right { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
+    .metric-pill { font-weight: 700; }
+    .metric-target, .metric-weight { color: var(--muted); font-size: 11px; }
+    .metric-score { padding: 3px 9px; border-radius: 999px; font-weight: 800; font-size: 12px; }
+    .lh-pill-pass { background: var(--pass-bg); color: var(--pass-text); }
+    .lh-pill-average { background: var(--avg-bg); color: var(--avg-text); }
+    .lh-pill-fail { background: var(--fail-bg); color: var(--fail-text); }
+    .lh-text-pass { color: var(--pass-text); }
+    .lh-text-average { color: var(--avg-text); }
+    .lh-text-fail { color: var(--fail-text); }
+    .audit-body { padding: 0 22px 16px 45px; overflow-x: auto; }
+    .all-pass-note, .empty-note {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+      padding-top: 8px;
+    }
+    @media print {
+      .topbar, .filter-bar { display: none; }
+      body { background: #fff; }
+      .card, .cat-section { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-dot">G</span>
+        <div>
+          <div>Guillotine Backpressure Audit</div>
+          <div class="brand-meta">evmts/guillotine v0.1.0 | Zig 0.17.1 | OSAKA</div>
+        </div>
+      </div>
+      <nav class="nav-links" aria-label="Factory links">
+        <a class="nav-pill" href="https://smithers.sh/evmts/guillotine" target="_blank" rel="noreferrer">Smithers Cloud</a>
+        <a class="nav-pill" href="wiki.html">Engineering Wiki</a>
+        <a class="nav-pill" href="https://guillotine.tevm.sh" target="_blank" rel="noreferrer">Docs</a>
+        <a class="nav-pill" href="https://github.com/evmts/guillotine" target="_blank" rel="noreferrer">GitHub</a>
+        <button class="btn-toggle" id="theme-toggle" type="button">Dark mode</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="hero-top">
+        <div class="hero-title">
+          <h1>Lighthouse Backpressure Scorecard</h1>
+          <p>Continuous safety, TigerStyle, modularity, formal verification, documentation, and Smithers Cloud trust diagnostics measured directly from repository source and CI policy.</p>
+        </div>
+        <div class="composite-wrap">
+          <svg class="lh-gauge-svg lh-band-average" width="92" height="92" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="45.24" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">85</text>
+  </svg>
+          <div class="composite-meta">
+            <span class="composite-label">Composite Score</span>
+            <span class="composite-stats">17 pass | 4 warn | 2 fail</span>
+            <span class="composite-stats">11 flows | 8 wiki pages</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="gauge-strip">
+        
+      <a class="lh-gauge-card" href="#cat-safety" data-category="safety">
+        <svg class="lh-gauge-svg lh-band-pass" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="30.16" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">90</text>
+  </svg>
+        <div class="lh-gauge-label">Safety &amp; TigerStyle</div>
+        <div class="lh-gauge-sub">6 audits</div>
+      </a>
+
+      <a class="lh-gauge-card" href="#cat-style" data-category="style">
+        <svg class="lh-gauge-svg lh-band-pass" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="30.16" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">90</text>
+  </svg>
+        <div class="lh-gauge-label">Style &amp; Limits</div>
+        <div class="lh-gauge-sub">4 audits</div>
+      </a>
+
+      <a class="lh-gauge-card" href="#cat-footprint" data-category="footprint">
+        <svg class="lh-gauge-svg lh-band-fail" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="186.99" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">38</text>
+  </svg>
+        <div class="lh-gauge-label">Footprint &amp; Modularity</div>
+        <div class="lh-gauge-sub">2 audits</div>
+      </a>
+
+      <a class="lh-gauge-card" href="#cat-verification" data-category="verification">
+        <svg class="lh-gauge-svg lh-band-pass" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="30.16" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">90</text>
+  </svg>
+        <div class="lh-gauge-label">Verification &amp; Tests</div>
+        <div class="lh-gauge-sub">4 audits</div>
+      </a>
+
+      <a class="lh-gauge-card" href="#cat-documentation" data-category="documentation">
+        <svg class="lh-gauge-svg lh-band-pass" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="0.00" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">100</text>
+  </svg>
+        <div class="lh-gauge-label">Documentation</div>
+        <div class="lh-gauge-sub">2 audits</div>
+      </a>
+
+      <a class="lh-gauge-card" href="#cat-factory" data-category="factory">
+        <svg class="lh-gauge-svg lh-band-pass" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="0.00" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">100</text>
+  </svg>
+        <div class="lh-gauge-label">Factory &amp; Trust</div>
+        <div class="lh-gauge-sub">5 audits</div>
+      </a>
+      </div>
+
+      <div class="scale-legend">
+        <span class="legend-item"><span class="lh-shape lh-shape-fail"></span> 0 to 49 Critical</span>
+        <span class="legend-item"><span class="lh-shape lh-shape-average"></span> 50 to 89 Needs Improvement</span>
+        <span class="legend-item"><span class="lh-shape lh-shape-pass"></span> 90 to 100 Passing</span>
+      </div>
+    </section>
+
+    <div class="two-col">
+      <section class="card">
+        <div class="section-head">
+          <h2>Top Opportunities</h2>
+          <span>Highest score impact first</span>
+        </div>
+        <div class="opp-list">
+          
+            <a class="opp-row" href="#metric-verification-smt-proofs">
+              <div class="opp-meta">
+                <span class="opp-cat">verification</span>
+                <span class="opp-name">smt-proofs (1 items)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:100%"></div>
+              </div>
+              <div class="opp-gain">+6 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-safety-rust-unsafe-blocks">
+              <div class="opp-meta">
+                <span class="opp-cat">safety</span>
+                <span class="opp-name">rust-unsafe-blocks (lib/foundry-compilers/src/lib.rs)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:67%"></div>
+              </div>
+              <div class="opp-gain">+4 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-safety-zig-assertion-density">
+              <div class="opp-meta">
+                <span class="opp-cat">safety</span>
+                <span class="opp-name">zig-assertion-density (1 items)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:50%"></div>
+              </div>
+              <div class="opp-gain">+3 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/evm.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/storage/database.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/tracer/minimal_frame.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/instructions/handlers_context.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/bytecode/bytecode.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/eips_and_hardforks/eips.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/instructions/handlers_system.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/bytecode/bytecode_stats.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/instructions/handlers_arithmetic.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/instructions/handlers_storage.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/layer2/evm_host.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+
+            <a class="opp-row" href="#metric-footprint-file-lines">
+              <div class="opp-meta">
+                <span class="opp-cat">footprint</span>
+                <span class="opp-name">file-lines (src/frame/call_params.zig)</span>
+              </div>
+              <div class="opp-bar-wrap">
+                <div class="opp-bar" style="width:33%"></div>
+              </div>
+              <div class="opp-gain">+2 pts</div>
+            </a>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Formal Verification & Consensus</h2>
+          <span>Dual Lean 4 + Zean + SMT stack</span>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-box">
+            <div class="kpi-label">EEST State Tests</div>
+            <div class="kpi-val lh-text-pass">66,652 / 66,652</div>
+            <div class="kpi-sub">100.00% Frontier through Osaka (fusion on and off)</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">Lean 4 Theorems</div>
+            <div class="kpi-val lh-text-pass">183</div>
+            <div class="kpi-sub">29 / 29 pass (zero sorry)</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">SMT-LIB2 Proofs</div>
+            <div class="kpi-val">42</div>
+            <div class="kpi-sub">Bitwuzla & Z3 pinned</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">Lean Diff Vectors</div>
+            <div class="kpi-val lh-text-pass">116,384 / 116,384</div>
+            <div class="kpi-sub">Inline Zig tests 100%</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Execution Trust Boundary & Shared Cache Isolation</h2>
+        <span>Untrusted runs encouraged, cache poisoning & gate bypass blocked</span>
+      </div>
+      <div class="trust-table-wrap">
+        <table class="trust-table">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Community & Fork PRs (Untrusted)</th>
+              <th>Smithers Cloud Sandbox</th>
+              <th>Maintainer & Main Branch</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+      <tr>
+        <td class="trust-cap">Shared Object Store Read (build.smithers.sh)</td>
+        <td><span class="trust-pill trust-allowed">Allowed (read-only token)</span></td>
+        <td><span class="trust-pill trust-allowed">Allowed (read + verified write)</span></td>
+        <td><span class="trust-pill trust-allowed">Allowed (read + write on main)</span></td>
+      </tr>
+
+      <tr>
+        <td class="trust-cap">Shared Object Store Write (Cache Population)</td>
+        <td><span class="trust-pill trust-blocked">Blocked (cannot poison cache)</span></td>
+        <td><span class="trust-pill trust-allowed">Allowed (attested sandbox)</span></td>
+        <td><span class="trust-pill trust-allowed">Allowed (push to main only)</span></td>
+      </tr>
+
+      <tr>
+        <td class="trust-cap">Local &amp; Fork PR Execution (Build, Tests, Audit)</td>
+        <td><span class="trust-pill trust-allowed">Encouraged (full feedback loop)</span></td>
+        <td><span class="trust-pill trust-allowed">Automated (deterministic runners)</span></td>
+        <td><span class="trust-pill trust-allowed">Authoritative gate</span></td>
+      </tr>
+
+      <tr>
+        <td class="trust-cap">Gate Bypass, Approvals, and Merge to Main</td>
+        <td><span class="trust-pill trust-blocked">Blocked (person-only gate)</span></td>
+        <td><span class="trust-pill trust-blocked">Blocked (cannot self-merge)</span></td>
+        <td><span class="trust-pill trust-allowed">Person-only (approve + merge)</span></td>
+      </tr>
+
+      <tr>
+        <td class="trust-cap">Release, npm Provenance, and Docs Publishing</td>
+        <td><span class="trust-pill trust-blocked">Blocked (no release secrets)</span></td>
+        <td><span class="trust-pill trust-blocked">Blocked (dry-run validation only)</span></td>
+        <td><span class="trust-pill trust-allowed">Automated on main push &amp; v* tags</span></td>
+      </tr>
+
+      <tr>
+        <td class="trust-cap">Cloud MCP Access (smithers.sh/evmts/guillotine/mcp)</td>
+        <td><span class="trust-pill trust-limited">Public read + BYOA one-time attach</span></td>
+        <td><span class="trust-pill trust-limited">Scoped one-time PKCE token (0600)</span></td>
+        <td><span class="trust-pill trust-allowed">Full maintainer scopes</span></td>
+      </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Baseline Diff</h2>
+        <span>Compared against .agents/uphill/uphill.baseline.yaml</span>
+      </div>
+      <div class="changes-grid"><div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">safety/zig-assertion-density</span>
+              <span class="change-val">0.89 -&gt; 0.87</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/bytecode/bytecode_analyze.zig</span>
+              <span class="change-val">214 -&gt; 216</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/bytecode/bytecode_stats.zig</span>
+              <span class="change-val">248 -&gt; 283</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/eips_and_hardforks/beacon_roots.zig</span>
+              <span class="change-val">19 -&gt; 23</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/eips_and_hardforks/historical_block_hashes.zig</span>
+              <span class="change-val">18 -&gt; 22</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/evm_arena_allocator.zig</span>
+              <span class="change-val">114 -&gt; 120</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/evm_c_api.zig</span>
+              <span class="change-val">77 -&gt; 79</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/frame/frame_config.zig</span>
+              <span class="change-val">41 -&gt; 43</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/frame/frame_handlers.zig</span>
+              <span class="change-val">155 -&gt; 158</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/instructions/handlers_arithmetic_synthetic.zig</span>
+              <span class="change-val">10 -&gt; 17</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/layer2/base/config.zig</span>
+              <span class="change-val">7 -&gt; 10</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/layer2/evm_host.zig</span>
+              <span class="change-val">139 -&gt; 149</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/layer2/executor.zig</span>
+              <span class="change-val">90 -&gt; 98</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/log_wasm.zig</span>
+              <span class="change-val">20 -&gt; 24</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/preprocessor/handler_abi.zig</span>
+              <span class="change-val">22 -&gt; 28</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/provider/provider.zig</span>
+              <span class="change-val">73 -&gt; 82</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/provider/simple_provider.zig</span>
+              <span class="change-val">10 -&gt; 15</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/provider/transport/http_simple.zig</span>
+              <span class="change-val">49 -&gt; 53</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/root.zig</span>
+              <span class="change-val">18 -&gt; 23</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/storage/database.zig</span>
+              <span class="change-val">43 -&gt; 51</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/storage/state_root.zig</span>
+              <span class="change-val">59 -&gt; 63</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/tracer/events/events.zig</span>
+              <span class="change-val">26 -&gt; 67</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/tracer/minimal_evm_sync.zig</span>
+              <span class="change-val">95 -&gt; 106</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/tracer/minimal_frame.zig</span>
+              <span class="change-val">1659 -&gt; 1692</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/tracer/minimal_host.zig</span>
+              <span class="change-val">15 -&gt; 22</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/tracer/ring_buffer.zig</span>
+              <span class="change-val">55 -&gt; 70</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">style/function-length src/tracer/tracer.zig</span>
+              <span class="change-val">103 -&gt; 117</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">footprint/file-lines src/build.zig</span>
+              <span class="change-val">28 -&gt; 32</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">footprint/file-lines src/bytecode/bytecode_analyze.zig</span>
+              <span class="change-val">652 -&gt; 654</span>
+            </div>
+<div class="change-pill">
+              <span class="delta-tag delta-worse">worse</span>
+              <span class="change-metric">footprint/file-lines src/bytecode/bytecode_bench_simple.zig</span>
+              <span class="change-val">169 -&gt; 173</span>
+            </div></div>
+    </section>
+
+    <section class="card">
+      <div class="filter-bar">
+        <input id="audit-search" class="search-input" type="search" placeholder="Filter audits by metric, file path, or diagnostic..." aria-label="Filter audits" />
+        <div class="filter-pills" role="group" aria-label="Filter by audit status">
+          <button class="filter-btn active" type="button" data-filter="all">All (23)</button>
+          <button class="filter-btn" type="button" data-filter="issues">Warn & Fail (6)</button>
+          <button class="filter-btn" type="button" data-filter="pass">Passing (17)</button>
+        </div>
+      </div>
+    </section>
+
+    
+      <section class="cat-section" id="cat-safety" data-category="safety">
+        <div class="cat-header">
+          <div class="cat-header-left">
+            <svg class="lh-gauge-svg lh-band-pass" width="64" height="64" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="30.16" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">90</text>
+  </svg>
+            <div>
+              <h2>Safety &amp; TigerStyle</h2>
+              <p class="cat-desc">Mission-critical EVM safety invariants from CLAUDE.md and TigerStyle across Zig and Rust FFI code.</p>
+            </div>
+          </div>
+          <div class="cat-header-meta">
+            <span class="cat-score-chip lh-pill-pass">90 / 100</span>
+          </div>
+        </div>
+        <div class="audit-list">
+          
+          <details class="audit-item" id="metric-safety-zig-no-panic" data-band="pass" data-search="safety zig-no-panic zig no panic never use @panic or unreachable in production src/**/*.zig, validate inputs and return typed errors instead. src/modules.build.zig src/stack/stack.zig src/tracer/tracer.zig" >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Zig no panic <span class="audit-slug">zig-no-panic</span></div>
+                  <div class="audit-desc">Never use @panic or unreachable in production src/**/*.zig, validate inputs and return typed errors instead.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">150 / 153 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">98</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <table class="item-table">
+                  <thead><tr><th>Item</th><th>Status / Value</th><th>Diagnostic</th></tr></thead>
+                  <tbody>
+                    <tr>
+                          <td class="mono">src/modules.build.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 74: @panic() in production code</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/stack/stack.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 120: @panic() in production code</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/tracer.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 950: unreachable in production code</td>
+                        </tr>
+                  </tbody>
+                </table>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-safety-zig-no-forbidden-debug" data-band="pass" data-search="safety zig-no-forbidden-debug zig no forbidden debug never use std.debug.assert or std.debug.print in production src/**/*.zig, use tracer.assert() and log.zig. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Zig no forbidden debug <span class="audit-slug">zig-no-forbidden-debug</span></div>
+                  <div class="audit-desc">Never use std.debug.assert or std.debug.print in production src/**/*.zig, use tracer.assert() and log.zig.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">153 / 153 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 153 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-safety-zig-no-swallowed-errors" data-band="pass" data-search="safety zig-no-swallowed-errors zig no swallowed errors never swallow errors with empty catch or return error.notimplemented stubs in production src/**/*.zig. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Zig no swallowed errors <span class="audit-slug">zig-no-swallowed-errors</span></div>
+                  <div class="audit-desc">Never swallow errors with empty catch or return error.NotImplemented stubs in production src/**/*.zig.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">153 / 153 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 153 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-safety-zig-assertion-density" data-band="average" data-search="safety zig-assertion-density zig assertion density add tracer.assert() invariant checks to production evm functions to raise assertion density toward tigerstyle levels. " open>
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-average" title="Needs improvement (50 to 89)" aria-label="Average"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Zig assertion density <span class="audit-slug">zig-assertion-density</span></div>
+                  <div class="audit-desc">Add tracer.assert() invariant checks to production EVM functions to raise assertion density toward TigerStyle levels.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-average">0.87</span>
+                <span class="metric-target">Target &gt;= 25</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-average">59</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 1 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-safety-rust-no-unwrap" data-band="pass" data-search="safety rust-no-unwrap rust no unwrap replace .unwrap() and .expect() in rust ffi crates (lib/ark, lib/foundry-compilers) with result propagation. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Rust no unwrap <span class="audit-slug">rust-no-unwrap</span></div>
+                  <div class="audit-desc">Replace .unwrap() and .expect() in Rust FFI crates (lib/ark, lib/foundry-compilers) with Result propagation.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">2 / 2 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w1.5</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 2 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-safety-rust-unsafe-blocks" data-band="average" data-search="safety rust-unsafe-blocks rust unsafe blocks minimize and encapsulate unsafe ffi blocks in lib/ark and lib/foundry-compilers behind safe wrappers. lib/foundry-compilers/src/lib.rs" open>
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-average" title="Needs improvement (50 to 89)" aria-label="Average"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Rust unsafe blocks <span class="audit-slug">rust-unsafe-blocks</span></div>
+                  <div class="audit-desc">Minimize and encapsulate unsafe FFI blocks in lib/ark and lib/foundry-compilers behind safe wrappers.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-average">11</span>
+                <span class="metric-target">Target &lt;= 1</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-average">51</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <table class="item-table">
+                  <thead><tr><th>Item</th><th>Status / Value</th><th>Diagnostic</th></tr></thead>
+                  <tbody>
+                    <tr>
+                          <td class="mono">lib/foundry-compilers/src/lib.rs</td>
+                          <td class="mono">11</td>
+                          <td>Exceeds target</td>
+                        </tr>
+                  </tbody>
+                </table>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="cat-section" id="cat-style" data-category="style">
+        <div class="cat-header">
+          <div class="cat-header-left">
+            <svg class="lh-gauge-svg lh-band-pass" width="64" height="64" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="30.16" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">90</text>
+  </svg>
+            <div>
+              <h2>Style &amp; Limits</h2>
+              <p class="cat-desc">TigerStyle structural bounds (70-line functions, 120-char lines) and canonical Zig formatting.</p>
+            </div>
+          </div>
+          <div class="cat-header-meta">
+            <span class="cat-score-chip lh-pill-pass">90 / 100</span>
+          </div>
+        </div>
+        <div class="audit-list">
+          
+          <details class="audit-item" id="metric-style-zig-fmt" data-band="pass" data-search="style zig-fmt zig fmt keep all zig files in src/ formatted with `zig fmt`. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Zig fmt <span class="audit-slug">zig-fmt</span></div>
+                  <div class="audit-desc">Keep all Zig files in src/ formatted with `zig fmt`.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">176 / 176 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 176 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-style-function-length" data-band="average" data-search="style function-length function length keep every production zig runtime function at or below 70 lines (tigerstyle limit), decompose large handlers. src/tracer/minimal_frame.zig src/log.zig src/preprocessor/dispatch_pretty_print.zig src/bytecode/bytecode_stats.zig src/bytecode/bytecode_analyze.zig src/preprocessor/dispatch_opcode_data.zig src/jit/compiler.zig src/bytecode/bytecode_bench_simple.zig src/frame/frame_handlers.zig src/layer2/evm_host.zig src/trie/hash_builder_complete.zig src/storage/rpc_client.zig src/evm_arena_allocator.zig src/tracer/tracer.zig src/tracer/minimal_evm_sync.zig src/layer2/executor.zig src/modules.build.zig src/tracer/minimal_evm.zig src/provider/config.zig src/provider/provider.zig src/evm_c_api.zig src/trie/proof.zig src/provider/transport/json_rpc.zig" open>
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-average" title="Needs improvement (50 to 89)" aria-label="Average"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Function length <span class="audit-slug">function-length</span></div>
+                  <div class="audit-desc">Keep every production Zig runtime function at or below 70 lines (TigerStyle limit), decompose large handlers.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-average">125</span>
+                <span class="metric-target">Target &lt;= 70</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-average">73</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <table class="item-table">
+                  <thead><tr><th>Item</th><th>Status / Value</th><th>Diagnostic</th></tr></thead>
+                  <tbody>
+                    <tr>
+                          <td class="mono">src/tracer/minimal_frame.zig</td>
+                          <td class="mono">1692</td>
+                          <td>executeOpcode() is 1692 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/log.zig</td>
+                          <td class="mono">725</td>
+                          <td>before_instruction() is 725 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch_pretty_print.zig</td>
+                          <td class="mono">588</td>
+                          <td>getDebugInfo() is 588 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode/bytecode_stats.zig</td>
+                          <td class="mono">283</td>
+                          <td>analyze() is 283 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode/bytecode_analyze.zig</td>
+                          <td class="mono">216</td>
+                          <td>bytecodeAnalyze() is 216 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch_opcode_data.zig</td>
+                          <td class="mono">192</td>
+                          <td>getOpData() is 192 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/jit/compiler.zig</td>
+                          <td class="mono">181</td>
+                          <td>emitBlock() is 181 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode/bytecode_bench_simple.zig</td>
+                          <td class="mono">162</td>
+                          <td>main() is 162 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/frame/frame_handlers.zig</td>
+                          <td class="mono">158</td>
+                          <td>getOpcodeHandlers() is 158 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/layer2/evm_host.zig</td>
+                          <td class="mono">149</td>
+                          <td>runFrame() is 149 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie/hash_builder_complete.zig</td>
+                          <td class="mono">135</td>
+                          <td>next() is 135 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/storage/rpc_client.zig</td>
+                          <td class="mono">125</td>
+                          <td>getProof() is 125 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/evm_arena_allocator.zig</td>
+                          <td class="mono">120</td>
+                          <td>alloc() is 120 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/tracer.zig</td>
+                          <td class="mono">117</td>
+                          <td>recordSteps() is 117 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/minimal_evm_sync.zig</td>
+                          <td class="mono">106</td>
+                          <td>executeMinimalEvmForOpcode() is 106 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/layer2/executor.zig</td>
+                          <td class="mono">98</td>
+                          <td>execute() is 98 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/modules.build.zig</td>
+                          <td class="mono">98</td>
+                          <td>createModules() is 98 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/minimal_evm.zig</td>
+                          <td class="mono">97</td>
+                          <td>execute() is 97 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/provider/config.zig</td>
+                          <td class="mono">88</td>
+                          <td>initWithOptions() is 88 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/provider/provider.zig</td>
+                          <td class="mono">82</td>
+                          <td>call() is 82 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/evm_c_api.zig</td>
+                          <td class="mono">79</td>
+                          <td>convertCallResult() is 79 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie/proof.zig</td>
+                          <td class="mono">73</td>
+                          <td>verify_path() is 73 lines (TigerStyle limit 70)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/provider/transport/json_rpc.zig</td>
+                          <td class="mono">71</td>
+                          <td>from_json() is 71 lines (TigerStyle limit 70)</td>
+                        </tr>
+                  </tbody>
+                </table>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-style-line-length" data-band="pass" data-search="style line-length line length keep production zig lines at or below 120 characters (tigerstyle limit). src/bytecode/bytecode.zig src/eips_and_hardforks/eips.zig src/evm.zig src/frame/frame.zig src/instructions/handlers_context.zig src/instructions/handlers_memory_synthetic.zig src/instructions/handlers_system.zig src/log.zig src/preprocessor/dispatch.zig src/preprocessor/dispatch_opcode_data.zig src/preprocessor/dispatch_pretty_print.zig src/tracer/lifecycle_events.zig src/trie/hash_builder_complete.zig" >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Line length <span class="audit-slug">line-length</span></div>
+                  <div class="audit-desc">Keep production Zig lines at or below 120 characters (TigerStyle limit).</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">140 / 153 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-pass">92</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <table class="item-table">
+                  <thead><tr><th>Item</th><th>Status / Value</th><th>Diagnostic</th></tr></thead>
+                  <tbody>
+                    <tr>
+                          <td class="mono">src/bytecode/bytecode.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 86: 130 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/eips_and_hardforks/eips.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 210: 134 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/evm.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 30: 125 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/frame/frame.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 62: 128 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_context.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 74: 123 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_memory_synthetic.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 45: 126 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_system.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 110: 123 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/log.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 241: 151 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 36: 224 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch_opcode_data.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 194: 162 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch_pretty_print.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 178: 172 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/lifecycle_events.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 219: 128 chars (limit 120)</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie/hash_builder_complete.zig</td>
+                          <td class="mono">fail</td>
+                          <td>line 324: 134 chars (limit 120)</td>
+                        </tr>
+                  </tbody>
+                </table>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-style-no-todo-markers" data-band="pass" data-search="style no-todo-markers no todo markers resolve todo, fixme, xxx, and hack markers in production src/**/*.zig instead of deferring work. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">No todo markers <span class="audit-slug">no-todo-markers</span></div>
+                  <div class="audit-desc">Resolve TODO, FIXME, XXX, and HACK markers in production src/**/*.zig instead of deferring work.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">153 / 153 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 153 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="cat-section" id="cat-footprint" data-category="footprint">
+        <div class="cat-header">
+          <div class="cat-header-left">
+            <svg class="lh-gauge-svg lh-band-fail" width="64" height="64" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="186.99" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">38</text>
+  </svg>
+            <div>
+              <h2>Footprint &amp; Modularity</h2>
+              <p class="cat-desc">Source file and subsystem modularity limits to keep the EVM auditable.</p>
+            </div>
+          </div>
+          <div class="cat-header-meta">
+            <span class="cat-score-chip lh-pill-fail">38 / 100</span>
+          </div>
+        </div>
+        <div class="audit-list">
+          
+          <details class="audit-item" id="metric-footprint-file-lines" data-band="fail" data-search="footprint file-lines file lines keep production zig files focused and under 500 lines, split monolithic modules like src/evm.zig. src/evm.zig src/storage/database.zig src/tracer/minimal_frame.zig src/instructions/handlers_context.zig src/bytecode/bytecode.zig src/eips_and_hardforks/eips.zig src/instructions/handlers_system.zig src/bytecode/bytecode_stats.zig src/instructions/handlers_arithmetic.zig src/instructions/handlers_storage.zig src/layer2/evm_host.zig src/frame/call_params.zig src/trie/trie.zig src/instructions/handlers_memory.zig src/jit/root.zig src/instructions/handlers_stack.zig src/tracer/tracer.zig src/instructions/handlers_jump.zig src/evm_c_api.zig src/storage/journal.zig src/stack/stack.zig src/storage/cache_storage.zig src/frame/call_result.zig src/preprocessor/dispatch_pretty_print.zig src/storage/access_list.zig src/instructions/handlers_bitwise.zig src/preprocessor/dispatch.zig src/jit/compiler.zig src/instructions/handlers_log.zig src/trie/hash_builder_complete.zig src/memory/memory.zig src/provider/config.zig src/trie/proof.zig src/provider/transport/http_simple.zig src/tracer/minimal_evm.zig src/log.zig src/instructions/handlers_comparison.zig src/bytecode/bytecode_c.zig src/eips_and_hardforks/authorization_processor.zig src/opcodes/opcode.zig" open>
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-fail" title="Fail (0 to 49)" aria-label="Fail"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">File lines <span class="audit-slug">file-lines</span></div>
+                  <div class="audit-desc">Keep production Zig files focused and under 500 lines, split monolithic modules like src/evm.zig.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-fail">1353</span>
+                <span class="metric-target">Target &lt;= 500</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-fail">43</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <table class="item-table">
+                  <thead><tr><th>Item</th><th>Status / Value</th><th>Diagnostic</th></tr></thead>
+                  <tbody>
+                    <tr>
+                          <td class="mono">src/evm.zig</td>
+                          <td class="mono">8743</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/storage/database.zig</td>
+                          <td class="mono">3250</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/minimal_frame.zig</td>
+                          <td class="mono">2690</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_context.zig</td>
+                          <td class="mono">2470</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode/bytecode.zig</td>
+                          <td class="mono">2205</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/eips_and_hardforks/eips.zig</td>
+                          <td class="mono">2072</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_system.zig</td>
+                          <td class="mono">1744</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode/bytecode_stats.zig</td>
+                          <td class="mono">1654</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_arithmetic.zig</td>
+                          <td class="mono">1519</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_storage.zig</td>
+                          <td class="mono">1459</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/layer2/evm_host.zig</td>
+                          <td class="mono">1437</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/frame/call_params.zig</td>
+                          <td class="mono">1428</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie/trie.zig</td>
+                          <td class="mono">1387</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_memory.zig</td>
+                          <td class="mono">1384</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/jit/root.zig</td>
+                          <td class="mono">1367</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_stack.zig</td>
+                          <td class="mono">1353</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/tracer.zig</td>
+                          <td class="mono">1278</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_jump.zig</td>
+                          <td class="mono">1231</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/evm_c_api.zig</td>
+                          <td class="mono">1176</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/storage/journal.zig</td>
+                          <td class="mono">1176</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/stack/stack.zig</td>
+                          <td class="mono">1131</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/storage/cache_storage.zig</td>
+                          <td class="mono">1098</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/frame/call_result.zig</td>
+                          <td class="mono">1084</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch_pretty_print.zig</td>
+                          <td class="mono">1019</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/storage/access_list.zig</td>
+                          <td class="mono">1019</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_bitwise.zig</td>
+                          <td class="mono">1007</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor/dispatch.zig</td>
+                          <td class="mono">1004</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/jit/compiler.zig</td>
+                          <td class="mono">967</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_log.zig</td>
+                          <td class="mono">954</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie/hash_builder_complete.zig</td>
+                          <td class="mono">953</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/memory/memory.zig</td>
+                          <td class="mono">949</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/provider/config.zig</td>
+                          <td class="mono">911</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie/proof.zig</td>
+                          <td class="mono">872</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/provider/transport/http_simple.zig</td>
+                          <td class="mono">846</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer/minimal_evm.zig</td>
+                          <td class="mono">818</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/log.zig</td>
+                          <td class="mono">785</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/instructions/handlers_comparison.zig</td>
+                          <td class="mono">781</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode/bytecode_c.zig</td>
+                          <td class="mono">770</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/eips_and_hardforks/authorization_processor.zig</td>
+                          <td class="mono">725</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/opcodes/opcode.zig</td>
+                          <td class="mono">724</td>
+                          <td>Exceeds target</td>
+                        </tr>
+                  </tbody>
+                </table>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-footprint-subsystem-size" data-band="fail" data-search="footprint subsystem-size subsystem size keep each src/ subsystem compact and modular, split sprawling subsystems into cohesive packages. src/instructions src/(root) src/storage src/tracer src/layer2 src/bytecode src/eips_and_hardforks src/frame src/preprocessor src/trie src/jit src/provider" open>
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-fail" title="Fail (0 to 49)" aria-label="Fail"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Subsystem size <span class="audit-slug">subsystem-size</span></div>
+                  <div class="audit-desc">Keep each src/ subsystem compact and modular, split sprawling subsystems into cohesive packages.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-fail">534766 B</span>
+                <span class="metric-target">Target &lt;= 80000 B</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-fail">28</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <table class="item-table">
+                  <thead><tr><th>Item</th><th>Status / Value</th><th>Diagnostic</th></tr></thead>
+                  <tbody>
+                    <tr>
+                          <td class="mono">src/instructions</td>
+                          <td class="mono">627784</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/(root)</td>
+                          <td class="mono">534766</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/storage</td>
+                          <td class="mono">479676</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/tracer</td>
+                          <td class="mono">299791</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/layer2</td>
+                          <td class="mono">267168</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/bytecode</td>
+                          <td class="mono">236216</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/eips_and_hardforks</td>
+                          <td class="mono">185966</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/frame</td>
+                          <td class="mono">170970</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/preprocessor</td>
+                          <td class="mono">157404</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/trie</td>
+                          <td class="mono">153441</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/jit</td>
+                          <td class="mono">149656</td>
+                          <td>Exceeds target</td>
+                        </tr>
+<tr>
+                          <td class="mono">src/provider</td>
+                          <td class="mono">136075</td>
+                          <td>Exceeds target</td>
+                        </tr>
+                  </tbody>
+                </table>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="cat-section" id="cat-verification" data-category="verification">
+        <div class="cat-header">
+          <div class="cat-header-left">
+            <svg class="lh-gauge-svg lh-band-pass" width="64" height="64" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="30.16" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">90</text>
+  </svg>
+            <div>
+              <h2>Verification &amp; Tests</h2>
+              <p class="cat-desc">Formal verification proofs (Lean 4 &amp; SMT-LIB2) and inline Zig unit test coverage.</p>
+            </div>
+          </div>
+          <div class="cat-header-meta">
+            <span class="cat-score-chip lh-pill-pass">90 / 100</span>
+          </div>
+        </div>
+        <div class="audit-list">
+          
+          <details class="audit-item" id="metric-verification-lean-no-sorry" data-band="pass" data-search="verification lean-no-sorry lean no sorry never commit `sorry` or unproved `axiom` declarations in verify/lean/**/*.lean, close every formal proof. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Lean no sorry <span class="audit-slug">lean-no-sorry</span></div>
+                  <div class="audit-desc">Never commit `sorry` or unproved `axiom` declarations in verify/lean/**/*.lean, close every formal proof.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">29 / 29 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 29 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-verification-lean-theorems" data-band="pass" data-search="verification lean-theorems lean theorems expand lean 4 theorem and lemma coverage in verify/lean/ for evm opcodes, gas rules, and fusion passes. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Lean theorems <span class="audit-slug">lean-theorems</span></div>
+                  <div class="audit-desc">Expand Lean 4 theorem and lemma coverage in verify/lean/ for EVM opcodes, gas rules, and fusion passes.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">183</span>
+                <span class="metric-target">Target &gt;= 100</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-pass">98</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 1 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-verification-smt-proofs" data-band="average" data-search="verification smt-proofs smt proofs add smt-lib2 equivalence and overflow-safety proofs in verify/smt/proofs/ for arithmetic and fusion optimizations. " open>
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-average" title="Needs improvement (50 to 89)" aria-label="Average"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Smt proofs <span class="audit-slug">smt-proofs</span></div>
+                  <div class="audit-desc">Add SMT-LIB2 equivalence and overflow-safety proofs in verify/smt/proofs/ for arithmetic and fusion optimizations.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-average">42</span>
+                <span class="metric-target">Target &gt;= 80</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-average">56</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 1 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-verification-inline-test-coverage" data-band="pass" data-search="verification inline-test-coverage inline test coverage add inline `test` blocks inside production src/**/*.zig files (claude.md requires tests in source files). " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Inline test coverage <span class="audit-slug">inline-test-coverage</span></div>
+                  <div class="audit-desc">Add inline `test` blocks inside production src/**/*.zig files (CLAUDE.md requires tests in source files).</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">100</span>
+                <span class="metric-target">Target &gt;= 95</span>
+                <span class="metric-weight">w1.5</span>
+                <span class="metric-score lh-pill-pass">93</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 1 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="cat-section" id="cat-documentation" data-category="documentation">
+        <div class="cat-header">
+          <div class="cat-header-left">
+            <svg class="lh-gauge-svg lh-band-pass" width="64" height="64" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="0.00" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">100</text>
+  </svg>
+            <div>
+              <h2>Documentation</h2>
+              <p class="cat-desc">Documentation link integrity and subsystem README coverage.</p>
+            </div>
+          </div>
+          <div class="cat-header-meta">
+            <span class="cat-score-chip lh-pill-pass">100 / 100</span>
+          </div>
+        </div>
+        <div class="audit-list">
+          
+          <details class="audit-item" id="metric-documentation-broken-links" data-band="pass" data-search="documentation broken-links broken links fix broken relative and root-relative links in root markdown files and docs/**/*.md. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Broken links <span class="audit-slug">broken-links</span></div>
+                  <div class="audit-desc">Fix broken relative and root-relative links in root Markdown files and docs/**/*.md.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">30 / 30 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 30 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-documentation-subdir-readme" data-band="pass" data-search="documentation subdir-readme subdir readme maintain a concise readme.md in every production subsystem directory under src/. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Subdir readme <span class="audit-slug">subdir-readme</span></div>
+                  <div class="audit-desc">Maintain a concise README.md in every production subsystem directory under src/.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">18 / 18 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w1</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 18 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="cat-section" id="cat-factory" data-category="factory">
+        <div class="cat-header">
+          <div class="cat-header-left">
+            <svg class="lh-gauge-svg lh-band-pass" width="64" height="64" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="lh-gauge-base" cx="60" cy="60" r="48" />
+    <circle class="lh-gauge-arc" cx="60" cy="60" r="48" stroke-dasharray="301.59" stroke-dashoffset="0.00" transform="rotate(-90 60 60)" />
+    <text class="lh-gauge-num" x="60" y="66" text-anchor="middle">100</text>
+  </svg>
+            <div>
+              <h2>Factory &amp; Trust</h2>
+              <p class="cat-desc">Smithers Cloud factory projection, shared object-store trust boundaries, wiki freshness, release parity, and playground CSP integrity.</p>
+            </div>
+          </div>
+          <div class="cat-header-meta">
+            <span class="cat-score-chip lh-pill-pass">100 / 100</span>
+          </div>
+        </div>
+        <div class="audit-list">
+          
+          <details class="audit-item" id="metric-factory-factory-projection" data-band="pass" data-search="factory factory-projection factory projection keep .smithers/factory.json and .smithers/home.json schema-valid with docs url, person-only merge policy, and maintainer, contributor, and viewer sections. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Factory projection <span class="audit-slug">factory-projection</span></div>
+                  <div class="audit-desc">Keep .smithers/factory.json and .smithers/home.json schema-valid with docs URL, person-only merge policy, and maintainer, contributor, and viewer sections.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">2 / 2 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 2 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-factory-remote-cache-trust" data-band="pass" data-search="factory remote-cache-trust remote cache trust wire build.smithers.sh with split read and write secrets and never expose smithers_cache_write_token to pull_request jobs. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Remote cache trust <span class="audit-slug">remote-cache-trust</span></div>
+                  <div class="audit-desc">Wire build.smithers.sh with split read and write secrets and never expose SMITHERS_CACHE_WRITE_TOKEN to pull_request jobs.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">2 / 2 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 2 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-factory-wiki-freshness" data-band="pass" data-search="factory wiki-freshness wiki freshness keep every .smithers/wiki/*.md page frontmatter-valid with zero broken wikilinks, zero secret leaks, and a fresh docs/public/wiki.html build. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Wiki freshness <span class="audit-slug">wiki-freshness</span></div>
+                  <div class="audit-desc">Keep every .smithers/wiki/*.md page frontmatter-valid with zero broken wikilinks, zero secret leaks, and a fresh docs/public/wiki.html build.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">10 / 10 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w1.5</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 10 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-factory-release-alignment" data-band="pass" data-search="factory release-alignment release alignment keep build.zig.zon, sdks/typescript/package.json, changelog.md, and .github/workflows/release.yml aligned for automated main-branch releases and docs deploys. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Release alignment <span class="audit-slug">release-alignment</span></div>
+                  <div class="audit-desc">Keep build.zig.zon, sdks/typescript/package.json, CHANGELOG.md, and .github/workflows/release.yml aligned for automated main-branch releases and docs deploys.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">2 / 2 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w1.5</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 2 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+
+          <details class="audit-item" id="metric-factory-workflow-security" data-band="pass" data-search="factory workflow-security workflow security keep .smithers/workflows quickjs-safe, .smithers/flows frontmatter-valid, and .smithers/playground csp sha-256 hashes exact. " >
+            <summary class="audit-summary">
+              <div class="audit-left">
+                <span class="lh-shape lh-shape-pass" title="Pass (90 to 100)" aria-label="Pass"></span>
+                <div class="audit-title-wrap">
+                  <div class="audit-title">Workflow security <span class="audit-slug">workflow-security</span></div>
+                  <div class="audit-desc">Keep .smithers/workflows QuickJS-safe, .smithers/flows frontmatter-valid, and .smithers/playground CSP SHA-256 hashes exact.</div>
+                </div>
+              </div>
+              <div class="audit-right">
+                <span class="metric-pill lh-text-pass">12 / 12 pass</span>
+                <span class="metric-target">Target 100% pass</span>
+                <span class="metric-weight">w2</span>
+                <span class="metric-score lh-pill-pass">100</span>
+              </div>
+            </summary>
+            <div class="audit-body">
+              <div class="all-pass-note">All 12 checked targets satisfy this audit invariant.</div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+    <footer class="footer">
+      Generated 2026-11-27T13:15:48.308Z by .smithers/reports/audit.mjs from Uphill telemetry and Smithers Cloud factory projections.
+    </footer>
+  </main>
+
+  <script id="audit-summary-data" type="application/json">{"repository":"evmts/guillotine","version":"0.1.0","compositeScore":85,"generatedAt":"2026-11-27T13:15:48.308Z","categories":[{"name":"safety","title":"Safety & TigerStyle","score":90},{"name":"style","title":"Style & Limits","score":90},{"name":"footprint","title":"Footprint & Modularity","score":38},{"name":"verification","title":"Verification & Tests","score":90},{"name":"documentation","title":"Documentation","score":100},{"name":"factory","title":"Factory & Trust","score":100}]}</script>
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const toggle = document.getElementById("theme-toggle");
+      const saved = localStorage.getItem("guillotine-audit-theme");
+      if (saved === "dark" || (!saved && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        root.setAttribute("data-theme", "dark");
+        toggle.textContent = "Light mode";
+      }
+      toggle.addEventListener("click", function () {
+        const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        localStorage.setItem("guillotine-audit-theme", next);
+        toggle.textContent = next === "dark" ? "Light mode" : "Dark mode";
+      });
+
+      let statusFilter = "all";
+      const searchInput = document.getElementById("audit-search");
+      const buttons = Array.from(document.querySelectorAll(".filter-btn"));
+      const items = Array.from(document.querySelectorAll(".audit-item"));
+
+      function applyFilters() {
+        const q = (searchInput.value || "").trim().toLowerCase();
+        for (const el of items) {
+          const band = el.getAttribute("data-band") || "";
+          const hay = el.getAttribute("data-search") || "";
+          const matchStatus =
+            statusFilter === "all" ||
+            (statusFilter === "pass" && band === "pass") ||
+            (statusFilter === "issues" && band !== "pass");
+          const matchText = !q || hay.includes(q);
+          el.classList.toggle("hidden", !(matchStatus && matchText));
+        }
+      }
+
+      searchInput.addEventListener("input", applyFilters);
+      for (const btn of buttons) {
+        btn.addEventListener("click", function () {
+          statusFilter = btn.getAttribute("data-filter") || "all";
+          for (const b of buttons) b.classList.toggle("active", b === btn);
+          applyFilters();
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

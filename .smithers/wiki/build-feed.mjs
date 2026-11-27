@@ -16,6 +16,7 @@ const CATALOG_PATH = join(WIKI_DIR, "coding-project.json")
 const FEED_OUT = ".smithers/reports/wiki-feed.json"
 const REPORT_HTML_OUT = ".smithers/reports/wiki.html"
 const DOCS_HTML_OUT = "docs/public/wiki.html"
+const DOCS_CLEAN_HTML_OUT = "docs/public/wiki/index.html"
 const MAX_FEED_BYTES = 950_000 // safely under Smithers' 1 MiB document cap
 
 const LEAK_PATTERNS = [
@@ -492,13 +493,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   if (args.has("--write") || (!args.has("--check") && !args.has("--push"))) {
-    for (const outPath of [FEED_OUT, REPORT_HTML_OUT, DOCS_HTML_OUT]) {
+    for (const outPath of [FEED_OUT, REPORT_HTML_OUT, DOCS_HTML_OUT, DOCS_CLEAN_HTML_OUT]) {
       mkdirSync(dirname(outPath), { recursive: true })
     }
     writeFileSync(FEED_OUT, JSON.stringify(result.feedPayload, null, 2) + "\n")
     const html = renderWikiHtml(result)
     writeFileSync(REPORT_HTML_OUT, html)
     writeFileSync(DOCS_HTML_OUT, html)
+    writeFileSync(DOCS_CLEAN_HTML_OUT, html)
   }
 
   if (args.has("--check")) {

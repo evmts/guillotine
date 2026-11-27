@@ -3,6 +3,6 @@
   "framework": null,
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "cleanUrls": true,
+  "cleanUrls": false,
   "trailingSlash": false
 }

@@ -27,6 +27,7 @@ const REPO_ROOT = resolve(HERE, "..", "..");
 
 const REPORT_JSON_REL = ".uphill/report.json";
 const DOCS_HTML_REL = "docs/public/audit.html";
+const DOCS_CLEAN_HTML_REL = "docs/public/audit/index.html";
 const LOCAL_HTML_REL = ".smithers/reports/lighthouse-audit.html";
 const SUMMARY_JSON_REL = ".smithers/reports/audit-summary.json";
 
@@ -1120,6 +1121,7 @@ export function writeAuditOutputs(rootDir = REPO_ROOT, opts = {}) {
 
   const targets = [
     join(rootDir, DOCS_HTML_REL),
+    join(rootDir, DOCS_CLEAN_HTML_REL),
     join(rootDir, LOCAL_HTML_REL),
   ];
   for (const file of targets) {

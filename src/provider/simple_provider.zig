@@ -166,6 +166,6 @@ pub const Provider = struct {
     }
 };
 
-test "SimpleProvider type compiles cleanly" {
-    try std.testing.expect(@sizeOf(SimpleProvider) > 0);
+test "Provider type compiles cleanly" {
+    try std.testing.expect(@sizeOf(Provider) > 0);
 }
