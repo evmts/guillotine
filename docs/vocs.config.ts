@@ -134,9 +134,4 @@ export default defineConfig({
       },
     },
   },
-  banner: {
-    dismissable: true,
-    content:
-      '⚠️ Guillotine is **alpha** software and not suitable for production use. [Follow progress →](https://github.com/evmts/guillotine/issues)',
-  },
 })

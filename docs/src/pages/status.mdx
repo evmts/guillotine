@@ -5,8 +5,7 @@ description: What actually works today, measured rather than claimed.
 
 # Project status
 
-Guillotine is **early alpha**. The repository's own words: *do not use in
-production*. Any use should be considered purely experimental.
+Guillotine is in **beta**, preparing for production release.
 
 This page records the measured results for v0.1.0. Each number names its
 source. The runs used Linux x86_64 and stock Zig 0.17.1 with native
@@ -63,15 +62,6 @@ proved. `zig build verify` runs the LLVM IR, SMT and Lean 4 suites together.
 `zig build specs` runs the older filler-based suite under `specs/cases/`. It
 does not pass yet and is not a CI gate. The official state tests above
 supersede it.
-
-:::danger
-Guillotine is still alpha. Passing every official state test means the engine
-agrees with Ethereum on those inputs. It does not cover block processing,
-networking, or inputs the fixtures and fuzzers never generate, and the code has
-had no external audit. Do not use it to compute anything you rely on (balances,
-gas estimates, state roots) without cross-checking against a mature
-implementation.
-:::
 
 ## Performance
 
@@ -139,16 +129,16 @@ The examples in [Getting started](/getting-started) were compiled and run with
 | --- | --- |
 | Ethereum mainnet | Frontier through Osaka |
 | Base L2 / OP Stack | Bedrock through Jovian (pre-Azul). `src/layer2/` implements fee, deposit and precompile rules and a transaction executor; `src/layer2/evm_host.zig` runs it on the real `Evm` engine (the type behind `DefaultEvm`), one comptime instance per OP Stack spec. `zig build test-layer2` tests it. |
-| Arbitrum Nitro | Not implemented. Planned for beta. |
+| Arbitrum Nitro | Not implemented yet. |
 | Hardforks | `Hardfork` spans `FRONTIER` through `AMSTERDAM`; the default is `OSAKA`. `state-tests` covers Frontier through Osaka. |
 | Precompiles | `0x01`–`0x11` and `P256VERIFY` (`0x100`, Osaka) in `lib/voltaire/src/precompiles/` |
 | Zig package | Public modules `evm`, `voltaire` and `layer2` (`dep.module("evm")`) |
-| C ABI | Experimental (`sdks/c/`, `src/evm_c_api.zig`). Releases ship `libguillotine_ffi.so` (x86_64, glibc >= 2.28), `libguillotine_ffi.dylib` (arm64), `guillotine.h` and `SHA256SUMS.txt`. |
-| TypeScript (`@tevm/guillotine`) | Experimental; Bun only, over the native library; 340 / 340 tests pass. Prebuilds for `darwin-arm64` and `linux-x64`. |
+| C ABI | Beta (`sdks/c/`, `src/evm_c_api.zig`). Releases ship `libguillotine_ffi.so` (x86_64, glibc >= 2.28), `libguillotine_ffi.dylib` (arm64), `guillotine.h` and `SHA256SUMS.txt`. |
+| TypeScript (`@tevm/guillotine`) | Beta; Bun only, over the native library; 340 / 340 tests pass. Prebuilds for `darwin-arm64` and `linux-x64`. |
 | WASM | No root build step for the `src/` engine. The separate [`evmts/guillotine-mini`](https://github.com/evmts/guillotine-mini) repository has a WASM build. |
 
 ## Following along
 
-- Issues and beta roadmap: [github.com/evmts/guillotine/issues](https://github.com/evmts/guillotine/issues)
+- Issues and roadmap: [github.com/evmts/guillotine/issues](https://github.com/evmts/guillotine/issues)
 - Telegram: [chat](https://t.me/+ANThR9bHDLAwMjUx)
 - Spec test instructions: `specs/README.md` in the repository

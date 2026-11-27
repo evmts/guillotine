@@ -8,7 +8,7 @@ Guillotine officially ships three integration surfaces:
 | C FFI bindings | [`c/`](c/), `src/evm_c_api.zig` | Embed the native EVM or build a custom language SDK. |
 | `@tevm/guillotine` TypeScript package | [`typescript/`](typescript/) | Call the native EVM from Bun through `bun:ffi`. |
 
-The C and TypeScript APIs are experimental and may change.
+The C and TypeScript APIs are in beta.
 
 The TypeScript package is a Bun native FFI binding over `libguillotine_ffi`,
 the shared library built from `src/evm_c_api.zig`. It loads the library from

@@ -6,7 +6,7 @@
 
 An Ethereum Virtual Machine written in Zig, built around a register-passing tailcall dispatch engine.
 
-**Status**: `v0.1.0`. Passes 100% of official Ethereum Execution Spec Tests (`66,652 / 66,652`, Frontier through Osaka, fusions on and off), `116,384 / 116,384` Zig↔Lean 4 differential fuzz vectors, and `32 / 32` SMT proofs. Ready for embedding, benchmarking, and experimentation; not yet independently security-audited for mainnet custody.
+**Status**: `v0.1.0` (Beta). Passes 100% of official Ethereum Execution Spec Tests (`66,652 / 66,652`, Frontier through Osaka, fusions on and off), `116,384 / 116,384` Zig↔Lean 4 differential fuzz vectors, and `32 / 32` SMT proofs.
 
 ## How does it work?
 

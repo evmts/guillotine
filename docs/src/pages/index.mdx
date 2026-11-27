@@ -9,14 +9,6 @@ Guillotine is an Ethereum Virtual Machine written in Zig. It exists to make EVM
 execution **fast**, **configurable at compile time**, and **embeddable** from
 other languages through a C ABI (`src/evm_c_api.zig`).
 
-:::warning[Alpha software]
-Guillotine is early alpha and is **not suitable for production use**. v0.1.0
-passes all 66,652 official EEST state-test cases across the 14 mainnet
-hardforks (Frontier through Osaka), with fusions on and off, but has had no
-external audit. See [Project status](/status) for the measured numbers and
-their sources.
-:::
-
 ## Why another EVM?
 
 Most EVMs are one implementation with runtime configuration. Guillotine takes a

@@ -4,8 +4,7 @@ The native C ABI is implemented in `src/evm_c_api.zig` and declared in
 [`include/guillotine.h`](include/guillotine.h). The header's top comment
 states the lifecycle, handle, error, memory, threading, and pointer rules.
 Every language binding, including the Bun-based `@tevm/guillotine` package,
-uses this ABI. The API is experimental; pin the header and library to the
-same revision.
+uses this ABI. Pin the header and library to the same revision.
 
 Run commands from the repository root with the Zig version pinned in
 `build.zig.zon`:

@@ -11,9 +11,9 @@ opaque-handle C interface, declared in `sdks/c/include/guillotine.h`.
 
 | Surface | Directory | Status | Mechanism |
 | --- | --- | --- | --- |
-| Zig | `src/root.zig` | Alpha, like the engine | Zig package; import `dep.module("evm")` |
-| C | `sdks/c/` | Experimental | The C ABI directly |
-| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Experimental; Bun only; 340 / 340 tests pass | Bun FFI over `libguillotine_ffi` |
+| Zig | `src/root.zig` | Beta | Zig package; import `dep.module("evm")` |
+| C | `sdks/c/` | Beta | The C ABI directly |
+| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Beta; Bun only; 340 / 340 tests pass | Bun FFI over `libguillotine_ffi` |
 
 Python, Go, Rust, Swift, Kotlin/JNI, and native Bun integrations are custom
 SDKs you build on the C ABI; the repository does not maintain them. Start with
