@@ -1,6 +1,6 @@
 {
 	"name": "@tevm/guillotine",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Guillotine EVM for TypeScript: Node-API and Bun FFI native bindings to the Guillotine Zig EVM",
 	"keywords": [
 		"evm",

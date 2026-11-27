@@ -126,6 +126,8 @@ void test_basic_call() {
         0xF3         // RETURN
     };
 
+    uint8_t caller_addr[20] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+                               0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14};
     uint8_t contract_addr[20] = {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
                                  0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11};
 
@@ -139,11 +141,19 @@ void test_basic_call() {
         .input = &empty,
         .input_len = 0
     };
+    // EIP-3607 rejects top-level calls originating from an address with deployed code.
     memcpy(params.caller, contract_addr, 20);
     memcpy(params.to, contract_addr, 20);
     memset(params.value, 0, 32);
     memset(params.salt, 0, 32);
 
+    EvmResult* rejected = guillotine_call(evm, &params);
+    assert(rejected != NULL);
+    assert(!rejected->success);
+    guillotine_free_result(rejected);
+
+    // Top-level call from an EOA succeeds and returns 15.
+    memcpy(params.caller, caller_addr, 20);
     EvmResult* result = guillotine_call(evm, &params);
     assert(result != NULL);
     assert(result->success);

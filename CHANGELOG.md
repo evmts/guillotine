@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-27
+
+### Fixed
+- Resolved Wave 1 consensus, safety, and C ABI hardening items (EIP-161 state clearing, EIP-3607 transaction admission, thread-safe C FFI handle borrow registry, and expanded SMT/fuzz coverage).
+- Updated C SDK `test_basic_call` to originate top-level calls from an EOA while asserting EIP-3607 rejection when the caller holds deployed bytecode.
+- Enabled npm OIDC Trusted Publishing (Node 24 / npm 11+) for `@tevm/guillotine` with Sigstore provenance.
+
 ## [0.1.0] - 2026-11-25
 
 First tagged release: the Zig package, the C FFI shared libraries, the
