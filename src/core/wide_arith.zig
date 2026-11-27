@@ -267,6 +267,7 @@ pub inline fn addmod(a: u256, b: u256, modulus: u256) u256 {
 
 /// `(a * b) % modulus` over the 512-bit product, or 0 when `modulus` is 0.
 pub inline fn mulmod(a: u256, b: u256, modulus: u256) u256 {
+    if (modulus <= 1 or a == 0 or b == 0) return 0;
     const x = toLimbs(a);
     const y = toLimbs(b);
     var product: [8]u64 = @splat(0);
@@ -296,13 +297,14 @@ pub inline fn rem64(a: u64, b: u64) u64 {
 
 /// `(a * b) % modulus` for one-limb operands, or 0 when `modulus` is 0.
 pub inline fn mulmod64(a: u64, b: u64, modulus: u64) u64 {
-    if (modulus == 0) return 0;
+    if (modulus <= 1 or a == 0 or b == 0) return 0;
     const product = @as(u128, a) * b;
     const hi: u64 = @intCast(product >> 64);
     const lo: u64 = @truncate(product);
     if (hi == 0) return lo % modulus;
     var r: u64 = undefined;
-    _ = divWide(u64, hi % modulus, lo, modulus, &r);
+    const hi_rem = if (hi < modulus) hi else hi % modulus;
+    _ = divWide(u64, hi_rem, lo, modulus, &r);
     return r;
 }
 

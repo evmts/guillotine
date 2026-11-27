@@ -2,6 +2,7 @@ const std = @import("std");
 const primitives = @import("voltaire");
 const Address = primitives.Address;
 const AccessListConfig = @import("access_list_config.zig").AccessListConfig;
+const slot_hash = @import("slot_hash.zig");
 
 /// Create an AccessList type with the given configuration
 pub fn createAccessList(comptime config: AccessListConfig) type {
@@ -11,11 +12,15 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         const Self = @This();
         /// Warm addresses - addresses that have been accessed
         /// Using ArrayHashMap for better cache locality
+        ///
+        /// The value of an entry is a mark its owner may set (`Access.recorded`).
+        /// The EVM sets it once it has recorded the entry for the state dump, so a
+        /// later warm access needs no further lookup. A new entry starts unmarked.
         allocator: std.mem.Allocator,
-        addresses: std.array_hash_map.Auto(Address, void),
+        addresses: std.array_hash_map.Auto(Address, bool),
         /// Warm storage slots - storage slots that have been accessed
-        /// Using ArrayHashMap for better cache locality
-        storage_slots: std.array_hash_map.Custom(StorageKey, void, StorageKeyContext, false),
+        /// Using ArrayHashMap for better cache locality. Values as for `addresses`.
+        storage_slots: std.array_hash_map.Custom(StorageKey, bool, StorageKeyContext, false),
 
         // Gas costs from configuration
         pub const COLD_ACCOUNT_ACCESS_COST: u64 = config.cold_account_access_cost;
@@ -28,20 +33,32 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
             slot: config.SlotType,
         };
 
+        fn storageKeyEql(a: StorageKey, b: StorageKey) bool {
+            return a.slot == b.slot and std.mem.eql(u8, &a.address.bytes, &b.address.bytes);
+        }
+
+        /// Hashes a slot with the shared `slot_hash`, so a caller that already has
+        /// that hash can pass it in (`accessStorageSlotEntry`).
         const StorageKeyContext = struct {
             pub fn hash(self: @This(), key: StorageKey) u32 {
                 _ = self;
-                var hasher = std.hash.Wyhash.init(0);
-                hasher.update(&key.address.bytes);
-                hasher.update(std.mem.asBytes(&key.slot));
-                return @truncate(hasher.final());
+                return @truncate(slot_hash.hash(key.address.bytes, key.slot));
             }
 
             pub fn eql(self: @This(), a: StorageKey, b: StorageKey, b_index: usize) bool {
                 _ = self;
                 _ = b_index;
-                return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
+                return storageKeyEql(a, b);
             }
+        };
+
+        const PrehashedStorageKey = slot_hash.PrehashedIndexed(storageKeyEql);
+
+        /// Result of an access: its gas cost and the entry's mark (see `addresses`).
+        /// `recorded` is valid until the next access or pre-warm.
+        pub const Access = struct {
+            cost: u64,
+            recorded: *bool,
         };
 
         pub fn init(allocator: std.mem.Allocator) Self {
@@ -63,25 +80,67 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
             self.storage_slots.clearRetainingCapacity();
         }
 
+        /// Most addresses `clearKeepingAddresses` removes one by one. Past this a
+        /// full clear is cheaper than undoing each insertion.
+        const max_incremental_clear = 32;
+
+        /// Clear the access list for a new transaction, keeping the first `keep`
+        /// addresses warm and unmarked.
+        ///
+        /// A host passes the number of leading addresses that every transaction
+        /// warms anyway (the fork's precompiles). Keeping them saves re-inserting
+        /// them, one hash-map insertion each, at the start of every transaction.
+        /// When fewer than `keep` addresses are present, everything is cleared.
+        pub fn clearKeepingAddresses(self: *Self, keep: usize) void {
+            self.storage_slots.clearRetainingCapacity();
+            const count = self.addresses.count();
+            if (keep == 0 or keep > count or count - keep > max_incremental_clear) {
+                self.addresses.clearRetainingCapacity();
+                return;
+            }
+            self.addresses.shrinkRetainingCapacity(keep);
+            @memset(self.addresses.values(), false);
+        }
+
         /// Mark an address as accessed and return the gas cost
         /// Returns COLD_ACCOUNT_ACCESS_COST if first access, WARM_ACCOUNT_ACCESS_COST if already accessed
         pub fn access_address(self: *Self, address: Address) !u64 {
+            return (try self.accessAddressEntry(address)).cost;
+        }
+
+        /// `access_address` that also returns the entry's mark.
+        pub fn accessAddressEntry(self: *Self, address: Address) !Access {
             const result = try self.addresses.getOrPut(self.allocator, address);
             if (result.found_existing) {
-                return WARM_ACCOUNT_ACCESS_COST;
+                return .{ .cost = WARM_ACCOUNT_ACCESS_COST, .recorded = result.value_ptr };
             }
-            return COLD_ACCOUNT_ACCESS_COST;
+            result.value_ptr.* = false;
+            return .{ .cost = COLD_ACCOUNT_ACCESS_COST, .recorded = result.value_ptr };
         }
 
         /// Mark a storage slot as accessed and return the gas cost
         /// Returns COLD_SLOAD_COST if first access, WARM_SLOAD_COST if already accessed
         pub fn access_storage_slot(self: *Self, address: Address, slot: config.SlotType) !u64 {
+            return (try self.accessStorageSlotEntry(address, slot, slot_hash.hash(address.bytes, slot))).cost;
+        }
+
+        /// `access_storage_slot` for a caller that already has the slot's
+        /// `slot_hash`. Also returns the entry's mark.
+        pub fn accessStorageSlotEntry(self: *Self, address: Address, slot: config.SlotType, hash: u64) !Access {
             const key = StorageKey{ .address = address, .slot = slot };
-            const result = try self.storage_slots.getOrPut(self.allocator, key);
+            const result = try self.storage_slots.getOrPutAdapted(self.allocator, key, PrehashedStorageKey{ .value = hash });
             if (result.found_existing) {
-                return WARM_SLOAD_COST;
+                return .{ .cost = WARM_SLOAD_COST, .recorded = result.value_ptr };
             }
-            return COLD_SLOAD_COST;
+            result.key_ptr.* = key;
+            result.value_ptr.* = false;
+            return .{ .cost = COLD_SLOAD_COST, .recorded = result.value_ptr };
+        }
+
+        /// Clear the mark of every entry.
+        pub fn clearRecorded(self: *Self) void {
+            @memset(self.addresses.values(), false);
+            @memset(self.storage_slots.values(), false);
         }
 
         /// Check if an address is warm (has been accessed)
@@ -100,8 +159,7 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         pub fn pre_warm_addresses(self: *Self, addresses: []const Address) !void {
             for (addresses) |address| {
                 const result = try self.addresses.getOrPut(self.allocator, address);
-                // Ensure the compiler doesn't optimize away the operation
-                std.mem.doNotOptimizeAway(&result);
+                if (!result.found_existing) result.value_ptr.* = false;
             }
         }
 

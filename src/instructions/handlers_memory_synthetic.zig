@@ -35,8 +35,9 @@ pub fn Handlers(FrameType: type) type {
             t2: u64,
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.word_ptr_in_bounds(cursor[1].push_inline.value)) |word| {
+            if (self.memory.word_in_bounds(cursor[1].push_inline.value)) {
                 @branchHint(.likely);
+                const word = self.memory.word_ptr_unchecked(cursor[1].push_inline.value);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
                 N.before(self, .PUSH_MLOAD_INLINE, cursor, s, gas);
                 s.push_unsafe(@truncate(memory_mod.loadWordBigEndian(word)));
@@ -56,8 +57,9 @@ pub fn Handlers(FrameType: type) type {
             t2: u64,
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.word_ptr_in_bounds(cursor[1].push_inline.value)) |word| {
+            if (self.memory.word_in_bounds(cursor[1].push_inline.value)) {
                 @branchHint(.likely);
+                const word = self.memory.word_ptr_unchecked(cursor[1].push_inline.value);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
                 N.before(self, .PUSH_MSTORE_INLINE, cursor, s, gas);
                 memory_mod.storeWordBigEndian(word, s.pop_unsafe());
@@ -77,8 +79,9 @@ pub fn Handlers(FrameType: type) type {
             t2: u64,
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.byte_ptr_in_bounds(cursor[1].push_inline.value)) |byte| {
+            if (self.memory.byte_in_bounds(cursor[1].push_inline.value)) {
                 @branchHint(.likely);
+                const byte = self.memory.byte_ptr_unchecked(cursor[1].push_inline.value);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
                 N.before(self, .PUSH_MSTORE8_INLINE, cursor, s, gas);
                 byte.* = @truncate(s.pop_unsafe());
@@ -98,8 +101,9 @@ pub fn Handlers(FrameType: type) type {
             t2: u64,
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.word_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |word| {
+            if (self.memory.word_in_bounds(cursor[1].push_pointer.value_ptr.*)) {
                 @branchHint(.likely);
+                const word = self.memory.word_ptr_unchecked(cursor[1].push_pointer.value_ptr.*);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
                 N.before(self, .PUSH_MLOAD_POINTER, cursor, s, gas);
                 s.push_unsafe(@truncate(memory_mod.loadWordBigEndian(word)));
@@ -119,8 +123,9 @@ pub fn Handlers(FrameType: type) type {
             t2: u64,
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.word_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |word| {
+            if (self.memory.word_in_bounds(cursor[1].push_pointer.value_ptr.*)) {
                 @branchHint(.likely);
+                const word = self.memory.word_ptr_unchecked(cursor[1].push_pointer.value_ptr.*);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
                 N.before(self, .PUSH_MSTORE_POINTER, cursor, s, gas);
                 memory_mod.storeWordBigEndian(word, s.pop_unsafe());
@@ -140,8 +145,9 @@ pub fn Handlers(FrameType: type) type {
             t2: u64,
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            if (self.memory.byte_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |byte| {
+            if (self.memory.byte_in_bounds(cursor[1].push_pointer.value_ptr.*)) {
                 @branchHint(.likely);
+                const byte = self.memory.byte_ptr_unchecked(cursor[1].push_pointer.value_ptr.*);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
                 N.before(self, .PUSH_MSTORE8_POINTER, cursor, s, gas);
                 byte.* = @truncate(s.pop_unsafe());

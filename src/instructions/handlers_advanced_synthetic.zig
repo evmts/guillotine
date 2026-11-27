@@ -4,8 +4,9 @@
 /// - ISZERO_JUMPI: `ISZERO; PUSH target; JUMPI` with the target resolved at build time.
 /// - PUSH_ADD_DUP1_INLINE / PUSH_ADD_DUP1_POINTER: `PUSH v; ADD; DUP1`.
 ///
-/// None of them touches memory or gas: the block entry already charged the static gas
-/// of the fused instructions and validated the stack bounds.
+/// None of them touches memory. The block entry already charged the static gas of
+/// the fused instructions and validated the stack bounds; ISZERO_JUMPI then enters
+/// its successor block itself, like the other static jumps.
 const std = @import("std");
 
 /// Advanced synthetic opcode handlers for complex fusion patterns
@@ -16,6 +17,7 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
         const handler_abi = @import("../preprocessor/handler_abi.zig");
         const N = handler_abi.Native(FrameType);
+        const Jump = @import("handlers_jump.zig").Handlers(FrameType);
 
         /// ISZERO_JUMPI - Combined zero check and conditional jump
         /// Replaces ISZERO, PUSH target, JUMPI with a single operation
@@ -32,11 +34,14 @@ pub fn Handlers(FrameType: type) type {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .ISZERO_JUMPI, cursor, s, gas);
             const value = s.pop_unsafe();
-            if (value != 0) return N.next(self, .ISZERO_JUMPI, cursor, s, gas);
-            // cursor[1] holds the statically resolved target: the JUMPDEST's schedule
-            // cursor, or the invalid-jump item when the target is not a JUMPDEST.
+            // Either way the successor block is entered here, from the metadata stored
+            // with the jump: cursor[3] for the fall-through block, cursor[2] for the
+            // target block. cursor[1] is the statically resolved target: the first
+            // instruction after the JUMPDEST, or the invalid-jump item when the target
+            // is not a JUMPDEST.
+            if (value != 0) return Jump.fallThroughStaticJump(self, .ISZERO_JUMPI, cursor, cursor[3].jump_dest, s, gas);
             const target: [*]const Dispatch.Item = @ptrCast(@alignCast(cursor[1].jump_static.dispatch));
-            return N.jump(self, .ISZERO_JUMPI, target, s, gas);
+            return Jump.takeStaticJump(self, .ISZERO_JUMPI, target, cursor[2].jump_dest, s, gas);
         }
 
         /// PUSH_ADD_DUP1_INLINE - `PUSH v; ADD; DUP1` with `v` stored inline (fits 64 bits).

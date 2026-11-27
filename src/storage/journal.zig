@@ -9,6 +9,7 @@ const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const JournalConfig = @import("journal_config.zig").JournalConfig;
 const journal_entry = @import("journal_entry.zig");
+const slot_hash = @import("slot_hash.zig");
 
 /// Creates a configured journal type for state tracking.
 pub fn Journal(comptime config: JournalConfig) type {
@@ -30,14 +31,35 @@ pub fn Journal(comptime config: JournalConfig) type {
         prefix_max: std.ArrayList(SnapshotIdType),
         /// First recorded value of each storage slot since the last `clear`, with the
         /// index of the entry that recorded it. Answers `get_original_storage` in O(1).
-        original_storage: std.AutoHashMapUnmanaged(SlotKey, OriginalValue),
+        original_storage: std.HashMapUnmanaged(SlotKey, OriginalValue, SlotKeyContext, std.hash_map.default_max_load_percentage),
+        /// True once `original_storage` has gained an entry since it was last
+        /// cleared. `clear` runs for every transaction; clearing a hash map rewrites
+        /// its metadata, so a transaction that wrote no storage skips it.
+        original_storage_dirty: bool = false,
         next_snapshot_id: SnapshotIdType,
         allocator: std.mem.Allocator,
 
         const SlotKey = struct {
             address: [20]u8,
             slot: WordType,
+
+            fn eql(a: SlotKey, b: SlotKey) bool {
+                return a.slot == b.slot and std.mem.eql(u8, &a.address, &b.address);
+            }
         };
+
+        /// Hashes a slot with the shared `slot_hash`, so a caller that already has
+        /// that hash can pass it in (the `*_hashed` functions).
+        const SlotKeyContext = struct {
+            pub fn hash(_: @This(), key: SlotKey) u64 {
+                return slot_hash.hash(key.address, key.slot);
+            }
+            pub fn eql(_: @This(), a: SlotKey, b: SlotKey) bool {
+                return a.eql(b);
+            }
+        };
+
+        const PrehashedSlotKey = slot_hash.Prehashed(SlotKey.eql);
 
         const OriginalValue = struct {
             value: WordType,
@@ -156,6 +178,7 @@ pub fn Journal(comptime config: JournalConfig) type {
                             .slot = sc.key,
                         });
                         if (!slot.found_existing) {
+                            self.original_storage_dirty = true;
                             slot.value_ptr.* = .{ .value = sc.original_value, .entry_index = @intCast(index) };
                         }
                     },
@@ -190,11 +213,32 @@ pub fn Journal(comptime config: JournalConfig) type {
             key: WordType,
             original_value: WordType,
         ) !void {
+            return self.record_storage_change_hashed(snapshot_id, address, key, slot_hash.hash(address.bytes, key), original_value);
+        }
+
+        /// `record_storage_change` for a caller that already has the slot's `slot_hash`.
+        pub fn record_storage_change_hashed(
+            self: *Self,
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            key: WordType,
+            hash: u64,
+            original_value: WordType,
+        ) !void {
             try self.entries.ensureUnusedCapacity(self.allocator, 1);
             try self.prefix_max.ensureUnusedCapacity(self.allocator, 1);
-            const slot = try self.original_storage.getOrPut(self.allocator, .{ .address = address.bytes, .slot = key });
+            // Checked before the index changes, so a failure leaves no half-made entry.
+            const entry_index = std.math.cast(u32, self.entries.items.len) orelse return error.OutOfMemory;
+            const slot_key = SlotKey{ .address = address.bytes, .slot = key };
+            const slot = try self.original_storage.getOrPutContextAdapted(
+                self.allocator,
+                slot_key,
+                PrehashedSlotKey{ .value = hash },
+                SlotKeyContext{},
+            );
             if (!slot.found_existing) {
-                const entry_index = std.math.cast(u32, self.entries.items.len) orelse return error.OutOfMemory;
+                self.original_storage_dirty = true;
+                slot.key_ptr.* = slot_key;
                 slot.value_ptr.* = .{ .value = original_value, .entry_index = entry_index };
             }
             self.appendAssumeCapacity(Entry.storage_change(snapshot_id, address, key, original_value));
@@ -256,16 +300,24 @@ pub fn Journal(comptime config: JournalConfig) type {
         pub fn clear(self: *Self) void {
             self.entries.clearRetainingCapacity();
             self.prefix_max.clearRetainingCapacity();
-            self.original_storage.clearRetainingCapacity();
+            if (self.original_storage_dirty or self.original_storage.count() != 0) {
+                self.original_storage.clearRetainingCapacity();
+                self.original_storage_dirty = false;
+            }
             self.next_snapshot_id = 0;
         }
 
         /// Get original storage value from journal: the value the slot held before the
         /// oldest recorded change that is still in the journal. O(1).
         pub fn get_original_storage(self: *const Self, address: Address, slot: WordType) ?WordType {
+            return self.get_original_storage_hashed(address, slot, slot_hash.hash(address.bytes, slot));
+        }
+
+        /// `get_original_storage` for a caller that already has the slot's `slot_hash`.
+        pub fn get_original_storage_hashed(self: *const Self, address: Address, slot: WordType, hash: u64) ?WordType {
             if (self.prefixMaxIsCurrent()) {
                 const lookup_key = SlotKey{ .address = address.bytes, .slot = slot };
-                const original = self.original_storage.get(lookup_key) orelse return null;
+                const original = self.original_storage.getAdapted(lookup_key, PrehashedSlotKey{ .value = hash }) orelse return null;
                 return original.value;
             }
             // Entries appended directly to `entries` are not indexed: scan them.

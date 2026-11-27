@@ -234,6 +234,7 @@ pub const Tracer = struct {
                     block_info.blob_base_fee,
                 );
                 evm.setTransactionContext(evm_instance.get_tx_origin(), evm_instance.gas_price);
+                evm.setBlobVersionedHashes(evm_instance.context.blob_versioned_hashes);
                 evm.setBlockHashes(block_info.block_hashes);
                 evm.setHardfork(evm_instance.get_hardfork());
                 var caller = primitives.ZERO_ADDRESS;

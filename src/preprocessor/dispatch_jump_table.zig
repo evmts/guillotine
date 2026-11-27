@@ -5,137 +5,144 @@ const std = @import("std");
 pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
     const Self = DispatchType;
 
-    // Performance note: JumpTable is a compact array of structs rather than a sparse bitmap.
-    // A sparse bitmap would provide O(1) lookups at the cost of CPU cache utilization.
-    // For contract jump table sizes, a compact cache-line-friendly array with binary search is faster.
+    // The table is an open-addressed hash table of 8-byte buckets, `{ pc, offset }`,
+    // probed linearly. A dynamic JUMP costs one multiply, one shift and, almost
+    // always, one bucket read: no division and no search loop over a sorted array.
     //
-    // Optimization: We use interpolated search to start at an estimated position based on the assumption that
-    // JUMPDESTs are roughly evenly distributed through bytecode. This reduces average search iterations significantly
-    // for large jump tables while maintaining O(log n) worst case performance
+    // It is the only record of the code's JUMPDESTs the schedule keeps. With at
+    // most two thirds of the buckets in use it takes 12 to 24 bytes per JUMPDEST;
+    // the sorted array it replaces took 16 bytes per JUMPDEST next to a second
+    // 16-byte list of the same positions.
     return struct {
+        const Table = @This();
         const CursorPtr = @FieldType(Self, "cursor");
 
-        /// Jump table entry for dynamic jumps (legacy sorted-array representation)
-        pub const JumpTableEntry = struct {
-            pc: FrameType.PcType,
-            dispatch: Self,
-        };
-
-        /// Compact 8-byte open-addressed hash bucket for O(1) dynamic JUMP lookup.
+        /// One bucket: a JUMPDEST's PC and the schedule index of its handler.
         pub const Bucket = extern struct {
             pc: u32,
             offset: u32,
         };
 
+        /// `Bucket.pc` of an unused bucket. No JUMPDEST can have this PC: code that
+        /// long is rejected before analysis (`insert` checks it again).
         pub const EMPTY_PC: u32 = std.math.maxInt(u32);
+        /// Fibonacci hashing multiplier: 2^32 divided by the golden ratio.
         pub const HASH_MULT: u32 = 0x9E3779B1;
 
-        entries: []const JumpTableEntry = &.{},
-        buckets: []const Bucket = &.{},
-        schedule_base: ?CursorPtr = null,
-        mask: usize = 0,
-        shift: u5 = 0,
+        pub const Error = error{ JumpTableFull, JumpDestOutOfRange, DuplicateJumpDest };
 
-        /// Compute power-of-2 bucket count for `jumpdest_count` entries (<=50% load factor).
+        /// Power-of-two bucket array; empty when the code has no JUMPDEST.
+        buckets: []Bucket = &.{},
+        /// First item of the schedule the offsets index.
+        schedule_base: ?CursorPtr = null,
+        /// Right shift that maps a 32-bit hash to a bucket index.
+        shift: u5 = 0,
+        /// Number of JUMPDESTs in the table.
+        len: u32 = 0,
+
+        /// A table without JUMPDESTs: every lookup misses.
+        pub const empty: Table = .{};
+
+        /// Number of buckets for `jumpdest_count` JUMPDESTs: a power of two that
+        /// leaves at least one third of the buckets unused, so every probe sequence
+        /// ends at an unused bucket.
         pub fn bucketCapacity(jumpdest_count: usize) usize {
             if (jumpdest_count == 0) return 0;
-            const needed = @max(jumpdest_count * 2, 4);
+            const needed = @max(jumpdest_count + jumpdest_count / 2 + 1, 4);
             return std.math.ceilPowerOfTwoAssert(usize, needed);
         }
 
-        /// Populate `buckets` with `EMPTY_PC` and insert all `(pc, schedule_index)` pairs.
-        pub fn initBuckets(
-            buckets: []Bucket,
-            schedule_base: CursorPtr,
-            jumpdests: anytype,
-        ) @This() {
-            if (buckets.len == 0) {
-                return .{ .entries = &.{}, .buckets = &.{}, .schedule_base = schedule_base, .mask = 0, .shift = 0 };
-            }
+        /// An empty table over `buckets`, whose length is `bucketCapacity` of the
+        /// number of JUMPDESTs that will be inserted.
+        pub fn init(buckets: []Bucket, schedule_base: CursorPtr) Table {
+            if (buckets.len == 0) return .{ .schedule_base = schedule_base };
             @memset(buckets, .{ .pc = EMPTY_PC, .offset = 0 });
-            const mask = buckets.len - 1;
-            const log2_cap: u6 = @intCast(@ctz(buckets.len));
-            const shift: u5 = @intCast(32 - log2_cap);
-            for (jumpdests) |jd| {
-                const key: u32 = @intCast(jd.pc);
-                var idx: usize = @intCast((key *% HASH_MULT) >> shift);
-                while (buckets[idx].pc != EMPTY_PC) {
-                    idx = (idx + 1) & mask;
-                }
-                buckets[idx] = .{ .pc = key, .offset = @intCast(jd.schedule_index) };
-            }
+            const log2_capacity: u6 = @intCast(@ctz(buckets.len));
             return .{
-                .entries = &.{},
                 .buckets = buckets,
                 .schedule_base = schedule_base,
-                .mask = mask,
-                .shift = shift,
+                .shift = @intCast(32 - log2_capacity),
+                .len = 0,
             };
         }
 
-        /// Find the dispatch for a given PC: O(1) hash lookup when `buckets` is populated,
-        /// falling back to binary search over `entries` for legacy/test tables.
-        pub inline fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
-            if (self.buckets.len > 0) {
-                const key: u32 = @intCast(target_pc);
-                var idx: usize = @intCast((key *% HASH_MULT) >> self.shift);
-                while (true) {
-                    const b = self.buckets[idx];
-                    if (b.pc == key) return Self{ .cursor = self.schedule_base.? + b.offset };
-                    if (b.pc == EMPTY_PC) return null;
-                    idx = (idx + 1) & self.mask;
-                }
-            }
-            return self.findJumpTargetLegacy(target_pc);
+        /// Allocate a table for `jumpdest_count` JUMPDESTs.
+        pub fn create(allocator: std.mem.Allocator, jumpdest_count: usize, schedule_base: CursorPtr) std.mem.Allocator.Error!Table {
+            const buckets = try allocator.alloc(Bucket, bucketCapacity(jumpdest_count));
+            return init(buckets, schedule_base);
         }
 
-        fn findJumpTargetLegacy(self: @This(), target_pc: FrameType.PcType) ?Self {
-            if (self.entries.len == 0) return null;
-            if (target_pc < self.entries[0].pc or target_pc > self.entries[self.entries.len - 1].pc) {
-                return null;
-            }
-            var left: usize = 0;
-            var right: usize = self.entries.len;
-            const has_frame_config = @hasField(FrameType, "frame_config");
-            var loop_counter = if (has_frame_config)
-                FrameType.frame_config.createLoopSafetyCounter().init(FrameType.frame_config.loop_quota orelse 0)
-            else {};
-            while (left < right) {
-                if (has_frame_config) loop_counter.inc();
-                const mid = left + (right - left) / 2;
-                const entry = self.entries[mid];
+        /// Free a table made by `create`.
+        pub fn deinit(self: *Table, allocator: std.mem.Allocator) void {
+            allocator.free(self.buckets);
+            self.* = empty;
+        }
 
-                if (entry.pc == target_pc) return entry.dispatch;
-                if (entry.pc < target_pc) {
-                    left = mid + 1;
-                } else {
-                    right = mid;
-                }
+        /// Number of JUMPDESTs in the table.
+        pub fn count(self: Table) usize {
+            return self.len;
+        }
+
+        /// Bytes of bucket storage the table holds.
+        pub fn byteSize(self: Table) usize {
+            return std.mem.sliceAsBytes(self.buckets).len;
+        }
+
+        inline fn slot(self: Table, key: u32) usize {
+            return @intCast((key *% HASH_MULT) >> self.shift);
+        }
+
+        /// Record that the JUMPDEST at `pc` has its handler at `schedule_index`.
+        pub fn insert(self: *Table, pc: FrameType.PcType, schedule_index: usize) Error!void {
+            if (pc >= EMPTY_PC) return Error.JumpDestOutOfRange;
+            const offset = std.math.cast(u32, schedule_index) orelse return Error.JumpDestOutOfRange;
+            // One bucket must stay unused, or a miss would probe forever.
+            if (@as(usize, self.len) + 1 >= self.buckets.len) return Error.JumpTableFull;
+            const key: u32 = @intCast(pc);
+            const mask = self.buckets.len - 1;
+            var index = self.slot(key);
+            while (self.buckets[index].pc != EMPTY_PC) : (index = (index + 1) & mask) {
+                if (self.buckets[index].pc == key) return Error.DuplicateJumpDest;
             }
-            return null;
+            self.buckets[index] = .{ .pc = key, .offset = offset };
+            self.len += 1;
+        }
+
+        /// Schedule index of the JUMPDEST at `target_pc`, or null when there is none.
+        pub inline fn findOffset(self: Table, target_pc: FrameType.PcType) ?u32 {
+            if (self.buckets.len == 0) return null;
+            if (target_pc >= EMPTY_PC) return null;
+            const key: u32 = @intCast(target_pc);
+            const mask = self.buckets.len - 1;
+            var index = self.slot(key);
+            // Ends at an unused bucket: `insert` keeps at least one.
+            while (true) : (index = (index + 1) & mask) {
+                const bucket = self.buckets[index];
+                if (bucket.pc == key) return bucket.offset;
+                if (bucket.pc == EMPTY_PC) return null;
+            }
+        }
+
+        /// The dispatch of the JUMPDEST at `target_pc`, or null when `target_pc` is
+        /// not a JUMPDEST.
+        pub inline fn findJumpTarget(self: Table, target_pc: FrameType.PcType) ?Self {
+            const offset = self.findOffset(target_pc) orelse return null;
+            return Self{ .cursor = self.schedule_base.? + offset };
         }
 
         /// Find the PC for a given dispatch pointer
         /// This is used by tracers to determine the current PC when landing on a jump destination
-        pub fn findPc(self: @This(), dispatch: Self) ?FrameType.PcType {
-            if (self.buckets.len > 0) {
-                const base = self.schedule_base orelse return null;
-                const target_addr = @intFromPtr(dispatch.cursor);
-                const base_addr = @intFromPtr(base);
-                if (target_addr < base_addr) return null;
-                const elem_size = @sizeOf(std.meta.Child(CursorPtr));
-                const diff = target_addr - base_addr;
-                if (diff % elem_size != 0) return null;
-                const target_off = diff / elem_size;
-                for (self.buckets) |b| {
-                    if (b.pc != EMPTY_PC and b.offset == target_off) return @intCast(b.pc);
-                }
-                return null;
-            }
-            for (self.entries) |entry| {
-                if (@intFromPtr(entry.dispatch.cursor) == @intFromPtr(dispatch.cursor)) {
-                    return entry.pc;
-                }
+        pub fn findPc(self: Table, dispatch: Self) ?FrameType.PcType {
+            const base = self.schedule_base orelse return null;
+            const target_addr = @intFromPtr(dispatch.cursor);
+            const base_addr = @intFromPtr(base);
+            if (target_addr < base_addr) return null;
+            const item_size = @sizeOf(std.meta.Child(CursorPtr));
+            const distance = target_addr - base_addr;
+            if (distance % item_size != 0) return null;
+            const target_offset = distance / item_size;
+            for (self.buckets) |bucket| {
+                if (bucket.pc != EMPTY_PC and bucket.offset == target_offset) return @intCast(bucket.pc);
             }
             return null;
         }
@@ -154,102 +161,110 @@ const TestFrame = struct {
 };
 
 const TestDispatch = struct {
-    cursor: [*]const u8,
+    cursor: [*]const u64,
 };
 
-test "JumpTable binary search finds existing entries" {
-    const JumpTableType = JumpTable(TestFrame, TestDispatch);
+const TestTable = JumpTable(TestFrame, TestDispatch);
 
-    // Create test entries
-    const entries = [_]JumpTableType.JumpTableEntry{
-        .{ .pc = 10, .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x1000)) } },
-        .{ .pc = 20, .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x2000)) } },
-        .{ .pc = 30, .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x3000)) } },
-        .{ .pc = 40, .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x4000)) } },
-    };
+test "JumpTable finds every inserted JUMPDEST and nothing else" {
+    var schedule: [64]u64 = @splat(0);
+    var table = try TestTable.create(testing.allocator, 4, &schedule);
+    defer table.deinit(testing.allocator);
 
-    const jump_table = JumpTableType{ .entries = &entries };
+    try table.insert(10, 1);
+    try table.insert(20, 7);
+    try table.insert(30, 9);
+    try table.insert(40, 63);
+    try testing.expectEqual(@as(usize, 4), table.count());
 
-    // Test finding existing entries
-    const result1 = jump_table.findJumpTarget(20);
-    try testing.expect(result1 != null);
-    try testing.expectEqual(@as(usize, 0x2000), @intFromPtr(result1.?.cursor));
-
-    const result2 = jump_table.findJumpTarget(40);
-    try testing.expect(result2 != null);
-    try testing.expectEqual(@as(usize, 0x4000), @intFromPtr(result2.?.cursor));
-}
-
-test "JumpTable binary search returns null for non-existent entries" {
-    const JumpTableType = JumpTable(TestFrame, TestDispatch);
-
-    const entries = [_]JumpTableType.JumpTableEntry{
-        .{ .pc = 10, .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x1000)) } },
-        .{ .pc = 30, .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x3000)) } },
-    };
-
-    const jump_table = JumpTableType{ .entries = &entries };
-
-    // Test searching for non-existent entries
-    try testing.expect(jump_table.findJumpTarget(5) == null);
-    try testing.expect(jump_table.findJumpTarget(20) == null);
-    try testing.expect(jump_table.findJumpTarget(50) == null);
-}
-
-test "JumpTable handles empty entries" {
-    const JumpTableType = JumpTable(TestFrame, TestDispatch);
-
-    const entries = [_]JumpTableType.JumpTableEntry{};
-    const jump_table = JumpTableType{ .entries = &entries };
-
-    try testing.expect(jump_table.findJumpTarget(0) == null);
-    try testing.expect(jump_table.findJumpTarget(100) == null);
-}
-
-test "JumpTable interpolated search optimization" {
-    const JumpTableType = JumpTable(TestFrame, TestDispatch);
-
-    // Create a large table with evenly distributed PCs to test interpolation
-    var entries: [100]JumpTableType.JumpTableEntry = undefined;
-    for (0..100) |i| {
-        entries[i] = .{
-            .pc = @intCast(i * 10), // PCs at 0, 10, 20, ..., 990
-            .dispatch = .{ .cursor = @as([*]const u8, @ptrFromInt(0x1000 + i * 0x100)) },
-        };
+    try testing.expectEqual(@intFromPtr(&schedule[7]), @intFromPtr(table.findJumpTarget(20).?.cursor));
+    try testing.expectEqual(@intFromPtr(&schedule[63]), @intFromPtr(table.findJumpTarget(40).?.cursor));
+    try testing.expectEqual(@as(?u32, 1), table.findOffset(10));
+    for ([_]u32{ 0, 5, 11, 19, 21, 50, 0xFFFF, std.math.maxInt(u32) }) |pc| {
+        try testing.expect(table.findJumpTarget(pc) == null);
     }
+}
 
-    const jump_table = JumpTableType{ .entries = &entries };
+test "JumpTable without JUMPDESTs allocates nothing and misses" {
+    var schedule: [1]u64 = .{0};
+    var table = try TestTable.create(testing.allocator, 0, &schedule);
+    defer table.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), table.byteSize());
+    try testing.expect(table.findJumpTarget(0) == null);
+    try testing.expect(table.findJumpTarget(100) == null);
+    try testing.expect(TestTable.empty.findJumpTarget(0) == null);
+    try testing.expectError(TestTable.Error.JumpTableFull, table.insert(0, 0));
+}
 
-    // Test finding entries at various positions
-    // The interpolated search should find these efficiently
+test "JumpTable dense table: a JUMPDEST at every PC" {
+    const n = 5000;
+    const schedule = try testing.allocator.alloc(u64, n * 2);
+    defer testing.allocator.free(schedule);
+    var table = try TestTable.create(testing.allocator, n, schedule.ptr);
+    defer table.deinit(testing.allocator);
 
-    // Test near beginning
-    const result1 = jump_table.findJumpTarget(20);
-    try testing.expect(result1 != null);
-    try testing.expectEqual(@as(usize, 0x1200), @intFromPtr(result1.?.cursor));
+    for (0..n) |pc| try table.insert(@intCast(pc), pc * 2);
+    for (0..n) |pc| try testing.expectEqual(@as(?u32, @intCast(pc * 2)), table.findOffset(@intCast(pc)));
+    for (n..n + 2000) |pc| try testing.expect(table.findOffset(@intCast(pc)) == null);
+    // At most two thirds of the buckets are in use and each is eight bytes.
+    try testing.expect(table.count() * 3 <= table.buckets.len * 2);
+    try testing.expect(table.byteSize() <= 24 * n);
+}
 
-    // Test near middle
-    const result2 = jump_table.findJumpTarget(500);
-    try testing.expect(result2 != null);
-    try testing.expectEqual(@as(usize, 0x1000 + 50 * 0x100), @intFromPtr(result2.?.cursor));
+test "JumpTable sparse table: PCs far apart and colliding" {
+    var schedule: [8]u64 = @splat(0);
+    const pcs = [_]u32{ 0, 1 << 8, 1 << 16, 1 << 24, (1 << 31) + 5, std.math.maxInt(u32) - 1 };
+    var table = try TestTable.create(testing.allocator, pcs.len, &schedule);
+    defer table.deinit(testing.allocator);
+    for (pcs, 0..) |pc, index| try table.insert(pc, index);
+    for (pcs, 0..) |pc, index| {
+        try testing.expectEqual(@as(?u32, @intCast(index)), table.findOffset(pc));
+        try testing.expect(table.findOffset(pc + 1) == null or std.mem.indexOfScalar(u32, &pcs, pc + 1) != null);
+    }
+}
 
-    // Test near end
-    const result3 = jump_table.findJumpTarget(980);
-    try testing.expect(result3 != null);
-    try testing.expectEqual(@as(usize, 0x1000 + 98 * 0x100), @intFromPtr(result3.?.cursor));
+test "JumpTable rejects duplicates, overflow and the reserved PC" {
+    var schedule: [4]u64 = @splat(0);
+    var table = try TestTable.create(testing.allocator, 2, &schedule);
+    defer table.deinit(testing.allocator);
+    try table.insert(3, 0);
+    try testing.expectError(TestTable.Error.DuplicateJumpDest, table.insert(3, 1));
+    try testing.expectError(TestTable.Error.JumpDestOutOfRange, table.insert(TestTable.EMPTY_PC, 1));
+    try table.insert(4, 1);
+    try table.insert(5, 2);
+    try testing.expectError(TestTable.Error.JumpTableFull, table.insert(6, 3));
+    try testing.expectEqual(@as(usize, 3), table.count());
+}
 
-    // Test exact interpolation hit (should return immediately)
-    const result4 = jump_table.findJumpTarget(450); // Exactly at index 45
-    try testing.expect(result4 != null);
-    try testing.expectEqual(@as(usize, 0x1000 + 45 * 0x100), @intFromPtr(result4.?.cursor));
+test "JumpTable findPc maps a JUMPDEST cursor back to its PC" {
+    var schedule: [16]u64 = @splat(0);
+    var table = try TestTable.create(testing.allocator, 2, &schedule);
+    defer table.deinit(testing.allocator);
+    try table.insert(100, 4);
+    try table.insert(200, 12);
+    try testing.expectEqual(@as(?u32, 100), table.findPc(.{ .cursor = schedule[4..].ptr }));
+    try testing.expectEqual(@as(?u32, 200), table.findPc(.{ .cursor = schedule[12..].ptr }));
+    try testing.expect(table.findPc(.{ .cursor = schedule[5..].ptr }) == null);
+}
 
-    // Test non-existent entries
-    try testing.expect(jump_table.findJumpTarget(25) == null);
-    try testing.expect(jump_table.findJumpTarget(505) == null);
-    try testing.expect(jump_table.findJumpTarget(1000) == null); // Beyond max
-
-    // Test boundary checks (early return optimization)
-    try testing.expect(jump_table.findJumpTarget(0xFFFF) == null); // Way beyond max
-    try testing.expect(jump_table.findJumpTarget(0) != null); // First element
-    try testing.expect(jump_table.findJumpTarget(990) != null); // Last element
+test "JumpTable lookups match a linear reference for pseudo-random PCs" {
+    var prng = std.Random.DefaultPrng.init(0x6a756d70);
+    const random = prng.random();
+    var reference: std.AutoHashMapUnmanaged(u32, u32) = .empty;
+    defer reference.deinit(testing.allocator);
+    var schedule: [1]u64 = .{0};
+    const n = 700;
+    var table = try TestTable.create(testing.allocator, n, &schedule);
+    defer table.deinit(testing.allocator);
+    while (reference.count() < n) {
+        const pc = random.uintLessThan(u32, 30_000);
+        const entry = try reference.getOrPut(testing.allocator, pc);
+        if (entry.found_existing) continue;
+        entry.value_ptr.* = random.int(u32);
+        try table.insert(pc, entry.value_ptr.*);
+    }
+    var pc: u32 = 0;
+    while (pc < 30_100) : (pc += 1) {
+        try testing.expectEqual(reference.get(pc), table.findOffset(pc));
+    }
 }

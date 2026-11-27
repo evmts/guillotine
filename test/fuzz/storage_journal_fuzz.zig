@@ -304,6 +304,150 @@ pub fn fuzzAccessListWarmCold(_: void, input: []const u8) !void {
     }
 }
 
+/// Storage as the slot-store model sees it: base slots, the overlay's slots (null:
+/// the overlay has no entry and the base shows through) and which view the
+/// overlay belongs to.
+const SlotModel = struct {
+    base: [NUM_ACCOUNTS][NUM_SLOTS]u256 = @as([NUM_ACCOUNTS][NUM_SLOTS]u256, @splat(@as([NUM_SLOTS]u256, @splat(0)))),
+    overlay: [NUM_ACCOUNTS][NUM_SLOTS]?u256 = @as([NUM_ACCOUNTS][NUM_SLOTS]?u256, @splat(@as([NUM_SLOTS]?u256, @splat(null)))),
+    /// Number of times a view was entered or left so far. A snapshot's overlay
+    /// part can be restored only while no view has been entered or left since.
+    epoch: u32 = 0,
+
+    fn visible(self: *const SlotModel, active: bool, account: usize, slot: usize) u256 {
+        if (active) {
+            if (self.overlay[account][slot]) |value| return value;
+        }
+        return self.base[account][slot];
+    }
+};
+
+/// `SlotStore` (per-address key list and non-zero count), `zeroSlots`, overlay
+/// shadowing and the overlay's dirty flags, against a model, under nested
+/// snapshots that stay open across ephemeral views.
+pub fn fuzzSlotStoreAndOverlayDirtiness(_: void, input: []const u8) !void {
+    const allocator = fuzz_alloc.get();
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    var model = SlotModel{};
+    var active = false;
+    var snapshots: [6]SlotModel = undefined;
+    var snapshot_ids: [6]u64 = undefined;
+    var depth: usize = 0;
+
+    var i: usize = 0;
+    while (i + 2 < input.len) : (i += 3) {
+        const account: usize = input[i + 1] % NUM_ACCOUNTS;
+        const slot: usize = input[i + 2] % NUM_SLOTS;
+        const address = makeAddr(@intCast(account));
+        switch (input[i] % 9) {
+            0, 1, 2 => { // SSTORE; a third of the writes store zero
+                const value: u256 = if (input[i + 2] % 3 == 0) 0 else @as(u256, input[i + 2]) + 1;
+                try db.set_storage(address, slot, value);
+                if (active) {
+                    model.overlay[account][slot] = value;
+                } else {
+                    model.base[account][slot] = value;
+                }
+            },
+            3 => { // clear the account's storage (SELFDESTRUCT, account deletion)
+                try db.clear_account_storage(address);
+                for (0..NUM_SLOTS) |s| {
+                    if (!active) {
+                        model.base[account][s] = 0;
+                    } else if (model.visible(true, account, s) != 0) {
+                        model.overlay[account][s] = 0;
+                    }
+                }
+            },
+            4 => { // enter a view: the overlay starts empty
+                if (!active) {
+                    db.begin_ephemeral_view();
+                    active = true;
+                    model.epoch += 1;
+                    model.overlay = @as([NUM_ACCOUNTS][NUM_SLOTS]?u256, @splat(@as([NUM_SLOTS]?u256, @splat(null))));
+                    try std.testing.expect(db.overlayIsClean());
+                }
+            },
+            5 => { // leave the view: everything it wrote is gone
+                if (active) {
+                    db.discard_ephemeral_view();
+                    active = false;
+                    model.epoch += 1;
+                    model.overlay = @as([NUM_ACCOUNTS][NUM_SLOTS]?u256, @splat(@as([NUM_SLOTS]?u256, @splat(null))));
+                    try std.testing.expect(db.overlayIsClean());
+                }
+            },
+            6 => { // open a snapshot
+                if (depth < snapshots.len) {
+                    snapshot_ids[depth] = try db.create_snapshot();
+                    snapshots[depth] = model;
+                    depth += 1;
+                }
+            },
+            7 => { // revert to the newest snapshot
+                if (depth > 0) {
+                    depth -= 1;
+                    try db.revert_to_snapshot(snapshot_ids[depth]);
+                    const saved = snapshots[depth];
+                    model.base = saved.base;
+                    // Overlay writes of a view that has since been left were dropped
+                    // with it; a view entered after the snapshot is undone back to
+                    // empty. Either way the overlay holds nothing.
+                    model.overlay = if (saved.epoch == model.epoch)
+                        saved.overlay
+                    else
+                        @as([NUM_ACCOUNTS][NUM_SLOTS]?u256, @splat(@as([NUM_SLOTS]?u256, @splat(null))));
+                }
+            },
+            else => { // commit the newest snapshot
+                if (depth > 0) {
+                    depth -= 1;
+                    try db.commit_snapshot(snapshot_ids[depth]);
+                }
+            },
+        }
+
+        // The database and the model agree after every operation.
+        var overlay_entries: usize = 0;
+        for (0..NUM_ACCOUNTS) |a| {
+            const a_address = makeAddr(@intCast(a));
+            var base_non_zero: usize = 0;
+            var visible_non_zero = false;
+            for (0..NUM_SLOTS) |s| {
+                try std.testing.expectEqual(model.visible(active, a, s), try db.get_storage(a_address, s));
+                if (model.base[a][s] != 0) base_non_zero += 1;
+                if (model.visible(active, a, s) != 0) visible_non_zero = true;
+                if (model.overlay[a][s] != null) overlay_entries += 1;
+            }
+            try std.testing.expectEqual(base_non_zero, db.storage.nonZeroCount(a_address));
+            try std.testing.expectEqual(visible_non_zero, try db.has_storage(a_address));
+            // The key list names each held slot once.
+            const keys = db.storage.keysOf(a_address);
+            try std.testing.expect(keys.len <= NUM_SLOTS);
+            for (keys, 0..) |key, index| {
+                try std.testing.expect(key < NUM_SLOTS);
+                try std.testing.expect(std.mem.indexOfScalar(u256, keys[0..index], key) == null);
+            }
+        }
+        try std.testing.expectEqual(overlay_entries, db.overlay_storage.count());
+        // A clean overlay holds nothing; a view that is not active shows nothing.
+        if (db.overlayIsClean()) try std.testing.expectEqual(@as(usize, 0), db.overlay_storage.count());
+        if (!active) try std.testing.expectEqual(@as(usize, 0), overlay_entries);
+    }
+}
+
+const slot_store_corpus: []const []const u8 = &.{
+    &.{},
+    &.{ 0, 0, 1, 0, 0, 2, 0, 0, 3, 3, 0, 0 }, // writes, a zero write, then clear
+    &.{ 0, 1, 1, 4, 0, 0, 0, 1, 3, 0, 1, 2, 5, 0, 0, 0, 1, 4 }, // a view shadows and is discarded
+    &.{ 6, 0, 0, 0, 2, 1, 4, 0, 0, 0, 2, 2, 3, 2, 0, 5, 0, 0, 7, 0, 0 }, // snapshot open across a view
+    &.{ 0, 3, 1, 0, 3, 2, 6, 0, 0, 3, 3, 0, 7, 0, 0, 6, 0, 0, 3, 3, 0, 8, 0, 0 }, // clear under revert and commit
+    &.{ 4, 0, 0, 6, 0, 0, 0, 4, 1, 3, 4, 0, 7, 0, 0, 5, 0, 0, 4, 0, 0, 5, 0, 0 }, // revert inside a view, re-enter
+    &.{ 6, 0, 0, 4, 0, 0, 0, 5, 1, 5, 0, 0, 4, 0, 0, 0, 5, 2, 7, 0, 0, 5, 0, 0 }, // revert past a discarded view
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{},
     &.{ 0, 0, 10, 4, 0, 40, 6, 0, 0, 1, 0, 99, 4, 0, 50, 7, 0, 0 },
@@ -322,6 +466,20 @@ test "fuzz journal O(1) original storage index vs brute-force log under nested r
 
 test "fuzz EIP-2929 access list warm/cold gas accounting and cloning" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzAccessListWarmCold), .{ .corpus = seed_corpus });
+}
+
+test "fuzz slot store counts, zeroSlots, overlay shadowing and overlay dirtiness" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSlotStoreAndOverlayDirtiness), .{ .corpus = slot_store_corpus });
+}
+
+test "storage_db: slot store model holds for pseudo-random operation streams" {
+    var prng = std.Random.DefaultPrng.init(0x736c6f74);
+    const random = prng.random();
+    var input: [600]u8 = undefined;
+    for (0..40) |_| {
+        random.bytes(&input);
+        try fuzzSlotStoreAndOverlayDirtiness({}, &input);
+    }
 }
 
 // Found by `zig build fuzz-campaign` (seed 1795676221327508486, iteration 47):

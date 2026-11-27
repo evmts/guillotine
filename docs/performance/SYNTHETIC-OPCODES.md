@@ -57,6 +57,8 @@ pub const OpcodeSynthetic = enum(u8) {
 
     // Schedule-only items (no bytecode instruction)
     BLOCK_BEGIN = 0xCE,            // Charges a fall-through basic block's gas, checks its stack
+                                   // (after GAS, CALL*, CREATE*, SSTORE and a dynamic JUMPI;
+                                   // static conditional jumps enter that block themselves)
     INVALID_JUMP_TARGET = 0xCF,    // Where a static jump to a non-JUMPDEST lands
 };
 ```
@@ -139,14 +141,16 @@ pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!n
 
 ```zig
 // src/instructions/handlers_advanced_synthetic.zig
-// ISZERO + PUSH target + JUMPI. cursor[1] holds the statically resolved target.
+// ISZERO + PUSH target + JUMPI. cursor[1] holds the statically resolved target,
+// cursor[2] the target block's metadata and cursor[3] the fall-through block's.
+// Either way the handler enters the successor block itself.
 pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_cc) ExitCode {
     var s = N.StackView.init(sp, t0, t1, t2, t3);
     N.before(self, .ISZERO_JUMPI, cursor, s, gas);
     const value = s.pop_unsafe();
-    if (value != 0) return N.next(self, .ISZERO_JUMPI, cursor, s, gas);
+    if (value != 0) return Jump.fallThroughStaticJump(self, .ISZERO_JUMPI, cursor, cursor[3].jump_dest, s, gas);
     const target: [*]const Dispatch.Item = @ptrCast(@alignCast(cursor[1].jump_static.dispatch));
-    return N.jump(self, .ISZERO_JUMPI, target, s, gas);
+    return Jump.takeStaticJump(self, .ISZERO_JUMPI, target, cursor[2].jump_dest, s, gas);
 }
 ```
 

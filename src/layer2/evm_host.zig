@@ -1050,11 +1050,11 @@ test "checkpoint composes with Evm.call snapshots and refuses foreign snapshots"
     try testing.expectEqual(deposits.Outcome.success, result.outcome);
     try testing.expectEqual(@as(usize, 1), db.snapshot_depth());
     try testing.expectEqual(@as(u256, 1), try db.get_storage(target.bytes, 0));
-    try testing.expectEqual(@as(?usize, 1), db.storage_slot_counts.get(target.bytes));
+    try testing.expectEqual(@as(usize, 1), db.storage.nonZeroCount(target.bytes));
     host.rollback(token);
     try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
     try testing.expectEqual(@as(u256, 0), try db.get_storage(target.bytes, 0));
-    try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(target.bytes));
+    try testing.expectEqual(@as(usize, 0), db.storage.nonZeroCount(target.bytes));
     try testing.expectEqual(@as(u64, 0), try db.get_nonce(sender.bytes));
     try testing.expectEqual(ETHER, try db.get_balance(sender.bytes));
 }
@@ -1099,33 +1099,33 @@ test "rollback restores storage slot counts: re-set and clear after rollback doe
     // (1) Set slot 1 non-zero under a checkpoint.
     const first = try host.checkpoint();
     try db.set_storage(address.bytes, 1, 11);
-    try testing.expectEqual(@as(?usize, 1), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 1), db.storage.nonZeroCount(address.bytes));
     // (2) Roll back: the slot and its count return to zero.
     host.rollback(first);
     try testing.expectEqual(@as(u256, 0), try db.get_storage(address.bytes, 1));
     try testing.expect(!(try db.has_storage(address.bytes)));
     // (3) Set the same slot non-zero again.
     try db.set_storage(address.bytes, 1, 12);
-    try testing.expectEqual(@as(?usize, 1), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 1), db.storage.nonZeroCount(address.bytes));
     // (4) Clear it to zero.
     try db.set_storage(address.bytes, 1, 0);
     // (5) Count and state agree.
-    try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 0), db.storage.nonZeroCount(address.bytes));
     try testing.expect(!(try db.has_storage(address.bytes)));
 
     // A slot that was non-zero before the checkpoint and cleared under it: the
     // rollback must restore its count, or clearing it again underflows the count.
     try db.set_storage(address.bytes, 2, 22);
-    try testing.expectEqual(@as(?usize, 1), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 1), db.storage.nonZeroCount(address.bytes));
     const second = try host.checkpoint();
     try db.set_storage(address.bytes, 2, 0);
-    try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 0), db.storage.nonZeroCount(address.bytes));
     host.rollback(second);
     try testing.expectEqual(@as(u256, 22), try db.get_storage(address.bytes, 2));
-    try testing.expectEqual(@as(?usize, 1), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 1), db.storage.nonZeroCount(address.bytes));
     try db.set_storage(address.bytes, 2, 23);
     try db.set_storage(address.bytes, 2, 0);
-    try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(address.bytes));
+    try testing.expectEqual(@as(usize, 0), db.storage.nonZeroCount(address.bytes));
     try testing.expect(!(try db.has_storage(address.bytes)));
     try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
 }

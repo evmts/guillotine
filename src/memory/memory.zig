@@ -59,16 +59,54 @@ pub fn Memory(config: MemoryConfig) type {
         pub const MEMORY_LIMIT = config.memory_limit;
         pub const is_owned = config.owned;
 
+        /// True when this type keeps the address and size of its bytes inline
+        /// (`MemoryConfig.flat`).
+        pub const is_flat = config.flat;
+
+        /// Inline copy of where this memory's bytes are: `data` is the address of
+        /// byte 0 (the buffer's start plus the checkpoint) and `len` the number of
+        /// bytes past the checkpoint. Empty unless `is_flat`. `sync` refreshes it.
+        const Flat = if (is_flat) struct { data: [*]u8, len: usize } else struct {};
+
+        flat: Flat,
         checkpoint: u32,
         buffer_ptr: *std.ArrayList(u8),
 
+        /// Words a `Memory` value takes: two, plus the two of the inline copy.
+        pub const size_in_words = if (is_flat) 4 else 2;
+
         comptime {
-            if (@sizeOf(Self) != 2 * @sizeOf(usize)) {
+            if (@sizeOf(Self) != size_in_words * @sizeOf(usize)) {
                 @compileError(std.fmt.comptimePrint(
                     "Memory must remain compact ({d} bytes), found {d}",
-                    .{ 2 * @sizeOf(usize), @sizeOf(Self) },
+                    .{ size_in_words * @sizeOf(usize), @sizeOf(Self) },
                 ));
             }
+        }
+
+        /// Refresh the inline copy from the buffer. Every function that can change
+        /// the buffer's address or length ends with it. A no-op unless `is_flat`.
+        inline fn sync(self: *Self) void {
+            if (comptime !is_flat) return;
+            const items = self.buffer_ptr.items;
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            if (items.len <= checkpoint_usize) {
+                // No byte is addressable, so `data` is never dereferenced.
+                self.flat = .{ .data = items.ptr, .len = 0 };
+                return;
+            }
+            self.flat = .{ .data = items.ptr + checkpoint_usize, .len = items.len - checkpoint_usize };
+        }
+
+        /// A view of `buffer_ptr` starting at `checkpoint`, with its inline copy set.
+        inline fn view(buffer_ptr: *std.ArrayList(u8), checkpoint: u32) Self {
+            var self = Self{
+                .flat = if (comptime is_flat) .{ .data = buffer_ptr.items.ptr, .len = 0 } else .{},
+                .checkpoint = checkpoint,
+                .buffer_ptr = buffer_ptr,
+            };
+            self.sync();
+            return self;
         }
 
         pub fn init(allocator: std.mem.Allocator) !Self {
@@ -78,10 +116,7 @@ pub fn Memory(config: MemoryConfig) type {
                 buffer_ptr.* = std.ArrayList(u8).empty;
                 errdefer buffer_ptr.deinit(allocator);
                 try buffer_ptr.ensureTotalCapacity(allocator, INITIAL_CAPACITY);
-                return Self{
-                    .checkpoint = 0,
-                    .buffer_ptr = buffer_ptr,
-                };
+                return view(buffer_ptr, 0);
             } else {
                 @compileError("Cannot call init() on borrowed memory type. Use init_borrowed() instead.");
             }
@@ -90,10 +125,7 @@ pub fn Memory(config: MemoryConfig) type {
         pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: u32) !Self {
             // For backward compatibility on owned memory types, ignore ownership
             // and return borrowed-like behavior.
-            return Self{
-                .checkpoint = checkpoint,
-                .buffer_ptr = buffer_ptr,
-            };
+            return view(buffer_ptr, checkpoint);
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -109,6 +141,9 @@ pub fn Memory(config: MemoryConfig) type {
             .memory_limit = config.memory_limit,
             .owned = false,
         }) {
+            // A child grows the buffer it shares with its parent, which the parent's
+            // inline copy would not see.
+            if (comptime is_flat) @compileError("a flat Memory is its buffer's only user; it cannot have child views");
             // Children are always borrowed memory types
             const BorrowedMemType = Memory(.{
                 .initial_capacity = config.initial_capacity,
@@ -116,6 +151,7 @@ pub fn Memory(config: MemoryConfig) type {
                 .owned = false,
             });
             return BorrowedMemType{
+                .flat = .{},
                 .checkpoint = std.math.cast(u32, self.buffer_ptr.*.items.len) orelse return MemoryError.MemoryOverflow,
                 .buffer_ptr = self.buffer_ptr,
             };
@@ -123,6 +159,7 @@ pub fn Memory(config: MemoryConfig) type {
 
         // Internal size calculation without locking
         inline fn size_internal(self: *const Self) usize {
+            if (comptime is_flat) return self.flat.len;
             const total = self.buffer_ptr.*.items.len;
             const checkpoint_usize = @as(usize, self.checkpoint);
             if (total <= checkpoint_usize) return 0;
@@ -138,6 +175,16 @@ pub fn Memory(config: MemoryConfig) type {
         /// whole 32-byte word. Any size whose rounded end overflows `usize` or exceeds
         /// `MEMORY_LIMIT` returns `MemoryOverflow` and leaves memory unchanged.
         pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: usize) !void {
+            if (comptime is_flat) {
+                // Already large enough: nothing to grow and nothing to refresh.
+                if (new_size <= self.flat.len) return;
+            }
+            try self.growBuffer(allocator, new_size);
+            self.sync();
+        }
+
+        /// `ensure_capacity` on the buffer itself.
+        inline fn growBuffer(self: *Self, allocator: std.mem.Allocator, new_size: usize) !void {
             const checkpoint_usize = @as(usize, self.checkpoint);
             // EVM memory only ever grows in whole 32-byte words (MSIZE is a multiple of 32).
             const rounded, const round_overflow = @addWithOverflow(new_size, 31);
@@ -298,26 +345,59 @@ pub fn Memory(config: MemoryConfig) type {
             return bytes;
         }
 
-        /// Pointer to the 32-byte word at `offset` when it lies entirely inside the
-        /// current memory, so reading or writing it needs no expansion and costs no
-        /// expansion gas. Returns null otherwise; the caller then takes the general path.
-        pub inline fn word_ptr_in_bounds(self: *const Self, offset: u256) ?*[WORD_SIZE]u8 {
+        /// True when the 32-byte word at `offset` lies entirely inside the current
+        /// memory, so reading or writing it needs no expansion and costs no expansion
+        /// gas. When false the caller takes the general path.
+        ///
+        /// A flat memory decides this with one comparison against its own `len`: no
+        /// load through `buffer_ptr` and no checkpoint addition. `len -| 31` is the
+        /// number of offsets at which a whole word fits, and zero for a memory
+        /// shorter than a word.
+        pub inline fn word_in_bounds(self: *const Self, offset: u256) bool {
+            if (comptime is_flat) return offset < self.flat.len -| (WORD_SIZE - 1);
             const items = self.buffer_ptr.*.items;
             const checkpoint_usize = @as(usize, self.checkpoint);
-            if (items.len < checkpoint_usize + WORD_SIZE) return null;
-            if (offset > items.len - checkpoint_usize - WORD_SIZE) return null;
-            const offset_usize: usize = @intCast(offset);
-            return @ptrCast(items.ptr + checkpoint_usize + offset_usize);
+            if (items.len < checkpoint_usize + WORD_SIZE) return false;
+            return offset <= items.len - checkpoint_usize - WORD_SIZE;
+        }
+
+        /// The word at `offset`, which `word_in_bounds` has accepted. A flat memory
+        /// indexes from its own `data`. Asking first and fetching second, instead
+        /// of returning an optional pointer, spares the caller a null test.
+        pub inline fn word_ptr_unchecked(self: *const Self, offset: u256) *[WORD_SIZE]u8 {
+            // An accepted offset is below the memory's length, so no bit is lost.
+            const offset_usize: usize = @truncate(offset);
+            if (comptime is_flat) return @ptrCast(self.flat.data + offset_usize);
+            return @ptrCast(self.buffer_ptr.*.items.ptr + @as(usize, self.checkpoint) + offset_usize);
+        }
+
+        /// True when the byte at `offset` lies inside the current memory.
+        pub inline fn byte_in_bounds(self: *const Self, offset: u256) bool {
+            if (comptime is_flat) return offset < self.flat.len;
+            const items = self.buffer_ptr.*.items;
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            if (items.len <= checkpoint_usize) return false;
+            return offset < items.len - checkpoint_usize;
+        }
+
+        /// The byte at `offset`, which `byte_in_bounds` has accepted.
+        pub inline fn byte_ptr_unchecked(self: *const Self, offset: u256) *u8 {
+            const offset_usize: usize = @truncate(offset);
+            if (comptime is_flat) return &self.flat.data[offset_usize];
+            return &self.buffer_ptr.*.items.ptr[@as(usize, self.checkpoint) + offset_usize];
+        }
+
+        /// Pointer to the 32-byte word at `offset` when it lies entirely inside the
+        /// current memory, null otherwise.
+        pub inline fn word_ptr_in_bounds(self: *const Self, offset: u256) ?*[WORD_SIZE]u8 {
+            if (!self.word_in_bounds(offset)) return null;
+            return self.word_ptr_unchecked(offset);
         }
 
         /// Pointer to the byte at `offset` when it lies inside the current memory.
         pub inline fn byte_ptr_in_bounds(self: *const Self, offset: u256) ?*u8 {
-            const items = self.buffer_ptr.*.items;
-            const checkpoint_usize = @as(usize, self.checkpoint);
-            if (items.len <= checkpoint_usize) return null;
-            if (offset >= items.len - checkpoint_usize) return null;
-            const offset_usize: usize = @intCast(offset);
-            return &items.ptr[checkpoint_usize + offset_usize];
+            if (!self.byte_in_bounds(offset)) return null;
+            return self.byte_ptr_unchecked(offset);
         }
 
         pub fn set_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u256) !void {
@@ -361,6 +441,14 @@ pub fn Memory(config: MemoryConfig) type {
                 // memory grows) and `validate` bounds MEMORY_LIMIT by maxInt(u32).
                 self.checkpoint = @as(u32, @intCast(self.buffer_ptr.*.items.len));
             }
+            self.sync();
+        }
+
+        /// Refresh the inline copy after the buffer was changed without going
+        /// through this value (a test that edits `buffer_ptr` directly). A no-op
+        /// unless `is_flat`.
+        pub fn resync(self: *Self) void {
+            self.sync();
         }
 
         fn bytes_to_u256(bytes: []const u8) u256 {
@@ -945,4 +1033,130 @@ test "Memory accepts usize offsets up to the limit" {
     try std.testing.expectEqual(@as(usize, 1024), memory.size());
     try std.testing.expectEqual(@as(u256, 0xBEEF), try memory.get_u256_evm(allocator, offset));
     try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_byte_evm(allocator, 1024, 1));
+}
+
+test "flat memory: in-bounds pointers match the buffer-backed view at every boundary" {
+    const allocator = std.testing.allocator;
+    const Flat = Memory(.{ .initial_capacity = 64, .memory_limit = 1 << 20, .flat = true });
+    const Plain = Memory(.{ .initial_capacity = 64, .memory_limit = 1 << 20 });
+    try std.testing.expectEqual(4 * @sizeOf(usize), @sizeOf(Flat));
+    try std.testing.expectEqual(2 * @sizeOf(usize), @sizeOf(Plain));
+
+    var flat = try Flat.init(allocator);
+    defer flat.deinit(allocator);
+    var plain = try Plain.init(allocator);
+    defer plain.deinit(allocator);
+
+    // Empty memory: nothing is in bounds.
+    try std.testing.expect(flat.word_ptr_in_bounds(0) == null);
+    try std.testing.expect(flat.byte_ptr_in_bounds(0) == null);
+    try std.testing.expectEqual(@as(usize, 0), flat.size());
+
+    // Grow in steps, some of which move the buffer, and compare at each size.
+    for ([_]usize{ 1, 32, 33, 64, 1000, 4096, 200_000 }) |new_size| {
+        try flat.ensure_capacity(allocator, new_size);
+        try plain.ensure_capacity(allocator, new_size);
+        const len = plain.size();
+        try std.testing.expectEqual(len, flat.size());
+        try std.testing.expectEqual(@as(usize, 0), len % 32);
+
+        // Wrapping keeps the offsets just below `len - 32` meaningful for a
+        // one-word memory: they become huge and must be out of bounds.
+        const wide_len: u256 = len;
+        const offsets = [_]u256{
+            0,
+            1,
+            31,
+            wide_len -% 33,
+            wide_len - 32,
+            wide_len - 31,
+            wide_len - 1,
+            wide_len,
+            wide_len + 1,
+            1 << 32,
+            1 << 64,
+            (1 << 64) + wide_len - 32,
+            std.math.maxInt(u256),
+        };
+        for (offsets) |offset| {
+            const plain_word = plain.word_ptr_in_bounds(offset);
+            const flat_word = flat.word_ptr_in_bounds(offset);
+            try std.testing.expectEqual(plain_word != null, flat_word != null);
+            try std.testing.expectEqual(offset <= len - 32, flat_word != null);
+            if (flat_word) |word| {
+                // The pointer addresses this memory's own bytes at `offset`.
+                const index: usize = @intCast(offset);
+                try std.testing.expectEqual(@intFromPtr(flat.buffer_ptr.items.ptr) + index, @intFromPtr(word));
+            }
+
+            const plain_byte = plain.byte_ptr_in_bounds(offset);
+            const flat_byte = flat.byte_ptr_in_bounds(offset);
+            try std.testing.expectEqual(plain_byte != null, flat_byte != null);
+            try std.testing.expectEqual(offset < len, flat_byte != null);
+            if (flat_byte) |byte| {
+                const index: usize = @intCast(offset);
+                byte.* = @truncate(index *% 7 +% 1);
+                try std.testing.expectEqual(byte.*, flat.buffer_ptr.items[index]);
+            }
+        }
+
+        // A word written through the pointer is what the checked reader returns.
+        const last_word = flat.word_ptr_in_bounds(len - 32).?;
+        storeWordBigEndian(last_word, 0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20);
+        try std.testing.expectEqual(
+            @as(u256, 0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20),
+            try flat.get_u256(len - 32),
+        );
+    }
+
+    // Asking for less than the memory holds changes nothing.
+    const before = flat.size();
+    try flat.ensure_capacity(allocator, 64);
+    try std.testing.expectEqual(before, flat.size());
+
+    flat.clear();
+    try std.testing.expectEqual(@as(usize, 0), flat.size());
+    try std.testing.expect(flat.word_ptr_in_bounds(0) == null);
+    try std.testing.expect(flat.byte_ptr_in_bounds(0) == null);
+
+    // Memory grown again after a clear starts zeroed.
+    try flat.ensure_capacity(allocator, 64);
+    try std.testing.expectEqual(@as(u256, 0), loadWordBigEndian(flat.word_ptr_in_bounds(32).?));
+}
+
+test "flat memory: a view over an existing buffer starts at its checkpoint" {
+    const allocator = std.testing.allocator;
+    const Flat = Memory(.{ .initial_capacity = 64, .memory_limit = 1 << 20, .flat = true });
+
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(allocator);
+    try list.appendNTimes(allocator, 0xAB, 96);
+
+    var view = try Flat.init_borrowed(&list, 32);
+    try std.testing.expectEqual(@as(usize, 64), view.size());
+    try std.testing.expectEqual(@intFromPtr(&list.items[32]), @intFromPtr(view.word_ptr_in_bounds(0).?));
+    try std.testing.expectEqual(@intFromPtr(&list.items[64]), @intFromPtr(view.word_ptr_in_bounds(32).?));
+    try std.testing.expect(view.word_ptr_in_bounds(33) == null);
+    try std.testing.expectEqual(@intFromPtr(&list.items[95]), @intFromPtr(view.byte_ptr_in_bounds(63).?));
+    try std.testing.expect(view.byte_ptr_in_bounds(64) == null);
+
+    // Growth through the view keeps the checkpoint as byte 0.
+    try view.ensure_capacity(allocator, 100);
+    try std.testing.expectEqual(@as(usize, 128), view.size());
+    try std.testing.expectEqual(@as(usize, 160), list.items.len);
+    try std.testing.expectEqual(@intFromPtr(&list.items[32]), @intFromPtr(view.word_ptr_in_bounds(0).?));
+    try std.testing.expectEqual(@as(u8, 0), view.byte_ptr_in_bounds(127).?.*);
+
+    // An edit made behind the view's back is picked up by `resync`.
+    list.items.len = 40;
+    view.resync();
+    try std.testing.expectEqual(@as(usize, 8), view.size());
+    try std.testing.expect(view.word_ptr_in_bounds(0) == null);
+    try std.testing.expect(view.byte_ptr_in_bounds(7) != null);
+    try std.testing.expect(view.byte_ptr_in_bounds(8) == null);
+
+    // A checkpoint at or past the end of the buffer is an empty memory.
+    const empty = try Flat.init_borrowed(&list, 40);
+    try std.testing.expectEqual(@as(usize, 0), empty.flat.len);
+    try std.testing.expect(empty.byte_ptr_in_bounds(0) == null);
 }

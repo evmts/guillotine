@@ -752,10 +752,13 @@ pub fn getDebugInfo(
                     const schedule_base = @intFromPtr(schedule_items.ptr);
                     if (target_ptr >= schedule_base and target_ptr < schedule_base + schedule_items.len * @sizeOf(Item)) {
                         target_idx = (target_ptr - schedule_base) / @sizeOf(Item);
+                        // A static jump lands on the first instruction after its
+                        // JUMPDEST, which sits `jumpdest_items` before the target.
+                        const jumpdest_idx = target_idx.? -| FrameType.Dispatch.jumpdest_items;
                         // Look up PC from our map (reverse lookup)
                         var pc_iter = debug_info.pc_to_schedule_map.iterator();
                         while (pc_iter.next()) |entry| {
-                            if (entry.value_ptr.* == target_idx.?) {
+                            if (entry.value_ptr.* == jumpdest_idx) {
                                 target_pc = entry.key_ptr.*;
                                 break;
                             }
@@ -790,7 +793,9 @@ pub fn getDebugInfo(
                         try addFormattedValidationError(&debug_info, schedule_idx, bytecode_pc, "Jump target mismatch", "PC=0x{x}", pushed_target, target_pc orelse 0);
                     }
                 }
-                schedule_idx += 1;
+                // The target cursor, the target block's metadata and, for JUMPI,
+                // the fall-through block's metadata.
+                schedule_idx += if (op_data == .push_jumpi_fusion) 3 else 2;
             },
 
             // Handle other fusion types
@@ -895,8 +900,11 @@ pub fn getDebugInfo(
                 schedule_idx += 1;
             },
 
-            // PC and ISZERO_JUMPI occupy a handler and one metadata item.
-            .pc, .iszero_jumpi => schedule_idx += 2,
+            // PC occupies a handler and one metadata item.
+            .pc => schedule_idx += 2,
+
+            // ISZERO_JUMPI: handler, target cursor and two blocks' metadata.
+            .iszero_jumpi => schedule_idx += 4,
 
             // Dynamic JUMP and JUMPI are a bare handler.
             .jump, .jumpi => schedule_idx += 1,
@@ -904,7 +912,9 @@ pub fn getDebugInfo(
 
         // The builder inserts BLOCK_BEGIN and its jump_dest metadata after an
         // instruction that ends a basic block by falling through.
-        if (try FrameType.Dispatch.blockBeginFollows(bytecode_iter.bytecode, bytecode_pc, bytecode_iter.pc)) {
+        // A static conditional jump enters its fall-through block itself.
+        const enters_own_successor = op_data == .push_jumpi_fusion or op_data == .iszero_jumpi;
+        if (!enters_own_successor and try FrameType.Dispatch.blockBeginFollows(bytecode_iter.bytecode, bytecode_pc, bytecode_iter.pc)) {
             if (schedule_idx + 1 < schedule_items.len) {
                 const handler_item = schedule_items[schedule_idx];
                 if (kindOf(Item, handler_item, .opcode_handler) == .opcode_handler) {

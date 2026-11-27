@@ -90,8 +90,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
                 // Handle fusion opcodes first (only if fusions are enabled)
-                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) fused: {
-                    const fusion_start = iterator.pc;
+                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) {
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
                     // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
@@ -114,12 +113,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             iterator.pc += 1;
                         },
                     }
-                    // A fusion must not run an opcode this fork leaves undefined (for
-                    // example PUSH0 before Shanghai); decode such ranges one by one.
-                    if (!iterator.bytecode.opcodesDefined(fusion_start, iterator.pc)) {
-                        iterator.pc = fusion_start;
-                        break :fused;
-                    }
+                    // A fusion must not run an opcode this fork leaves undefined. Every
+                    // fusion is built from `fusion_constituents`, which the `comptime`
+                    // block below proves defined on the configured fork, so the range
+                    // is not scanned again here.
                     return fusion_data;
                 }
 
@@ -297,6 +294,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         allocator: std.mem.Allocator,
         // Packed bitmap (4 bits per byte position) for efficient storage
         packed_bitmap: []PackedBits,
+        /// Number of instructions the validation pass found. The schedule builder
+        /// sizes its item list from it.
+        opcode_count: usize = 0,
+        /// Number of JUMPDESTs the validation pass found. The schedule builder sizes
+        /// its jump table from it.
+        jumpdest_count: usize = 0,
 
         pub fn init(allocator: std.mem.Allocator, code: []const u8) ValidationError!Self {
             return initWithTracer(allocator, code, null);
@@ -417,16 +420,41 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             return OpcodeData{ .push_add_dup1 = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
         }
 
-        /// True when every instruction starting in `[start, end)` is defined on the
-        /// configured fork.
-        fn opcodesDefined(self: *const Self, start: PcType, end: PcType) bool {
-            const stop = @min(@as(usize, end), self.packed_bitmap.len);
-            var pc: usize = start;
-            while (pc < stop) : (pc += 1) {
-                if (!self.packed_bitmap[pc].is_op_start) continue;
-                if (!fork_gas.isOpcodeDefined(cfg.hardfork, self.runtime_code[pc])) return false;
+        /// Every opcode a fused instruction can contain: the first opcode of a
+        /// fusion candidate (ISZERO or PUSH1-PUSH32, see the validation pass) and
+        /// the opcodes `getFusionData` accepts after it.
+        pub const fusion_constituents = blk: {
+            var opcodes: [32 + 14]u8 = undefined;
+            for (0..32) |index| opcodes[index] = 0x60 + index;
+            const others = [14]u8{
+                0x15, // ISZERO
+                0x01, // ADD
+                0x02, // MUL
+                0x03, // SUB
+                0x04, // DIV
+                0x16, // AND
+                0x17, // OR
+                0x18, // XOR
+                0x51, // MLOAD
+                0x52, // MSTORE
+                0x53, // MSTORE8
+                0x56, // JUMP
+                0x57, // JUMPI
+                0x80, // DUP1
+            };
+            for (others, 0..) |opcode, index| opcodes[32 + index] = opcode;
+            break :blk opcodes;
+        };
+
+        comptime {
+            // The iterator emits a fusion without checking its opcodes against the
+            // fork again. That is sound only while every constituent is defined on
+            // every fork this type can be configured for.
+            for (fusion_constituents) |opcode| {
+                if (!fork_gas.isOpcodeDefined(cfg.hardfork, opcode)) {
+                    @compileError(std.fmt.comptimePrint("fusion constituent 0x{x:0>2} is undefined on the configured fork", .{opcode}));
+                }
             }
-            return true;
         }
 
         /// Get fusion data for a bytecode position marked as fusion candidate
@@ -666,18 +694,17 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             self.packed_bitmap = self.allocator.alloc(PackedBits, N) catch return error.OutOfMemory;
             cleanup_state.packed_bitmap_allocated = true;
             // Initialize all packed bits to false
-            for (self.packed_bitmap) |*packed_bits| {
-                packed_bits.* = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
-            }
+            @memset(self.packed_bitmap, PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false });
+
+            // PUSH values are decoded here only to describe fusion opportunities to a
+            // tracer. Without one the decode (up to 32 bytes per PUSH) is skipped: the
+            // iterator decodes the value again when it builds the schedule.
+            const describes_fusions = comptime fusions_enabled and @TypeOf(tracer) != @TypeOf(null);
 
             // Single pass: validate opcodes, mark bitmaps, detect JUMPDEST and fusions
-            // Track state for immediate jump validation
+            // Track state for the tracer's description of PUSH + PUSH + JUMPI
             var last_push_value: ?u256 = null;
             var last_push_end: PcType = 0;
-
-            // Collect immediate jumps to validate after first pass
-            var immediate_jumps = std.ArrayList(PcType).empty;
-            defer immediate_jumps.deinit(self.allocator);
 
             var opcode_count: usize = 0;
             var jumpdest_count: usize = 0;
@@ -779,11 +806,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         }
                     }
 
-                    // Extract push value for fusion detection (only if fusions enabled)
-                    var push_value: u256 = 0;
-                    if (comptime fusions_enabled) {
-                        push_value = self.pushValuePadded(i, n);
-                    }
+                    // Extract push value for the tracer's fusion descriptions
+                    const push_value: u256 = if (describes_fusions) self.pushValuePadded(i, n) else 0;
 
                     // Mark push data bytes
                     var j: PcType = 0;
@@ -794,9 +818,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                     const push_end = i + 1 + available;
 
-                    // ONLY check for immediate jump patterns if fusions are enabled
-                    // This is for optimization purposes, not correctness validation
-                    if (comptime fusions_enabled) {
+                    // ONLY describe immediate jump patterns to a tracer
+                    // This is for visibility, not correctness validation
+                    if (describes_fusions) {
                         if (push_end < validate_up_to) {
                             const next_op = self.runtime_code[push_end];
 
@@ -831,13 +855,15 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     i = push_end;
                 } else {
                     // Reset state when we see non-PUSH opcodes (unless it's JUMPI)
-                    if (op != @backingInt(Opcode.JUMPI) and op != @backingInt(Opcode.JUMP)) {
+                    if (describes_fusions and op != @backingInt(Opcode.JUMPI) and op != @backingInt(Opcode.JUMP)) {
                         last_push_value = null;
                         last_push_end = 0;
                     }
                     i += 1;
                 }
             }
+            self.opcode_count = opcode_count;
+            self.jumpdest_count = jumpdest_count;
             // Note: We do NOT validate immediate jumps during bytecode initialization because:
             // 1. Not all PUSH+JUMP patterns in bytecode are actually executed (dead code, data sections)
             // 2. The EVM spec requires jump validation at execution time, not initialization time

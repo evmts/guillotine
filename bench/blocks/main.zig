@@ -513,7 +513,7 @@ fn resetEvmTxState(vm: *EvmType) void {
     vm.host_failure = null;
     vm.frame_memory.trim();
     vm.resetTouched();
-    vm.call_arena.resetRetainCapacity() catch {};
+    vm.call_arena.resetRetainCapacity();
 }
 
 fn runSystemCall(vm: *EvmType, target: Address, input: []const u8) !void {

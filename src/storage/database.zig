@@ -39,8 +39,16 @@
 //! a per-address index of the keys it holds. `clear_account_storage`,
 //! `delete_account` and `has_storage` (EIP-7610) use the index, so they cost
 //! O(slots of the account) in every layer. Storage must be written through
-//! `set_storage`, which keeps the index and the per-address count of non-zero
-//! base slots (`storage_slot_counts`) exact.
+//! `set_storage`, which keeps the index and its per-address count of non-zero
+//! slots exact.
+//!
+//! ## Ephemeral view and dirtiness
+//!
+//! `simulate()` brackets a call with `begin_ephemeral_view` and
+//! `discard_ephemeral_view`. Each overlay table records whether anything was
+//! written to it since it was last cleared, so entering and leaving a view
+//! clears only the tables a call wrote and skips the undo-log scan when the
+//! overlay is clean. `clear_transient_storage` uses the same record.
 //!
 //! ## EIP-7702 delegation designators
 //!
@@ -85,6 +93,7 @@ const EMPTY_STORAGE_ROOT = [_]u8{
 };
 
 const slot_store = @import("slot_store.zig");
+const slot_hash = @import("slot_hash.zig");
 const SlotKey = slot_store.SlotKey;
 pub const SlotStore = slot_store.SlotStore;
 
@@ -105,17 +114,14 @@ pub const Database = struct {
     /// Persistent storage with its per-address index. Write it through `set_storage`.
     storage: SlotStore,
     transient_storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
-    code_storage: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    code_storage: CodeMap,
     /// Open snapshots, oldest first. Each one is a position in `undo_log`.
     snapshots: std.ArrayList(Snapshot),
     /// Previous values of every write made while a snapshot is open, oldest first.
     undo_log: std.ArrayList(UndoEntry),
-    /// Number of non-zero slots each address holds in base `storage` (EIP-7610).
-    /// An address keeps its entry once it has one, so undo never has to insert.
-    storage_slot_counts: std.HashMap([20]u8, usize, ArrayHashContext, std.hash_map.default_max_load_percentage),
     /// Delegate of every designator `set_code` has seen, by code hash. The mapping
     /// is a property of the code's content, so entries are never undone or removed.
-    delegation_targets: std.HashMap([32]u8, [20]u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    delegation_targets: std.HashMap([32]u8, [20]u8, CodeHashContext, std.hash_map.default_max_load_percentage),
     next_snapshot_id: u64,
     allocator: std.mem.Allocator,
     // Ephemeral overlay state (active only during simulate)
@@ -130,7 +136,28 @@ pub const Database = struct {
     /// Overlay storage. A zero value hides a non-zero base slot.
     overlay_storage: SlotStore,
     overlay_transient: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
-    overlay_code: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    overlay_code: CodeMap,
+    /// Which overlay tables have been written since they were last cleared.
+    overlay_dirty: OverlayDirty = .{},
+    /// True when base transient storage has been written since it was last cleared.
+    transient_dirty: bool = false,
+
+    /// Overlay tables written since the last `clearOverlay`. A clean table holds
+    /// nothing and no undo entry points into it.
+    const OverlayDirty = packed struct(u8) {
+        accounts: bool = false,
+        storage: bool = false,
+        transient: bool = false,
+        code: bool = false,
+        _: u4 = 0,
+
+        fn any(self: OverlayDirty) bool {
+            return @as(u8, @bitCast(self)) != 0;
+        }
+    };
+
+    /// Code by code hash.
+    const CodeMap = std.HashMap([32]u8, []const u8, CodeHashContext, std.hash_map.default_max_load_percentage);
 
     /// Database operation errors
     pub const Error = error{
@@ -202,19 +229,19 @@ pub const Database = struct {
         }
     };
 
-    const StorageKeyContext = struct {
-        pub fn hash(self: @This(), key: StorageKey) u64 {
-            _ = self;
-            var hasher = std.hash.Wyhash.init(0);
-            hasher.update(&key.address);
-            hasher.update(std.mem.asBytes(&key.key));
-            return hasher.final();
+    /// Context for maps keyed by a keccak256 code hash. The key is already
+    /// uniformly distributed, so its first eight bytes are the table hash; the
+    /// full 32 bytes still decide equality.
+    pub const CodeHashContext = struct {
+        pub fn hash(_: @This(), key: [32]u8) u64 {
+            return std.mem.readInt(u64, key[0..8], .little);
         }
-        pub fn eql(self: @This(), a: StorageKey, b: StorageKey) bool {
-            _ = self;
-            return std.mem.eql(u8, &a.address, &b.address) and a.key == b.key;
+        pub fn eql(_: @This(), a: [32]u8, b: [32]u8) bool {
+            return std.mem.eql(u8, &a, &b);
         }
     };
+
+    const StorageKeyContext = slot_store.SlotKeyContext;
 
     /// Initialize a new database
     pub fn init(allocator: std.mem.Allocator) Database {
@@ -223,18 +250,17 @@ pub const Database = struct {
             .accounts = std.HashMap([20]u8, Account, ArrayHashContext, load).init(allocator),
             .storage = SlotStore.init(allocator),
             .transient_storage = std.HashMap(StorageKey, u256, StorageKeyContext, load).init(allocator),
-            .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, load).init(allocator),
+            .code_storage = CodeMap.init(allocator),
             .snapshots = .empty,
             .undo_log = .empty,
-            .storage_slot_counts = std.HashMap([20]u8, usize, ArrayHashContext, load).init(allocator),
-            .delegation_targets = std.HashMap([32]u8, [20]u8, ArrayHashContext, load).init(allocator),
+            .delegation_targets = std.HashMap([32]u8, [20]u8, CodeHashContext, load).init(allocator),
             .next_snapshot_id = 1,
             .allocator = allocator,
             .overlay_active = false,
             .overlay_accounts = std.HashMap([20]u8, ?Account, ArrayHashContext, load).init(allocator),
             .overlay_storage = SlotStore.init(allocator),
             .overlay_transient = std.HashMap(StorageKey, u256, StorageKeyContext, load).init(allocator),
-            .overlay_code = std.HashMap([32]u8, []const u8, ArrayHashContext, load).init(allocator),
+            .overlay_code = CodeMap.init(allocator),
         };
     }
 
@@ -243,10 +269,7 @@ pub const Database = struct {
     /// Safety: Zig's HashMap iterator is stable during iteration because we're only
     /// freeing the memory that the value *points to* (the code slice), not modifying
     /// the HashMap entry itself. The HashMap structure remains unchanged.
-    fn freeAllCodeInMap(
-        self: *Database,
-        code_map: *std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    ) void {
+    fn freeAllCodeInMap(self: *Database, code_map: *CodeMap) void {
         var it = code_map.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.value_ptr.*);
@@ -254,13 +277,29 @@ pub const Database = struct {
     }
 
     /// Drop everything the overlay holds and forget undo entries that point into it.
+    ///
+    /// Only tables written since the last clear are cleared: clearing a hash map
+    /// rewrites its whole metadata array, however little it holds. A table is
+    /// also cleared when it holds entries without being marked (a host wrote the
+    /// field directly). An undo entry for the overlay exists only when an overlay
+    /// table was written, so a clean overlay skips the undo-log scan as well.
     fn clearOverlay(self: *Database) void {
-        self.discardUndoEntriesFor(.overlay);
-        self.overlay_accounts.clearRetainingCapacity();
-        self.overlay_storage.clearRetainingCapacity();
-        self.overlay_transient.clearRetainingCapacity();
-        self.freeAllCodeInMap(&self.overlay_code);
-        self.overlay_code.clearRetainingCapacity();
+        const dirty = self.overlay_dirty;
+        if (dirty.any()) self.discardUndoEntriesFor(.overlay);
+        if (dirty.accounts or self.overlay_accounts.count() != 0) self.overlay_accounts.clearRetainingCapacity();
+        if (dirty.storage or self.overlay_storage.count() != 0) self.overlay_storage.clearRetainingCapacity();
+        if (dirty.transient or self.overlay_transient.count() != 0) self.overlay_transient.clearRetainingCapacity();
+        if (dirty.code or self.overlay_code.count() != 0) {
+            self.freeAllCodeInMap(&self.overlay_code);
+            self.overlay_code.clearRetainingCapacity();
+        }
+        self.overlay_dirty = .{};
+    }
+
+    /// True when no overlay table has been written since the overlay was last
+    /// cleared: entering or leaving a view then costs O(1).
+    pub fn overlayIsClean(self: *const Database) bool {
+        return !self.overlay_dirty.any();
     }
 
     pub fn begin_ephemeral_view(self: *Database) void {
@@ -280,7 +319,6 @@ pub const Database = struct {
         self.accounts.deinit();
         self.storage.deinit();
         self.transient_storage.deinit();
-        self.storage_slot_counts.deinit();
         self.delegation_targets.deinit();
 
         // Free all allocated code before deinitializing the hashmap
@@ -337,6 +375,7 @@ pub const Database = struct {
     /// Write `value` into a tombstone-capable account map and record what it replaces.
     fn writeLayeredAccount(self: *Database, map: anytype, layer: Layer, address: [20]u8, value: ?Account) Error!void {
         try self.reserveUndo();
+        if (layer == .overlay) self.overlay_dirty.accounts = true;
         const slot = try map.getOrPut(address);
         const previous: PreviousAccount = if (!slot.found_existing)
             .absent
@@ -348,33 +387,22 @@ pub const Database = struct {
         slot.value_ptr.* = value;
     }
 
-    /// Write a slot into a storage layer and record what it replaces. A base
-    /// write keeps the per-address non-zero count exact.
-    fn writeSlot(self: *Database, store: *SlotStore, layer: Layer, key: StorageKey, value: u256) Error!void {
+    /// Write a slot into a storage layer and record what it replaces. `hash` is
+    /// the slot's `slot_hash`. The store keeps its per-address non-zero count.
+    fn writeSlot(self: *Database, store: *SlotStore, layer: Layer, key: StorageKey, hash: u64, value: u256) Error!void {
         try self.reserveUndo();
-        // The count entry is created before the slot, so a failure here changes nothing.
-        const count: ?*usize = switch (layer) {
-            .base => count: {
-                const entry = try self.storage_slot_counts.getOrPut(key.address);
-                if (!entry.found_existing) entry.value_ptr.* = 0;
-                break :count entry.value_ptr;
-            },
-            .overlay => null,
-        };
-        const previous = try store.put(key, value);
+        if (layer == .overlay) self.overlay_dirty.storage = true;
+        const previous = try store.putHashed(key, hash, value);
         self.recordUndo(.{ .storage = .{ .layer = layer, .key = key, .previous = previous } });
-        if (count) |non_zero| adjustSlotCount(non_zero, previous orelse 0, value);
-    }
-
-    /// Update a non-zero slot count for one slot changing from `before` to `after`.
-    fn adjustSlotCount(count: *usize, before: u256, after: u256) void {
-        if (before == 0 and after != 0) count.* += 1;
-        if (before != 0 and after == 0) count.* -= 1;
     }
 
     /// Write a transient slot and record what it replaces.
     fn writeTransientSlot(self: *Database, map: anytype, layer: Layer, key: StorageKey, value: u256) Error!void {
         try self.reserveUndo();
+        switch (layer) {
+            .base => self.transient_dirty = true,
+            .overlay => self.overlay_dirty.transient = true,
+        }
         const slot = try map.getOrPut(key);
         const previous: ?u256 = if (slot.found_existing) slot.value_ptr.* else null;
         self.recordUndo(.{ .transient = .{ .layer = layer, .key = key, .previous = previous } });
@@ -416,14 +444,7 @@ pub const Database = struct {
                 .overlay => restoreLayeredAccount(&self.overlay_accounts, e.address, e.previous),
             },
             .storage => |e| switch (e.layer) {
-                .base => {
-                    const current = self.storage.get(e.key) orelse 0;
-                    self.storage.restore(e.key, e.previous);
-                    // The address got its count entry when the undone write ran.
-                    if (self.storage_slot_counts.getPtr(e.key.address)) |count| {
-                        adjustSlotCount(count, current, e.previous orelse 0);
-                    }
-                },
+                .base => self.storage.restore(e.key, e.previous),
                 .overlay => self.overlay_storage.restore(e.key, e.previous),
             },
             .transient => |e| switch (e.layer) {
@@ -447,8 +468,8 @@ pub const Database = struct {
     /// The account a read sees at `address`, or null. An in-memory lookup that
     /// cannot fail; `get_account` is the same read behind the database interface.
     pub fn find_account(self: *Database, address: [20]u8) ?Account {
-        // Check overlay first (simulate mode)
-        if (self.overlay_active) {
+        // Check overlay first (simulate mode), skipping clean overlay tables.
+        if (self.overlay_active and self.overlay_dirty.accounts) {
             if (self.overlay_accounts.get(address)) |maybe_acc| {
                 return maybe_acc; // null means deleted in the view
             }
@@ -508,7 +529,7 @@ pub const Database = struct {
 
     /// Check if account exists in the database
     pub fn account_exists(self: *Database, address: [20]u8) bool {
-        if (self.overlay_active) {
+        if (self.overlay_active and self.overlay_dirty.accounts) {
             if (self.overlay_accounts.get(address)) |maybe_acc| {
                 return maybe_acc != null;
             }
@@ -567,21 +588,31 @@ pub const Database = struct {
     /// written. An in-memory lookup that cannot fail; `get_storage` is the same
     /// read behind the database interface.
     pub fn read_storage(self: *Database, address: [20]u8, key: u256) u256 {
+        return self.read_storage_hashed(address, key, slot_hash.hash(address, key));
+    }
+
+    /// `read_storage` for a caller that already has the slot's `slot_hash`.
+    pub fn read_storage_hashed(self: *Database, address: [20]u8, key: u256, hash: u64) u256 {
         const storage_key = StorageKey{ .address = address, .key = key };
-        if (self.overlay_active) {
-            if (self.overlay_storage.get(storage_key)) |v| return v;
+        if (self.overlay_active and self.overlay_dirty.storage) {
+            if (self.overlay_storage.getHashed(storage_key, hash)) |v| return v;
         }
-        return self.storage.get(storage_key) orelse 0;
+        return self.storage.getHashed(storage_key, hash) orelse 0;
     }
 
     /// Set storage value for the given address and key
     pub fn set_storage(self: *Database, address: [20]u8, key: u256, value: u256) Error!void {
+        return self.set_storage_hashed(address, key, slot_hash.hash(address, key), value);
+    }
+
+    /// `set_storage` for a caller that already has the slot's `slot_hash`.
+    pub fn set_storage_hashed(self: *Database, address: [20]u8, key: u256, hash: u64, value: u256) Error!void {
         errdefer self.noteAllocationFailure();
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.overlay_active) {
-            return self.writeSlot(&self.overlay_storage, .overlay, storage_key, value);
+            return self.writeSlot(&self.overlay_storage, .overlay, storage_key, hash, value);
         }
-        try self.writeSlot(&self.storage, .base, storage_key, value);
+        try self.writeSlot(&self.storage, .base, storage_key, hash, value);
     }
 
     /// Set every storage slot of `address` to zero in the state a read sees.
@@ -594,23 +625,29 @@ pub const Database = struct {
         try self.zeroSlots(&self.overlay_storage, .overlay, address);
         // Hide every non-zero base slot the overlay does not already cover. The
         // writes change only the overlay, so the base key slice stays valid.
+        if (self.storage.nonZeroCount(address) == 0) return;
         for (self.storage.keysOf(address)) |key| {
             const storage_key = StorageKey{ .address = address, .key = key };
-            if ((self.storage.get(storage_key) orelse 0) == 0) continue;
-            if (self.overlay_storage.get(storage_key) != null) continue;
-            try self.writeSlot(&self.overlay_storage, .overlay, storage_key, 0);
+            const hash = storage_key.hash();
+            if ((self.storage.getHashed(storage_key, hash) orelse 0) == 0) continue;
+            if (self.overlay_storage.getHashed(storage_key, hash) != null) continue;
+            try self.writeSlot(&self.overlay_storage, .overlay, storage_key, hash, 0);
         }
     }
 
     /// Write zero over every non-zero slot `store` holds for `address`.
+    ///
+    /// The key slice is fetched once. Each write overwrites a key the store
+    /// already holds, which changes neither the key list nor its memory
+    /// (`SlotStore.keysOf`), so the slice stays valid for the whole loop. An
+    /// address without non-zero slots costs one index lookup.
     fn zeroSlots(self: *Database, store: *SlotStore, layer: Layer, address: [20]u8) Error!void {
-        // Overwriting an existing key never changes the key set, but the slice is
-        // fetched again each round so that this does not depend on it.
-        var index: usize = 0;
-        while (index < store.keysOf(address).len) : (index += 1) {
-            const storage_key = StorageKey{ .address = address, .key = store.keysOf(address)[index] };
-            if ((store.get(storage_key) orelse 0) == 0) continue;
-            try self.writeSlot(store, layer, storage_key, 0);
+        if (store.nonZeroCount(address) == 0) return;
+        for (store.keysOf(address)) |key| {
+            const storage_key = StorageKey{ .address = address, .key = key };
+            const hash = storage_key.hash();
+            if ((store.getHashed(storage_key, hash) orelse 0) == 0) continue;
+            try self.writeSlot(store, layer, storage_key, hash, 0);
         }
     }
 
@@ -624,14 +661,12 @@ pub const Database = struct {
                 return true;
             }
         }
-        const base_count = self.storage_slot_counts.get(address) orelse 0;
-        if (!self.overlay_active) return base_count != 0;
+        const base_count = self.storage.nonZeroCount(address);
+        if (!self.overlay_active or !self.overlay_dirty.storage) return base_count != 0;
 
         // The overlay can add slots and can also zero base slots, so a base slot
         // counts only when the overlay does not cover it.
-        for (self.overlay_storage.keysOf(address)) |key| {
-            if ((self.overlay_storage.get(.{ .address = address, .key = key }) orelse 0) != 0) return true;
-        }
+        if (self.overlay_storage.nonZeroCount(address) != 0) return true;
         if (base_count == 0) return false;
         for (self.storage.keysOf(address)) |key| {
             const storage_key = StorageKey{ .address = address, .key = key };
@@ -646,7 +681,7 @@ pub const Database = struct {
     /// Get transient storage value for the given address and key (EIP-1153)
     pub fn get_transient_storage(self: *Database, address: [20]u8, key: u256) Error!u256 {
         const storage_key = StorageKey{ .address = address, .key = key };
-        if (self.overlay_active) {
+        if (self.overlay_active and self.overlay_dirty.transient) {
             if (self.overlay_transient.get(storage_key)) |v| return v;
         }
         return self.transient_storage.get(storage_key) orelse 0;
@@ -666,7 +701,7 @@ pub const Database = struct {
 
     /// Get contract code by hash
     pub fn get_code(self: *Database, code_hash: [32]u8) Error![]const u8 {
-        if (self.overlay_active) {
+        if (self.overlay_active and self.overlay_dirty.code) {
             if (self.overlay_code.get(code_hash)) |buf| return buf;
         }
         const code = self.code_storage.get(code_hash) orelse {
@@ -726,6 +761,7 @@ pub const Database = struct {
         @memcpy(code_copy, code);
 
         if (self.overlay_active) {
+            self.overlay_dirty.code = true;
             try self.overlay_code.put(hash, code_copy);
             self.recordUndo(.{ .code = .{ .layer = .overlay, .hash = hash } });
         } else {
@@ -747,10 +783,17 @@ pub const Database = struct {
         return self.get_state_root();
     }
 
-    /// Clear transient storage (called at transaction end per EIP-1153)
-    /// Uses clearRetainingCapacity to avoid memory churn between transactions
+    /// Clear transient storage (called at transaction end per EIP-1153).
+    /// Uses clearRetainingCapacity to avoid memory churn between transactions.
+    /// A layer that no TSTORE has written since its last clear is skipped in
+    /// O(1): it holds nothing and no undo entry points into it.
     pub fn clear_transient_storage(self: *Database) void {
         const layer: Layer = if (self.overlay_active) .overlay else .base;
+        const dirty = switch (layer) {
+            .base => self.transient_dirty or self.transient_storage.count() != 0,
+            .overlay => self.overlay_dirty.transient or self.overlay_transient.count() != 0,
+        };
+        if (!dirty) return;
         // Undo entries for cleared slots must not bring the values back.
         for (self.undo_log.items) |*entry| {
             switch (entry.*) {
@@ -760,11 +803,16 @@ pub const Database = struct {
                 else => {},
             }
         }
-        if (self.overlay_active) {
-            self.overlay_transient.clearRetainingCapacity();
-            return;
+        switch (layer) {
+            .base => {
+                self.transient_storage.clearRetainingCapacity();
+                self.transient_dirty = false;
+            },
+            .overlay => {
+                self.overlay_transient.clearRetainingCapacity();
+                self.overlay_dirty.transient = false;
+            },
         }
-        self.transient_storage.clearRetainingCapacity();
     }
 
     // Snapshot operations
@@ -3094,7 +3142,7 @@ test "Database delete_account without a snapshot leaves no slot behind" {
     while (key < 100) : (key += 1) try db.set_storage(address, key, key + 1);
 
     try db.delete_account(address);
-    try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(address));
+    try testing.expectEqual(@as(usize, 0), db.storage.nonZeroCount(address));
     var slots = db.storage.iterator();
     while (slots.next()) |slot| try testing.expectEqual(@as(u256, 0), slot.value_ptr.*);
 }

@@ -141,6 +141,8 @@ pub const MinimalEvm = struct {
     block_gas_limit: u64,
     block_base_fee: u256,
     blob_base_fee: u256,
+    /// Borrowed from the transaction that owns this validation frame.
+    blob_versioned_hashes: []const [32]u8 = &.{},
     origin: Address,
     gas_price: u256,
     host: ?HostInterface,
@@ -231,6 +233,7 @@ pub const MinimalEvm = struct {
         self.block_gas_limit = 30_000_000;
         self.block_base_fee = 0;
         self.blob_base_fee = 0;
+        self.blob_versioned_hashes = &.{};
         self.origin = primitives.ZERO_ADDRESS;
         self.gas_price = 0;
         self.host = null;
@@ -290,6 +293,11 @@ pub const MinimalEvm = struct {
     pub fn setTransactionContext(self: *Self, origin: Address, gas_price: u256) void {
         self.origin = origin;
         self.gas_price = gas_price;
+    }
+
+    /// Set the EIP-4844 blob versioned hashes for BLOBHASH. Borrowed from the transaction.
+    pub fn setBlobVersionedHashes(self: *Self, hashes: []const [32]u8) void {
+        self.blob_versioned_hashes = hashes;
     }
 
     /// Configure hardfork for gas and access list rules

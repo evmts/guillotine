@@ -21,6 +21,17 @@ pub const MemoryConfig = struct {
     owned: bool = true,
     // SIMD vector length for optimized operations (1 = scalar)
     vector_length: comptime_int = 1,
+    /// Keep the address and size of the memory's bytes in the `Memory` value itself.
+    ///
+    /// An in-bounds MLOAD, MSTORE or MSTORE8 then checks its offset against a field
+    /// of the frame and indexes from a field of the frame; without it each access
+    /// first loads the buffer's list header through `buffer_ptr`.
+    ///
+    /// The copy is refreshed by every operation that goes through the `Memory`
+    /// value, so it is correct only while that value is the buffer's one user. A
+    /// frame's memory is; a buffer shared between a parent and its `init_child`
+    /// views is not, and `init_child` refuses a flat memory at compile time.
+    flat: bool = false,
 
     pub fn validate(comptime self: Self) void {
         if (self.memory_limit > std.math.maxInt(u32)) @compileError("memory_limit cannot exceed u32 max");

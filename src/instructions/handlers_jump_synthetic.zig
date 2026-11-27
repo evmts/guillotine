@@ -19,8 +19,12 @@ pub fn Handlers(FrameType: type) type {
             return @ptrCast(@alignCast(item.jump_static.dispatch));
         }
 
-        /// Jump directly to a statically known location without a jump table lookup.
-        /// The cursor points to: [0] = handler, [1] = jump_static metadata.
+        const Jump = jump_handlers.Handlers(FrameType);
+
+        /// Jump directly to a statically known location without a jump table lookup,
+        /// entering the target block here (`takeStaticJump`).
+        /// The cursor points to: [0] = handler, [1] = jump_static metadata,
+        /// [2] = jump_dest metadata of the target block.
         pub fn jump_to_static_location(
             self: *FrameType,
             cursor: [*]const Dispatch.Item,
@@ -33,11 +37,14 @@ pub fn Handlers(FrameType: type) type {
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             const s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMP_TO_STATIC_LOCATION, cursor, s, gas);
-            return N.jump(self, .JUMP_TO_STATIC_LOCATION, staticTarget(cursor[1]), s, gas);
+            return Jump.takeStaticJump(self, .JUMP_TO_STATIC_LOCATION, staticTarget(cursor[1]), cursor[2].jump_dest, s, gas);
         }
 
-        /// Conditionally jump to a statically known location without a jump table lookup.
-        /// The cursor points to: [0] = handler, [1] = jump_static metadata.
+        /// Conditionally jump to a statically known location without a jump table
+        /// lookup. Either way the successor block is entered here.
+        /// The cursor points to: [0] = handler, [1] = jump_static metadata,
+        /// [2] = jump_dest metadata of the target block, [3] = jump_dest metadata of
+        /// the fall-through block.
         pub fn jumpi_to_static_location(
             self: *FrameType,
             cursor: [*]const Dispatch.Item,
@@ -51,8 +58,10 @@ pub fn Handlers(FrameType: type) type {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMPI_TO_STATIC_LOCATION, cursor, s, gas);
             const condition = s.pop_unsafe();
-            if (condition != 0) return N.jump(self, .JUMPI_TO_STATIC_LOCATION, staticTarget(cursor[1]), s, gas);
-            return N.next(self, .JUMPI_TO_STATIC_LOCATION, cursor, s, gas);
+            if (condition != 0) {
+                return Jump.takeStaticJump(self, .JUMPI_TO_STATIC_LOCATION, staticTarget(cursor[1]), cursor[2].jump_dest, s, gas);
+            }
+            return Jump.fallThroughStaticJump(self, .JUMPI_TO_STATIC_LOCATION, cursor, cursor[3].jump_dest, s, gas);
         }
 
         /// INVALID_JUMP_TARGET - where a static jump to a non-JUMPDEST lands. Invalid
@@ -88,7 +97,7 @@ pub fn Handlers(FrameType: type) type {
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             const stack_view = N.StackView.init(sp, t0, t1, t2, t3);
-            return jump_handlers.Handlers(FrameType).enterBlock(self, .BLOCK_BEGIN, cursor, stack_view, gas);
+            return Jump.enterBlock(self, .BLOCK_BEGIN, cursor, stack_view, gas);
         }
     };
 }

@@ -48,24 +48,33 @@ pub fn getOpcodeHandlers(
     const KeccakHandlers = stack_frame_keccak.Handlers(FrameType);
     const LogHandlers = stack_frame_log.Handlers(FrameType);
 
-    // The default opcode handler used for any opcode that is not supported by the EVM
-    const invalid = handler_abi.wrap(FrameType, struct {
+    // The default opcode handler used for any opcode that is not supported by the EVM.
+    // Written against the register ABI: it does no host work. An invalid opcode
+    // consumes all remaining gas, so the frame's gas is written back as zero.
+    const invalid: FrameType.OpcodeHandler = &struct {
         fn handler(
             frame: *FrameType,
             cursor: [*]const FrameType.Dispatch.Item,
-        ) FrameType.Error![*]const FrameType.Dispatch.Item {
+            sp: [*]FrameType.WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             _ = cursor;
-            // Invalid opcodes consume all remaining gas and revert
-            frame.gas_remaining = 0;
-            return FrameType.Error.InvalidOpcode;
+            _ = gas;
+            const N = handler_abi.Native(FrameType);
+            N.flush(frame, N.StackView.init(sp, t0, t1, t2, t3), 0);
+            return .invalid_opcode;
         }
-    }.handler);
+    }.handler;
 
     var h: [256]FrameType.OpcodeHandler = undefined;
     @setEvalBranchQuota(10000);
     for (&h) |*handler| handler.* = invalid;
 
-    h[@backingInt(Opcode.STOP)] = handler_abi.wrap(FrameType, SystemHandlers.stop);
+    h[@backingInt(Opcode.STOP)] = &SystemHandlers.stop;
     h[@backingInt(Opcode.ADD)] = &ArithmeticHandlers.add;
     h[@backingInt(Opcode.MUL)] = &ArithmeticHandlers.mul;
     h[@backingInt(Opcode.SUB)] = &ArithmeticHandlers.sub;
@@ -118,7 +127,7 @@ pub fn getOpcodeHandlers(
     h[@backingInt(Opcode.CHAINID)] = &ContextHandlers.chainid;
     h[@backingInt(Opcode.SELFBALANCE)] = handler_abi.wrap(FrameType, ContextHandlers.selfbalance);
     h[@backingInt(Opcode.BASEFEE)] = &ContextHandlers.basefee;
-    h[@backingInt(Opcode.BLOBHASH)] = handler_abi.wrap(FrameType, ContextHandlers.blobhash);
+    h[@backingInt(Opcode.BLOBHASH)] = &ContextHandlers.blobhash;
     h[@backingInt(Opcode.BLOBBASEFEE)] = &ContextHandlers.blobbasefee;
     h[@backingInt(Opcode.POP)] = &StackHandlers.pop;
     h[@backingInt(Opcode.MLOAD)] = &MemoryHandlers.mload;

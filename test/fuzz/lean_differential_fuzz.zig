@@ -3085,6 +3085,13 @@ pub fn main(init: std.process.Init) !void {
     const seed = try envU64(init, "FUZZ_SEED", 0xC0FFEE);
     const iters = try envU64(init, "FUZZ_ITERS", 2000);
 
+    // Isolated EVM calls inherit these read-only settings across fork. Loading
+    // once here avoids repeating KZG setup in every forked child and surfaces
+    // any setup failure before comparing vectors.
+    const setup = @import("crypto").kzg_setup;
+    try setup.init();
+    defer setup.deinit(gpa);
+
     show_crashes = init.environ_map.get("LEAN_DIFF_SHOW_CRASH") != null;
     const oracle_path = init.environ_map.get("GUILLOTINE_LEAN_REF") orelse "verify/lean/.lake/build/bin/guillotine-lean-ref";
 

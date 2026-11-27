@@ -108,6 +108,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             .memory_limit = config.memory_limit,
             .owned = true,
             .vector_length = config.vector_length,
+            // A frame is the only user of its memory buffer, pooled or not, so the
+            // buffer's address and size live in the frame itself.
+            .flat = true,
         });
         /// The struct in charge of managing Evm Word stack
         pub const Stack = stack_mod.Stack(.{
@@ -153,7 +156,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         gas_remaining: GasType, // 8B
         evm_ptr: *anyopaque, // 8B
         database: *anyopaque, // 8B - Direct database pointer for hot path (storage ops)
-        memory: Memory, // 16B on 64-bit
+        memory: Memory, // 32B on 64-bit: the bytes' address and size, then the buffer
         contract_address: Address, // 20B
         caller: Address, // 20B
 
@@ -179,9 +182,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                         .{@sizeOf(Stack)},
                     ));
                 }
-                if (@sizeOf(Memory) != 16) {
+                if (@sizeOf(Memory) != 32) {
                     @compileError(std.fmt.comptimePrint(
-                        "Frame hot Memory must be 16 bytes on 64-bit, found {d}",
+                        "Frame hot Memory must be 32 bytes on 64-bit, found {d}",
                         .{@sizeOf(Memory)},
                     ));
                 }
@@ -227,7 +230,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 .evm_ptr = evm_ptr,
                 .database = @as(*anyopaque, @ptrCast(evm.database)),
                 .contract_address = Address.ZERO_ADDRESS,
-                .jump_table = &Dispatch.JumpTable{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} }, // Pointer to empty jump table
+                .jump_table = &Dispatch.JumpTable.empty, // Until `interpret` installs the code's table
                 .caller = caller,
                 .value = value,
                 .calldata_slice = calldata_input,

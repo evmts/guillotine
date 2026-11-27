@@ -13,6 +13,7 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
         const handler_abi = @import("../preprocessor/handler_abi.zig");
         const N = handler_abi.Native(FrameType);
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
 
         /// Resolve a dynamic jump destination to the schedule cursor of its JUMPDEST.
         /// Returns null when the destination is not a JUMPDEST.
@@ -26,6 +27,10 @@ pub fn Handlers(FrameType: type) type {
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
+        ///
+        /// The handler does not check the stack depth: the entry of the basic block
+        /// that contains this JUMP validated the block's deepest stack access, and
+        /// JUMP's one input is part of it (`Iterator.calculateBlockInfo`).
         pub fn jump(
             self: *FrameType,
             cursor: [*]const Dispatch.Item,
@@ -38,7 +43,7 @@ pub fn Handlers(FrameType: type) type {
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMP, cursor, s, gas);
-            if (s.size(self) < 1) return N.exit(self, .JUMP, s, gas, .stack_underflow);
+            if (comptime N.traced) (&self.getEvm().tracer).assert(s.size(self) >= 1, "JUMP: block entry must have validated one stack item");
             const dest = s.pop_unsafe();
             const target = resolve(self, dest) orelse return N.exit(self, .JUMP, s, gas, .invalid_jump);
             return N.jump(self, .JUMP, target, s, gas);
@@ -47,6 +52,7 @@ pub fn Handlers(FrameType: type) type {
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
+        /// As for JUMP, block entry validated the two stack inputs.
         pub fn jumpi(
             self: *FrameType,
             cursor: [*]const Dispatch.Item,
@@ -59,12 +65,60 @@ pub fn Handlers(FrameType: type) type {
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMPI, cursor, s, gas);
-            if (s.size(self) < 2) return N.exit(self, .JUMPI, s, gas, .stack_underflow);
+            if (comptime N.traced) (&self.getEvm().tracer).assert(s.size(self) >= 2, "JUMPI: block entry must have validated two stack items");
             const dest = s.pop_unsafe();
             const condition = s.pop_unsafe();
             if (condition == 0) return N.next(self, .JUMPI, cursor, s, gas);
             const target = resolve(self, dest) orelse return N.exit(self, .JUMPI, s, gas, .invalid_jump);
             return N.jump(self, .JUMPI, target, s, gas);
+        }
+
+        /// Outcome of entering a basic block: the gas left after its static charge, or
+        /// the reason the frame halts and the gas to report with it.
+        pub const BlockCheck = union(enum) {
+            ok: FrameType.GasType,
+            halt: struct { gas: FrameType.GasType, code: handler_abi.ExitCode },
+        };
+
+        /// Charge the static gas of the block `meta` describes and validate its stack
+        /// bounds against the current stack size. Shared by every way of entering a
+        /// block: JUMPDEST, BLOCK_BEGIN and the static jumps that enter their
+        /// successor block themselves.
+        pub inline fn checkBlock(
+            self: *FrameType,
+            meta: Dispatch.JumpDestMetadata,
+            s: N.StackView,
+            gas_before: FrameType.GasType,
+        ) BlockCheck {
+            // A u32 block charge fits directly in i64. On narrower targets the
+            // comparison must precede the signed conversion.
+            const gas = if (@bitSizeOf(FrameType.GasType) > @bitSizeOf(@TypeOf(meta.gas))) blk: {
+                const remaining = gas_before - @as(FrameType.GasType, meta.gas);
+                if (remaining < 0) {
+                    @branchHint(.unlikely);
+                    return .{ .halt = .{ .gas = remaining, .code = .out_of_gas } };
+                }
+                break :blk remaining;
+            } else verified_ops.chargeGasChecked(FrameType.GasType, gas_before, meta.gas) orelse {
+                @branchHint(.unlikely);
+                return .{ .halt = .{ .gas = 0, .code = .out_of_gas } };
+            };
+
+            const size: u32 = @intCast(s.size(self));
+            const min_stack: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
+            const max_stack: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
+            switch (verified_ops.blockStackGuardFast(size, min_stack, max_stack, FrameType.Stack.stack_capacity)) {
+                .ok => {},
+                .underflow => {
+                    @branchHint(.unlikely);
+                    return .{ .halt = .{ .gas = gas, .code = .stack_underflow } };
+                },
+                .overflow => {
+                    @branchHint(.unlikely);
+                    return .{ .halt = .{ .gas = gas, .code = .stack_overflow } };
+                },
+            }
+            return .{ .ok = gas };
         }
 
         /// Enter a basic block: charge its static gas and validate its stack bounds in one
@@ -79,37 +133,91 @@ pub fn Handlers(FrameType: type) type {
             gas_before: FrameType.GasType,
         ) handler_abi.ExitCode {
             N.before(self, opcode, cursor, s, gas_before);
-            const meta = cursor[1].jump_dest;
-
-            // A u32 block charge fits directly in i64. On narrower targets the
-            // comparison must precede the signed conversion.
-            const gas = if (@bitSizeOf(FrameType.GasType) > @bitSizeOf(@TypeOf(meta.gas))) blk: {
-                const remaining = gas_before - @as(FrameType.GasType, meta.gas);
-                if (remaining < 0) {
-                    @branchHint(.unlikely);
-                    return N.exit(self, opcode, s, remaining, .out_of_gas);
-                }
-                break :blk remaining;
-            } else verified_ops.chargeGasChecked(FrameType.GasType, gas_before, meta.gas) orelse {
-                @branchHint(.unlikely);
-                return N.exit(self, opcode, s, 0, .out_of_gas);
-            };
-
-            const size: u32 = @intCast(s.size(self));
-            const min_stack: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
-            const max_stack: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
-            switch (verified_ops.blockStackGuardFast(size, min_stack, max_stack, FrameType.Stack.stack_capacity)) {
-                .ok => {},
-                .underflow => {
-                    @branchHint(.unlikely);
-                    return N.exit(self, opcode, s, gas, .stack_underflow);
-                },
-                .overflow => {
-                    @branchHint(.unlikely);
-                    return N.exit(self, opcode, s, gas, .stack_overflow);
-                },
+            switch (checkBlock(self, cursor[1].jump_dest, s, gas_before)) {
+                .halt => |halt| return N.exit(self, opcode, s, halt.gas, halt.code),
+                .ok => |gas| return N.next(self, opcode, cursor, s, gas),
             }
-            return N.next(self, opcode, cursor, s, gas);
+        }
+
+        /// Take a static jump whose item carries its target block's metadata.
+        ///
+        /// `target` is the `jump_static` cursor of the item at `cursor` and `meta` the
+        /// `jump_dest` item after it (`Dispatch.resolveStaticJumps`). For a jump to a
+        /// JUMPDEST, `target` is the first instruction after the JUMPDEST and `meta`
+        /// is a copy of the JUMPDEST's metadata: the block is charged and validated
+        /// here and execution continues at `target`, with no dispatch through the
+        /// JUMPDEST handler. For a jump to anything else, `target` is the
+        /// invalid-jump item and `meta` charges nothing.
+        ///
+        /// Builds with instruction hooks instead run the JUMPDEST handler's own
+        /// logic on the JUMPDEST's cursor, so the tracer and MinimalEvm see the
+        /// JUMPDEST as its own step, exactly as after a dynamic jump. They also
+        /// check that the copied metadata equals the JUMPDEST's.
+        pub inline fn takeStaticJump(
+            self: *FrameType,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            target: [*]const Dispatch.Item,
+            meta: Dispatch.JumpDestMetadata,
+            s: N.StackView,
+            gas_before: FrameType.GasType,
+        ) handler_abi.ExitCode {
+            if (comptime N.traced) {
+                // Items carry their tag in these builds. Only a JUMPDEST's first
+                // instruction is preceded by `jump_dest` metadata among jump targets.
+                if ((target - 1)[0] != .jump_dest) return N.jump(self, opcode, target, s, gas_before);
+                const landing = target - Dispatch.jumpdest_items;
+                (&self.getEvm().tracer).assert(
+                    @as(u64, @bitCast(landing[1].jump_dest)) == @as(u64, @bitCast(meta)),
+                    "static jump: folded block metadata differs from its JUMPDEST's",
+                );
+                N.flush(self, s, gas_before);
+                self.afterInstruction(opcode, landing[0].opcode_handler, landing);
+                return enterBlock(self, .JUMPDEST, landing, s, gas_before);
+            }
+            switch (checkBlock(self, meta, s, gas_before)) {
+                .halt => |halt| return N.exit(self, opcode, s, halt.gas, halt.code),
+                .ok => |gas| return N.jump(self, opcode, target, s, gas),
+            }
+        }
+
+        /// Fall through a conditional static jump that was not taken.
+        ///
+        /// `meta` is the last item of the jump at `cursor`: the metadata of the block
+        /// that starts at the next instruction. It is charged and validated here, so
+        /// the schedule holds no BLOCK_BEGIN after the jump. When the next
+        /// instruction is a JUMPDEST, or the code ends, `meta` charges nothing and
+        /// the JUMPDEST (or the implicit STOP) runs as usual.
+        ///
+        /// Builds with instruction hooks report the block entry to the tracer as the
+        /// BLOCK_BEGIN step it replaces.
+        pub inline fn fallThroughStaticJump(
+            self: *FrameType,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            cursor: [*]const Dispatch.Item,
+            meta: Dispatch.JumpDestMetadata,
+            s: N.StackView,
+            gas_before: FrameType.GasType,
+        ) handler_abi.ExitCode {
+            const count = comptime dispatch_opcode_data.itemCount(opcode);
+            const next_cursor = cursor + count;
+            const next_handler = next_cursor[0].opcode_handler;
+            if (comptime N.traced) {
+                N.flush(self, s, gas_before);
+                self.afterInstruction(opcode, next_handler, next_cursor);
+                // The tracer reads a block's metadata from the item after the cursor
+                // it is given: `meta` is this jump's last item.
+                (&self.getEvm().tracer).before_instruction(self, .BLOCK_BEGIN, cursor + count - 2);
+            }
+            const gas = switch (checkBlock(self, meta, s, gas_before)) {
+                .halt => |halt| return N.exit(self, if (comptime N.traced) .BLOCK_BEGIN else opcode, s, halt.gas, halt.code),
+                .ok => |gas| gas,
+            };
+            if (comptime N.traced) {
+                N.flush(self, s, gas);
+                self.afterInstruction(.BLOCK_BEGIN, next_handler, next_cursor);
+            }
+            const tos = handler_abi.toLimbs(WordType, s.tos);
+            return @call(handler_abi.tail_mod, next_handler, .{ self, next_cursor, s.sp, gas, tos[0], tos[1], tos[2], tos[3] });
         }
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.

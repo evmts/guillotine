@@ -408,6 +408,103 @@ pub fn fuzzBinaryAndTernaryArithmetic(_: void, input: []const u8) !void {
     try std.testing.expectEqual(expected, res.word);
 }
 
+/// MULMOD and fused PUSH+DIV against 512-bit reference arithmetic.
+///
+/// MULMOD reduces the full 512-bit product once; PUSH+DIV with a pushed dividend
+/// that fits 64 bits divides one limb. Both run in the EVM with and without fusion
+/// and must equal `@as(u512, a) * b % m` and `dividend / divisor`. The pure cores in
+/// `verified_ops` (the functions the SMT suite models) are checked on the same
+/// inputs.
+pub fn fuzzMulmodAndPushDiv(_: void, input: []const u8) !void {
+    if (input.len < 4) return;
+    const allocator = fuzz_alloc.get();
+
+    const a = decodeWord(input, 1);
+    const b = decodeWord(input, if (input.len > 33) 33 else @min(2, input.len - 1));
+    const c = decodeWord(input, if (input.len > 65) 65 else @min(3, input.len - 1));
+
+    var code = std.ArrayList(u8).empty;
+    defer code.deinit(allocator);
+
+    if ((input[0] & 1) == 0) {
+        // MULMOD: top = a, second = b, third = modulus c.
+        const narrow = (input[0] & 2) != 0;
+        const mask: u256 = if (narrow) std.math.maxInt(u64) else std.math.maxInt(u256);
+        const x = a & mask;
+        const y = b & mask;
+        const modulus = c & mask;
+        try appendPush32(&code, allocator, modulus);
+        try appendPush32(&code, allocator, y);
+        try appendPush32(&code, allocator, x);
+        try code.append(allocator, 0x09);
+        try appendReturnTop(&code, allocator);
+
+        const expected: u256 = if (modulus == 0) 0 else @intCast((@as(u512, x) * @as(u512, y)) % modulus);
+        const res = try runAndCompareWord(allocator, code.items);
+        try std.testing.expectEqual(expected, res.word);
+        try std.testing.expectEqual(expected, try refMulmod(allocator, x, y, modulus));
+        try std.testing.expectEqual(expected, evm.verified_ops.mulmodDirect(x, y, modulus));
+        try std.testing.expectEqual(expected, evm.verified_ops.mulmodRef(x, y, modulus));
+        if (evm.verified_ops.mulmodFitsU64(x, y, modulus)) {
+            const one_limb = evm.verified_ops.mulmodU64(@truncate(x), @truncate(y), @truncate(modulus));
+            try std.testing.expectEqual(expected, @as(u256, one_limb));
+        }
+        return;
+    }
+
+    // PUSH+DIV: the pushed value is the dividend (the top of the stack), the item
+    // under it the divisor. A dividend that fits 64 bits is pushed with the
+    // narrowest PUSH that holds it, which the fused handler stores inline; a wider
+    // one takes the handler's pointer form.
+    const one_limb = (input[0] & 2) == 0;
+    const dividend: u256 = if (one_limb) a & std.math.maxInt(u64) else a;
+    const divisor = b;
+    try appendPush32(&code, allocator, divisor);
+    if (dividend <= std.math.maxInt(u64)) {
+        const width: u8 = @intCast(@max(1, (64 - @clz(@as(u64, @intCast(dividend))) + 7) / 8));
+        try code.append(allocator, 0x5f + width);
+        var bytes: [8]u8 = undefined;
+        std.mem.writeInt(u64, &bytes, @intCast(dividend), .big);
+        try code.appendSlice(allocator, bytes[8 - width ..]);
+    } else {
+        try appendPush32(&code, allocator, dividend);
+    }
+    try code.append(allocator, 0x04);
+    try appendReturnTop(&code, allocator);
+
+    const expected: u256 = if (divisor == 0) 0 else dividend / divisor;
+    const res = try runAndCompareWord(allocator, code.items);
+    try std.testing.expectEqual(expected, res.word);
+    if (dividend <= std.math.maxInt(u64)) {
+        const narrow_dividend: u64 = @intCast(dividend);
+        try std.testing.expectEqual(expected, @as(u256, evm.verified_ops.pushDivU64(narrow_dividend, divisor)));
+        try std.testing.expectEqual(expected, evm.verified_ops.pushDivRef(narrow_dividend, divisor));
+    }
+}
+
+/// Seeds: byte 0 selects MULMOD (even) or PUSH+DIV (odd) and the operand width;
+/// the next bytes index `BOUNDARY_WORDS` (values below 64) or start a literal word.
+const mulmod_push_div_corpus: []const []const u8 = &.{
+    &.{ 0, 21, 21, 21 }, // MULMOD MAX * MAX mod MAX
+    &.{ 0, 21, 21, 19 }, // MULMOD MAX * MAX mod 2^255: needs the high half
+    &.{ 0, 21, 20, 0 }, // MULMOD modulus 0
+    &.{ 0, 21, 20, 1 }, // MULMOD modulus 1
+    &.{ 0, 19, 19, 18 }, // MULMOD 2^255 * 2^255 mod (2^255 - 1)
+    &.{ 2, 16, 16, 16 }, // MULMOD one-limb path: all operands 2^64 - 1
+    &.{ 2, 16, 16, 2 }, // MULMOD one-limb path, product above 2^64
+    &.{ 2, 16, 1, 0 }, // MULMOD one-limb path, modulus 0
+    &.{ 1, 0, 0, 0 }, // DIV 0 / 0
+    &.{ 1, 1, 0, 0 }, // DIV 1 / 0
+    &.{ 1, 16, 16, 0 }, // DIV (2^64 - 1) / (2^64 - 1)
+    &.{ 1, 16, 1, 0 }, // DIV (2^64 - 1) / 1
+    &.{ 1, 16, 17, 0 }, // DIV one-limb dividend by a divisor above 2^64
+    &.{ 1, 4, 21, 0 }, // DIV 7 / MAX
+    &.{ 1, 21, 4, 0 }, // DIV (MAX mod 2^64) / 7
+    &.{ 3, 21, 4, 0 }, // DIV MAX / 7, pointer form
+    &.{ 3, 19, 19, 0 }, // DIV 2^255 / 2^255, pointer form
+    &.{ 3, 17, 16, 0 }, // DIV (2^128 - 1) / (2^64 - 1), pointer form
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{ 0, 21, 1, 0 }, // ADD overflow: MAX + 1
     &.{ 1, 21, 21, 0 }, // MUL overflow: MAX * MAX
@@ -436,4 +533,30 @@ const seed_corpus: []const []const u8 = &.{
 
 test "fuzz all 256-bit arithmetic, bitwise, shift, and comparison opcodes vs big-int oracle" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBinaryAndTernaryArithmetic), .{ .corpus = seed_corpus });
+}
+
+test "fuzz MULMOD single 512-bit reduction and PUSH+DIV one-limb path vs u512 reference" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMulmodAndPushDiv), .{ .corpus = mulmod_push_div_corpus });
+}
+
+test "arithmetic_u256: MULMOD and PUSH+DIV boundary grid" {
+    // Every pair and triple of boundary words through both targets, so the
+    // corpus replay covers the grid even without the coverage-guided fuzzer.
+    var input: [4]u8 = undefined;
+    for ([_]u8{ 0, 1, 2, 3 }) |selector| {
+        input[0] = selector;
+        var first: u8 = 0;
+        while (first < BOUNDARY_WORDS.len) : (first += 3) {
+            var second: u8 = 0;
+            while (second < BOUNDARY_WORDS.len) : (second += 2) {
+                var third: u8 = 0;
+                while (third < BOUNDARY_WORDS.len) : (third += 5) {
+                    input[1] = first;
+                    input[2] = second;
+                    input[3] = third;
+                    try fuzzMulmodAndPushDiv({}, &input);
+                }
+            }
+        }
+    }
 }

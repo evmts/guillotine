@@ -2,6 +2,7 @@ const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const wide_arith = @import("../core/wide_arith.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// Synthetic arithmetic opcode handlers for the EVM stack frame.
 /// These handle fused PUSH+arithmetic operations for optimization.
@@ -114,12 +115,11 @@ pub fn Handlers(FrameType: type) type {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_DIV_INLINE, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
+            // PUSH puts its value on top and DIV computes `top / second`, so the pushed
+            // value is the dividend and the item it replaces is the divisor.
             const dividend: u64 = op_data.metadata.value;
-
             const divisor = s.peek_unsafe();
-            const result: u64 = if (wide_arith.fitsU64(divisor)) wide_arith.div64(dividend, @truncate(divisor)) else 0;
-
-            s.set_top_unsafe(result);
+            s.set_top_unsafe(verified_ops.pushDivU64(dividend, divisor));
 
             return N.next(self, .PUSH_DIV_INLINE, cursor, s, gas);
         }

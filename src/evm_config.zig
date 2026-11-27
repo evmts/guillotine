@@ -61,6 +61,12 @@ pub const EvmConfig = struct {
     /// Enable bytecode fusion optimizations (default: true)
     /// When enabled, common opcode patterns like PUSH+ADD are fused into single operations
     enable_fusion: bool = true,
+
+    /// Record every address and storage slot a call touches so that
+    /// `Evm.dumpState` can report the state the instance has touched (default:
+    /// true). A host that never dumps state can turn this off: the touched sets
+    /// are then never written and `dumpState` returns `error.StateDumpDisabled`.
+    track_state_dump: bool = true,
     /// Maximum cached analyzed bytecode entries in DispatchCache (default 256).
     dispatch_cache_entries: usize = 256,
     /// Maximum total bytes kept by DispatchCache (default 32 MiB).

@@ -6,6 +6,7 @@ const Address = @import("voltaire").Address.Address;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 const fork_gas = @import("../frame/fork_gas.zig");
+const slot_hash = @import("../storage/slot_hash.zig");
 
 /// Storage operation handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -15,6 +16,16 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
+
+        /// True when the frame's EVM and database take a precomputed slot hash, so
+        /// one opcode hashes `(address, slot)` once for the access list, the
+        /// journal and the slot store. Other hosts (test doubles, custom databases)
+        /// use the plain interface.
+        const hashed = @hasDecl(FrameType.Evm, "access_storage_slot_hashed") and
+            @hasDecl(FrameType.Evm, "get_original_storage_hashed") and
+            @hasDecl(FrameType.Evm, "record_storage_change_hashed") and
+            @hasDecl(FrameType.config.DatabaseType, "read_storage_hashed") and
+            @hasDecl(FrameType.config.DatabaseType, "set_storage_hashed");
 
         /// SLOAD opcode (0x54) - Load from storage.
         /// Loads value from storage slot and pushes it onto the stack.
@@ -29,7 +40,12 @@ pub fn Handlers(FrameType: type) type {
 
             // Access storage slot and get gas cost (cold vs warm)
             const evm = self.getEvm();
-            const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            const hash: u64 = if (comptime hashed) slot_hash.hash(contract_addr.bytes, slot) else 0;
+            const access_result = if (comptime hashed)
+                evm.access_storage_slot_hashed(contract_addr, slot, hash)
+            else
+                evm.access_storage_slot(contract_addr, slot);
+            const access_cost = access_result catch |err| switch (err) {
                 else => {
                     self.afterComplete(.SLOAD);
                     return Error.AllocationError;
@@ -52,12 +68,15 @@ pub fn Handlers(FrameType: type) type {
 
             // Load value from storage through direct database pointer for better cache locality
             const database = self.getDatabase();
-            const value = database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
-                else => {
-                    self.afterComplete(.SLOAD);
-                    return Error.AllocationError;
-                },
-            };
+            const value = if (comptime hashed)
+                database.read_storage_hashed(contract_addr.bytes, slot, hash)
+            else
+                database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+                    else => {
+                        self.afterComplete(.SLOAD);
+                        return Error.AllocationError;
+                    },
+                };
             self.stack.set_top_unsafe(value);
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .SLOAD);
@@ -103,18 +122,29 @@ pub fn Handlers(FrameType: type) type {
             // Get database directly for storage operations (better cache locality)
             const database = self.getDatabase();
 
+            // One hash of `(address, slot)` serves the slot store, the access list and
+            // the journal below.
+            const hash: u64 = if (comptime hashed) slot_hash.hash(contract_addr.bytes, slot) else 0;
+
             // Get current value for gas calculation (through direct database pointer)
-            const current_value = database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
-                else => {
-                    self.afterComplete(.SSTORE);
-                    return Error.AllocationError;
-                },
-            };
+            const current_value = if (comptime hashed)
+                database.read_storage_hashed(contract_addr.bytes, slot, hash)
+            else
+                database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+                    else => {
+                        self.afterComplete(.SSTORE);
+                        return Error.AllocationError;
+                    },
+                };
 
             // Access storage slot once to both warm it and get cost. `Evm.access_storage_slot`
             // records a failed allocation as a host failure; warming the slot through the
             // access list directly would let it pass as an ordinary frame halt.
-            const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            const access_result = if (comptime hashed)
+                evm.access_storage_slot_hashed(contract_addr, slot, hash)
+            else
+                evm.access_storage_slot(contract_addr, slot);
+            const access_cost = access_result catch |err| switch (err) {
                 else => {
                     self.afterComplete(.SSTORE);
                     return Error.AllocationError;
@@ -123,7 +153,10 @@ pub fn Handlers(FrameType: type) type {
             const is_cold = access_cost == GasConstants.ColdSloadCost;
 
             // Determine original value at start of transaction (for EIP-2200 logic)
-            const original_opt = evm.get_original_storage(contract_addr, slot);
+            const original_opt = if (comptime hashed)
+                evm.get_original_storage_hashed(contract_addr, slot, hash)
+            else
+                evm.get_original_storage(contract_addr, slot);
             const original_value: WordType = original_opt orelse current_value;
 
             // SSTORE gas and refund for this fork (includes the EIP-2929 cold surcharge).
@@ -153,7 +186,11 @@ pub fn Handlers(FrameType: type) type {
 
             // Record original value for journal on first write in this transaction
             if (original_opt == null) {
-                evm.record_storage_change(contract_addr, slot, original_value) catch |err| switch (err) {
+                const recorded = if (comptime hashed)
+                    evm.record_storage_change_hashed(contract_addr, slot, hash, original_value)
+                else
+                    evm.record_storage_change(contract_addr, slot, original_value);
+                recorded catch |err| switch (err) {
                     else => {
                         self.afterComplete(.SSTORE);
                         return Error.AllocationError;
@@ -162,7 +199,11 @@ pub fn Handlers(FrameType: type) type {
             }
 
             // Store the value through direct database pointer (better cache locality)
-            database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
+            const stored = if (comptime hashed)
+                database.set_storage_hashed(contract_addr.bytes, slot, hash, value)
+            else
+                database.set_storage(contract_addr.bytes, slot, value);
+            stored catch |err| switch (err) {
                 error.WriteProtection => {
                     self.afterComplete(.SSTORE);
                     return Error.WriteProtection;

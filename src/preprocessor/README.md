@@ -17,7 +17,7 @@ The preprocessor module transforms raw EVM bytecode into highly optimized dispat
 
 ### Specialized Modules
 
-- **`dispatch_jump_table.zig`** - Binary search jump table with interpolated starting points
+- **`dispatch_jump_table.zig`** - Open-addressed table of 8-byte `{ pc, offset }` buckets: a dynamic JUMP is one multiply, one shift and (almost always) one bucket read
 - **`dispatch_jump_table_builder.zig`** - Builder pattern for jump table construction
 - **`dispatch_pretty_print.zig`** - Human-readable dispatch schedule visualization with ANSI colors
 - **`dispatch_allocated_memory.zig`** - Memory allocation tracking for dispatch items
@@ -79,23 +79,41 @@ pub fn createDispatch(allocator: std.mem.Allocator, bytecode: anytype) !Dispatch
 }
 ```
 
-### Jump Table Creation
+### Jump Table
+
+The schedule builds its jump table itself and owns it: `DispatchSchedule.jump_table`
+is the only record of the code's JUMPDESTs. JUMPDESTs arrive in PC order from the
+bytecode iterator, so nothing is sorted, and static jumps are resolved from the same
+table at build time.
 
 ```zig
-const DispatchType = Dispatch(Frame);
+var schedule = try DispatchType.DispatchSchedule.init(allocator, bytecode, &handlers, tracer);
+defer schedule.deinit(); // frees the items, the wide PUSH operands and the jump table
 
-pub fn createJumpTable(
-    allocator: std.mem.Allocator,
-    schedule: []const DispatchType.Item,
-    bytecode: anytype,
-) !DispatchType.JumpTable {
-    return try DispatchType.createJumpTable(
-        allocator,
-        schedule,
-        bytecode,
-    );
-}
+const target = schedule.jump_table.findJumpTarget(pc); // null: not a JUMPDEST
 ```
+
+### Static Jumps
+
+A static jump (`PUSH target; JUMP`, `PUSH target; JUMPI`, `ISZERO; PUSH target; JUMPI`)
+enters its successor block from its own handler. Its item carries the metadata it needs:
+
+```
+JUMP_TO_STATIC_LOCATION:   [handler] [jump_static] [jump_dest: target block]
+JUMPI_TO_STATIC_LOCATION:  [handler] [jump_static] [jump_dest: target block] [jump_dest: fall-through block]
+ISZERO_JUMPI:              [handler] [jump_static] [jump_dest: target block] [jump_dest: fall-through block]
+```
+
+`jump_static` points at the first instruction after the target JUMPDEST, and the target
+block's metadata is a copy of that JUMPDEST's. A taken jump charges and validates the
+block and continues there: one dispatch, not two. A conditional jump that is not taken
+charges the fall-through block from its last item, so no `BLOCK_BEGIN` follows it. A
+jump to anything but a JUMPDEST points at the invalid-jump item and charges nothing.
+JUMPDEST still does the block entry for dynamic jumps and for straight-line fall-through.
+
+Builds with instruction hooks (Debug, ReleaseSafe, tracing) run the JUMPDEST's own block
+entry on the JUMPDEST's cursor instead, so the tracer and MinimalEvm see the JUMPDEST as
+a step of its own.
 
 ### Dispatch Execution
 
@@ -258,7 +276,7 @@ pub fn Dispatch(comptime FrameType: type) type {
 ### Core Functions
 
 - `init()` - Create optimized dispatch schedule from bytecode
-- `createJumpTable()` - Generate jump table for efficient JUMPDEST lookup
+- `DispatchSchedule.jump_table` - JUMPDEST lookup table, built with the schedule
 - `calculateFirstBlockGas()` - Compute gas cost for initial execution block
 - `getOpData()` - Extract opcode-specific data from dispatch cursor
 

@@ -998,9 +998,9 @@ pub const MinimalFrame = struct {
 
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const index = try self.popStack();
-                _ = index;
-                // For now, return zero (no blob hashes in test context)
-                try self.pushStack(0);
+                const hashes = evm.blob_versioned_hashes;
+                const value = if (index < hashes.len) std.mem.readInt(u256, &hashes[@intCast(index)], .big) else 0;
+                try self.pushStack(value);
                 self.pc += 1;
             },
 

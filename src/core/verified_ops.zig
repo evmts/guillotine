@@ -432,6 +432,99 @@ pub inline fn checkedBlobGasCost(blob_gas: u64, fee_per_blob_gas: u256) ?u256 {
     return product[0];
 }
 
+/// MULMOD specification in its pre-reducing form: both factors are reduced modulo
+/// `modulus` before they are multiplied. A zero modulus gives 0.
+///
+/// This is the shape an implementation needs when its intermediate product is only
+/// as wide as its operands. With a 512-bit product the two reductions are redundant
+/// (`mulmodDirect`); they cost two extra 256-bit divisions per MULMOD.
+pub inline fn mulmodRef(a: u256, b: u256, modulus: u256) u256 {
+    if (modulus == 0) return 0;
+    const reduced_a: u512 = a % modulus;
+    const reduced_b: u512 = b % modulus;
+    return @intCast((reduced_a * reduced_b) % modulus);
+}
+
+/// MULMOD with one reduction: the full 512-bit product of the unreduced factors,
+/// reduced once. A zero modulus gives 0.
+///
+/// Sound because `(2^256 - 1)^2 < 2^512`: the product never wraps
+/// (`mulmod_product_fits_512`), and reducing the factors first does not change the
+/// remainder (`mulmod_direct_equiv`). `wide_arith.mulmod`, which the MULMOD handler
+/// runs, computes exactly this value limb by limb.
+pub inline fn mulmodDirect(a: u256, b: u256, modulus: u256) u256 {
+    if (modulus == 0) return 0;
+    const product = @as(u512, a) * @as(u512, b);
+    return @intCast(product % modulus);
+}
+
+/// MULMOD for operands that all fit one 64-bit limb: a 128-bit product reduced once.
+/// Equal to `mulmodDirect` on the same values (`mulmod_u64_fast_path_equiv`).
+pub inline fn mulmodU64(a: u64, b: u64, modulus: u64) u64 {
+    if (modulus == 0) return 0;
+    const product = @as(u128, a) * @as(u128, b);
+    return @intCast(product % modulus);
+}
+
+/// True when MULMOD may take the one-limb path: no operand has a bit above bit 63.
+pub inline fn mulmodFitsU64(a: u256, b: u256, modulus: u256) bool {
+    return ((a | b | modulus) >> 64) == 0;
+}
+
+/// DIV specification for a dividend that fits 64 bits: full 256-bit floor division,
+/// with the EVM's `x / 0 = 0`.
+pub inline fn pushDivRef(dividend: u64, divisor: u256) u256 {
+    if (divisor == 0) return 0;
+    return @as(u256, dividend) / divisor;
+}
+
+/// `dividend / divisor` for the fused PUSH+DIV whose pushed dividend fits 64 bits.
+/// The dividend is the pushed value and the divisor is the stack item under it: DIV
+/// computes `top / second` and the PUSH puts its value on top.
+///
+/// A divisor of 2^64 or more exceeds every such dividend, so the quotient is 0. Any
+/// other divisor fits a limb and takes one hardware divide. Division by zero gives
+/// 0. Equal to `pushDivRef` for every input (`push_div_u64_fast_path_equiv`).
+pub inline fn pushDivU64(dividend: u64, divisor: u256) u64 {
+    if ((divisor >> 64) != 0) return 0;
+    const narrow: u64 = @truncate(divisor);
+    if (narrow == 0 or narrow > dividend) return 0;
+    return dividend / narrow;
+}
+
+/// Mask of one slot's bit in its 64-bit word of a free-slot bitmap.
+pub inline fn slotBitmapMask(slot: usize) u64 {
+    return @as(u64, 1) << @as(u6, @truncate(slot));
+}
+
+/// Index of the lowest free slot in `word` (its lowest set bit), or null when the
+/// word has none.
+pub inline fn slotBitmapLowest(word: u64) ?u6 {
+    if (word == 0) return null;
+    return @intCast(@ctz(word));
+}
+
+/// `word` with `slot` marked in use (its bit cleared).
+pub inline fn slotBitmapTake(word: u64, slot: usize) u64 {
+    return word & ~slotBitmapMask(slot);
+}
+
+/// `word` with `slot` marked free (its bit set).
+pub inline fn slotBitmapRelease(word: u64, slot: usize) u64 {
+    return word | slotBitmapMask(slot);
+}
+
+/// Word `word_index` of a bitmap in which every one of `slot_count` slots is free.
+/// Bits past `slot_count` stay clear, so a search never returns a slot that does
+/// not exist.
+pub inline fn slotBitmapFullWord(slot_count: usize, word_index: usize) u64 {
+    const first = word_index * 64;
+    if (slot_count <= first) return 0;
+    const in_word = slot_count - first;
+    if (in_word >= 64) return ~@as(u64, 0);
+    return (@as(u64, 1) << @as(u6, @intCast(in_word))) - 1;
+}
+
 /// Bytes the bytecode analyzer may address past the end of the code: one PUSH32
 /// immediate (32 bytes) plus the one-past-the-end offset.
 pub const pc_headroom: u32 = 33;
@@ -687,4 +780,88 @@ test "verified_ops: copyEvmBytes and stack fused top operations" {
     stackSwap1Top(&stack);
     try testing.expectEqual(@as(u256, 20), stack[0]);
     try testing.expectEqual(@as(u256, 15), stack[1]);
+}
+
+test "verified_ops: mulmodDirect matches mulmodRef on boundary values" {
+    const max = std.math.maxInt(u256);
+    const values = [_]u256{
+        0,
+        1,
+        2,
+        3,
+        0xFFFF_FFFF_FFFF_FFFF,
+        1 << 64,
+        (1 << 64) + 1,
+        1 << 127,
+        1 << 128,
+        (1 << 128) - 1,
+        1 << 255,
+        (1 << 255) - 1,
+        max,
+        max - 1,
+        max - 2,
+        // The secp256k1 field prime and the BN254 scalar field prime.
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F,
+        0x30644E72E131A029B85045B68181585D2833E84879B9709143E1F593F0000001,
+    };
+    for (values) |a| {
+        for (values) |b| {
+            for (values) |modulus| {
+                try std.testing.expectEqual(mulmodRef(a, b, modulus), mulmodDirect(a, b, modulus));
+                if (mulmodFitsU64(a, b, modulus)) {
+                    const narrow = mulmodU64(@truncate(a), @truncate(b), @truncate(modulus));
+                    try std.testing.expectEqual(mulmodDirect(a, b, modulus), @as(u256, narrow));
+                }
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(u256, 0), mulmodDirect(max, max, 0));
+    try std.testing.expectEqual(@as(u256, 0), mulmodDirect(max, max, 1));
+    // (2^256 - 1)^2 mod 2^255 = 1: the high half of the product is needed.
+    try std.testing.expectEqual(@as(u256, 1), mulmodDirect(max, max, 1 << 255));
+}
+
+test "verified_ops: pushDivU64 matches pushDivRef and keeps the operand order" {
+    const max = std.math.maxInt(u256);
+    const dividends = [_]u64{ 0, 1, 2, 7, 1 << 32, (1 << 63) + 5, std.math.maxInt(u64) - 1, std.math.maxInt(u64) };
+    const divisors = [_]u256{
+        0,                  1,        2,             3,        7,
+        1 << 32,            1 << 63,  (1 << 64) - 1, 1 << 64,  (1 << 64) + 1,
+        @as(u256, 5) << 64, 1 << 128, 1 << 192,      1 << 255, max,
+    };
+    for (dividends) |dividend| {
+        for (divisors) |divisor| {
+            try std.testing.expectEqual(pushDivRef(dividend, divisor), @as(u256, pushDivU64(dividend, divisor)));
+        }
+        // Dividing by itself gives 1, except 0 / 0 = 0.
+        try std.testing.expectEqual(@as(u64, @intFromBool(dividend != 0)), pushDivU64(dividend, dividend));
+    }
+    // The pushed value is the dividend: PUSH 100, DIV over a stack top of 7 is 100 / 7.
+    try std.testing.expectEqual(@as(u64, 14), pushDivU64(100, 7));
+    try std.testing.expectEqual(@as(u64, 0), pushDivU64(7, 100));
+}
+
+test "verified_ops: slot bitmap takes the lowest free slot and releases it again" {
+    // 256 slots in four words: all free, none past the end.
+    var words: [4]u64 = undefined;
+    for (&words, 0..) |*word, index| word.* = slotBitmapFullWord(256, index);
+    for (words) |word| try std.testing.expectEqual(~@as(u64, 0), word);
+    try std.testing.expectEqual(@as(u64, 0), slotBitmapFullWord(256, 4));
+    try std.testing.expectEqual(@as(u64, 0b111), slotBitmapFullWord(3, 0));
+    try std.testing.expectEqual(@as(u64, 0), slotBitmapFullWord(3, 1));
+    try std.testing.expectEqual(@as(u64, 1), slotBitmapFullWord(65, 1));
+
+    var word: u64 = ~@as(u64, 0);
+    var expected: usize = 0;
+    while (slotBitmapLowest(word)) |slot| : (expected += 1) {
+        try std.testing.expectEqual(expected, @as(usize, slot));
+        const taken = slotBitmapTake(word, slot);
+        try std.testing.expectEqual(@popCount(word) - 1, @popCount(taken));
+        try std.testing.expectEqual(word, slotBitmapRelease(taken, slot));
+        word = taken;
+    }
+    try std.testing.expectEqual(@as(usize, 64), expected);
+    try std.testing.expectEqual(@as(?u6, null), slotBitmapLowest(0));
+    // A slot index selects its bit modulo 64, whatever word it lives in.
+    try std.testing.expectEqual(slotBitmapMask(5), slotBitmapMask(64 + 5));
 }

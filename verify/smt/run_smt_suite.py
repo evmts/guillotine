@@ -197,6 +197,9 @@ class Theorem:
     structural_error: str = ""  # set when Python-level structure (e.g. stack shape) mismatches
     # Minimum per-query solver budget in seconds; --timeout applies when larger.
     timeout: int = 0
+    # Solver this theorem must run on, whatever --solver says. Set for theorems over
+    # mathematical integers (QF_NIA), which Bitwuzla does not accept.
+    solver: str = ""
 
     def render(self, vacuity: bool) -> str:
         status = "sat" if vacuity else "unsat"
@@ -227,7 +230,9 @@ class Theorem:
         out.append("(set-info :smt-lib-version 2.6)")
         out.append(f"(set-info :status {status})")
         out.append(f"(set-logic {self.logic})")
-        out.append(COMMON_DEFS)
+        # The Word sort is a bit-vector sort; integer-only logics have no such sort.
+        if "BV" in self.logic:
+            out.append(COMMON_DEFS)
         out.append("")
         out.append(self.decls.strip())
         out.append("")
@@ -1292,6 +1297,266 @@ high = height - inputs + outputs exactly.""",
 
 
 # ---------------------------------------------------------------------------
+# MULMOD: one 512-bit reduction instead of three (QF_NIA, mathematical integers)
+# ---------------------------------------------------------------------------
+#
+# Bit-blasting a 512-bit multiply and three 256-bit divisions is out of reach for
+# both solvers (the 8-bit version of the claim already times out). The claim is a
+# statement about integers, so it is proved over integers: every Zig `x % m` with
+# m > 0 is modeled by its Euclidean witnesses (x = q*m + r, 0 <= r < m, q >= 0),
+# which determine r uniquely. The goals also bound every intermediate value, which
+# is what makes the integer model equal to the Zig fixed-width code: no u512
+# product wraps and the final `@intCast` to u256 cannot trap.
+
+POW64 = 1 << 64
+POW128 = 1 << 128
+POW256 = 1 << 256
+POW512 = 1 << 512
+
+
+def euclid(x: str, m: str, q: str, r: str) -> str:
+    """`r = x % m` for m > 0, as the Euclidean division it denotes."""
+    return f"(and (= {x} (+ (* {q} {m}) {r})) (<= 0 {r}) (< {r} {m}) (<= 0 {q}))"
+
+
+theorem(
+    Theorem(
+        name="mulmod_direct_equiv",
+        claim="""For ALL u256 a, b and ALL u256 modulus > 0:
+  mulmodDirect(a, b, modulus) == mulmodRef(a, b, modulus)
+i.e. reducing the full 512-bit product a * b once gives the same remainder as
+reducing a and b first, multiplying, and reducing again:
+  (a * b) mod m == ((a mod m) * (b mod m)) mod m.
+The same file proves the facts that make the integer model exact for the Zig code:
+  (1) a * b <= (2^256 - 1)^2 < 2^512: the u512 product never wraps,
+  (2) (a mod m) * (b mod m) < 2^512 likewise,
+  (3) both results are < modulus <= 2^256 - 1, so the @intCast to u256 cannot trap,
+  (4) modulus == 1 gives 0.
+modulus == 0 returns 0 in both functions before any arithmetic (same first line).""",
+        logic="QF_NIA",
+        solver="z3",
+        decls=f"""(declare-const a Int)
+(declare-const b Int)
+(declare-const m Int)
+; verified_ops.zig mulmodRef: reduced_a = a % m; reduced_b = b % m; (reduced_a * reduced_b) % m
+(declare-const qa Int)
+(declare-const reduced_a Int)
+(declare-const qb Int)
+(declare-const reduced_b Int)
+(declare-const q_ref Int)
+(declare-const r_ref Int)
+; verified_ops.zig mulmodDirect: (a * b) % m over the unreduced 512-bit product
+(declare-const q_direct Int)
+(declare-const r_direct Int)""",
+        hyps=[
+            ("a, b are u256 and modulus is a non-zero u256", f"(and (<= 0 a) (< a {POW256}) (<= 0 b) (< b {POW256}) (< 0 m) (< m {POW256}))"),
+            ("reduced_a = a % m", euclid("a", "m", "qa", "reduced_a")),
+            ("reduced_b = b % m", euclid("b", "m", "qb", "reduced_b")),
+            ("r_ref = (reduced_a * reduced_b) % m", euclid("(* reduced_a reduced_b)", "m", "q_ref", "r_ref")),
+            ("r_direct = (a * b) % m", euclid("(* a b)", "m", "q_direct", "r_direct")),
+        ],
+        goal=f"""(and (= r_direct r_ref)
+     (<= (* a b) {(POW256 - 1) * (POW256 - 1)})
+     (< (* a b) {POW512})
+     (< (* reduced_a reduced_b) {POW512})
+     (< r_direct {POW256})
+     (< r_ref {POW256})
+     (=> (= m 1) (= r_direct 0)))""",
+        sources=src(VERIFIED_OPS, "mulmodDirect", "mulmodRef"),
+        notes="""Solved by Z3 over the integers (Bitwuzla has no integer theory). The Euclidean
+hypotheses are satisfiable for every a, b, m in range (see the vacuity file), so
+the proof is not vacuous. `wide_arith.mulmod`, which the MULMOD handler runs, is
+tied to mulmodDirect by differential tests and the arithmetic fuzz target.""",
+    )
+)
+
+theorem(
+    Theorem(
+        name="mulmod_u64_fast_path_equiv",
+        claim="""For ALL a, b < 2^64 and ALL 0 < modulus < 2^64 (the operands MULMOD's one-limb
+path accepts): mulmodU64(a, b, modulus) == mulmodDirect(a, b, modulus), and
+  (1) a * b < 2^128: the u128 product of the fast path never wraps,
+  (2) the result is < 2^64, so the @intCast to u64 cannot trap.""",
+        logic="QF_NIA",
+        solver="z3",
+        decls="""(declare-const a Int)
+(declare-const b Int)
+(declare-const m Int)
+; verified_ops.zig mulmodU64: (a * b) % m over the 128-bit product
+(declare-const q_narrow Int)
+(declare-const r_narrow Int)
+; verified_ops.zig mulmodDirect: (a * b) % m over the 512-bit product
+(declare-const q_direct Int)
+(declare-const r_direct Int)""",
+        hyps=[
+            ("a, b fit one limb and modulus is a non-zero limb", f"(and (<= 0 a) (< a {POW64}) (<= 0 b) (< b {POW64}) (< 0 m) (< m {POW64}))"),
+            ("r_narrow = (a * b) % m", euclid("(* a b)", "m", "q_narrow", "r_narrow")),
+            ("r_direct = (a * b) % m", euclid("(* a b)", "m", "q_direct", "r_direct")),
+        ],
+        goal=f"""(and (= r_narrow r_direct)
+     (< (* a b) {POW128})
+     (< r_narrow {POW64}))""",
+        sources=src(VERIFIED_OPS, "mulmodU64", "mulmodDirect"),
+        notes="""The two functions compute the same Euclidean remainder at different widths; the
+content of the theorem is that the narrow width is wide enough (goal 1) and that
+the remainder is unique. `mulmod_fits_u64_guard` proves the guard that selects
+this path.""",
+    )
+)
+
+theorem(
+    Theorem(
+        name="mulmod_fits_u64_guard",
+        claim="""For ALL u256 a, b, modulus: mulmodFitsU64(a, b, modulus), computed as
+((a | b | modulus) >> 64) == 0, holds exactly when a < 2^64 and b < 2^64 and
+modulus < 2^64, and then truncating each operand to u64 loses nothing.""",
+        logic="QF_BV",
+        decls=f"""(declare-const a Word)
+(declare-const b Word)
+(declare-const m Word)
+; verified_ops.zig mulmodFitsU64
+(define-fun fits () Bool (= (bvlshr (bvor (bvor a b) m) {w(64)}) {w(0)}))
+(define-fun narrow ((x Word)) Word ((_ zero_extend 192) ((_ extract 63 0) x)))""",
+        hyps=[],
+        goal=f"""(and (= fits (and (bvult a {w(POW64)}) (bvult b {w(POW64)}) (bvult m {w(POW64)})))
+     (=> fits (and (= (narrow a) a) (= (narrow b) b) (= (narrow m) m))))""",
+        sources=src(VERIFIED_OPS, "mulmodFitsU64"),
+    )
+)
+
+# ---------------------------------------------------------------------------
+# PUSH+DIV with a one-limb dividend
+# ---------------------------------------------------------------------------
+
+theorem(
+    Theorem(
+        name="push_div_u64_fast_path_equiv",
+        claim="""For ALL u64 dividend and ALL u256 divisor (2^320 inputs):
+  pushDivU64(dividend, divisor) == pushDivRef(dividend, divisor)
+i.e. the fused PUSH+DIV fast path equals full 256-bit EVM division dividend / divisor
+with x / 0 = 0. The fast path returns 0 for a divisor >= 2^64 or == 0 and otherwise
+performs one 64-bit hardware divide. The result is < 2^64 and never exceeds the
+dividend. The dividend is the pushed (top) operand, as DIV computes top / second.""",
+        logic="QF_NIA",
+        solver="z3",
+        decls=f"""(declare-const dividend Int)
+(declare-const divisor Int)
+; pushDivRef: @as(u256, dividend) / divisor  (full-width floor division, divisor != 0)
+(declare-const q_ref Int)
+(declare-const r_ref Int)
+; pushDivU64: dividend / narrow  (64-bit hardware divide, 0 < divisor < 2^64)
+(declare-const q_fast Int)
+(declare-const r_fast Int)
+(define-fun ref () Int (ite (= divisor 0) 0 q_ref))
+(define-fun fast () Int (ite (>= divisor {POW64}) 0 (ite (= divisor 0) 0 q_fast)))""",
+        hyps=[
+            ("dividend is a u64 and divisor a u256", f"(and (<= 0 dividend) (< dividend {POW64}) (<= 0 divisor) (< divisor {POW256}))"),
+            ("q_ref = dividend / divisor when divisor != 0", f"(=> (not (= divisor 0)) {euclid('dividend', 'divisor', 'q_ref', 'r_ref')})"),
+            (
+                "q_fast = dividend / divisor on the hardware-divide path",
+                f"(=> (and (not (= divisor 0)) (< divisor {POW64})) {euclid('dividend', 'divisor', 'q_fast', 'r_fast')})",
+            ),
+        ],
+        goal=f"""(and (= fast ref)
+     (<= 0 fast)
+     (< fast {POW64})
+     (<= fast dividend))""",
+        sources=src(VERIFIED_OPS, "pushDivU64", "pushDivRef"),
+        notes="""Floor division is modeled by its Euclidean witnesses, which determine the
+quotient uniquely. `push_div_u64_guard` proves that the handler's bit tests select
+exactly these three cases and that the narrowed divisor equals the divisor.""",
+    )
+)
+
+theorem(
+    Theorem(
+        name="push_div_u64_guard",
+        claim="""For ALL u256 divisor: pushDivU64's tests partition the input as the integer
+model of `push_div_u64_fast_path_equiv` assumes:
+  (divisor >> 64) != 0            iff  divisor >= 2^64,
+  and when divisor < 2^64 the truncated `narrow` equals divisor, so
+  narrow == 0                     iff  divisor == 0.""",
+        logic="QF_BV",
+        decls=f"""(declare-const divisor Word)
+(define-fun wide () Bool (not (= (bvlshr divisor {w(64)}) {w(0)})))
+(define-fun narrow () (_ BitVec 64) ((_ extract 63 0) divisor))""",
+        hyps=[],
+        goal=f"""(and (= wide (bvuge divisor {w(POW64)}))
+     (=> (not wide) (= ((_ zero_extend 192) narrow) divisor))
+     (=> (not wide) (= (= narrow {bv(0, 64)}) (= divisor {w(0)}))))""",
+        sources=src(VERIFIED_OPS, "pushDivU64"),
+    )
+)
+
+# ---------------------------------------------------------------------------
+# DispatchCache free-slot bitmap
+# ---------------------------------------------------------------------------
+
+
+def ctz64_fun(name: str) -> str:
+    """`@ctz` of a 64-bit word as an if-chain from bit 0 up; 64 for a zero word."""
+    body = bv(64, 8)
+    for i in reversed(range(64)):
+        body = f"(ite (= ((_ extract {i} {i}) x) #b1) {bv(i, 8)}\n    {body})"
+    return f"(define-fun {name} ((x (_ BitVec 64))) (_ BitVec 8)\n    {body})"
+
+
+theorem(
+    Theorem(
+        name="dispatch_cache_free_slot_bitmap",
+        claim="""For ALL 64-bit bitmap words and ALL slot indexes (one word of DispatchCache's
+free-slot bitmap; bit set = slot free):
+  (1) slotBitmapLowest(word) is null iff word == 0; otherwise it names a set bit
+      and every lower bit is clear (the LOWEST free slot),
+  (2) slotBitmapTake clears exactly that slot's bit and slotBitmapRelease sets
+      exactly it: every other bit of the word is unchanged,
+  (3) take and release are inverse on the slot's bit: release(take(w, s), s) == w
+      when s was free and take(release(w, s), s) == w when s was in use, so the
+      free/in-use states of a slot are in bijection and no slot is lost or doubled,
+  (4) a slot just taken is not returned again: lowest(take(w, lowest(w))) is null
+      or a strictly higher slot.""",
+        logic="QF_BV",
+        decls=f"""(declare-const word (_ BitVec 64))
+(declare-const slot (_ BitVec 64))
+(declare-const other (_ BitVec 8))
+; @ctz(word)
+{ctz64_fun("ctz")}
+; verified_ops.zig slotBitmapMask: 1 << @truncate(slot)  (shift amount = slot mod 64)
+(define-fun mask ((s (_ BitVec 64))) (_ BitVec 64) (bvshl {bv(1, 64)} (bvand s {bv(63, 64)})))
+; verified_ops.zig slotBitmapTake / slotBitmapRelease
+(define-fun take ((x (_ BitVec 64)) (s (_ BitVec 64))) (_ BitVec 64) (bvand x (bvnot (mask s))))
+(define-fun release ((x (_ BitVec 64)) (s (_ BitVec 64))) (_ BitVec 64) (bvor x (mask s)))
+(define-fun bit ((x (_ BitVec 64)) (i (_ BitVec 8))) Bool
+  (not (= (bvand x (bvshl {bv(1, 64)} ((_ zero_extend 56) i))) {bv(0, 64)})))
+(define-fun lowest () (_ BitVec 64) ((_ zero_extend 56) (ctz word)))
+(define-fun taken () (_ BitVec 64) (take word lowest))""",
+        hyps=[("`other` is a bit index of the word", f"(bvult other {bv(64, 8)})")],
+        goal=f"""(and
+  ; (1) lowest free slot
+  (= (= word {bv(0, 64)}) (= (ctz word) {bv(64, 8)}))
+  (=> (not (= word {bv(0, 64)}))
+      (and (bit word (ctz word))
+           (=> (bvult other (ctz word)) (not (bit word other)))))
+  ; (2) take and release change exactly one bit
+  (=> (not (= ((_ zero_extend 56) other) (bvand slot {bv(63, 64)})))
+      (and (= (bit (take word slot) other) (bit word other))
+           (= (bit (release word slot) other) (bit word other))))
+  (= (bvand (take word slot) (mask slot)) {bv(0, 64)})
+  (= (bvand (release word slot) (mask slot)) (mask slot))
+  ; (3) inverse on the slot's bit
+  (=> (not (= (bvand word (mask slot)) {bv(0, 64)})) (= (release (take word slot) slot) word))
+  (=> (= (bvand word (mask slot)) {bv(0, 64)}) (= (take (release word slot) slot) word))
+  ; (4) a taken slot is not handed out again
+  (=> (not (= word {bv(0, 64)}))
+      (or (= taken {bv(0, 64)}) (bvugt (ctz taken) (ctz word)))))""",
+        sources=src(VERIFIED_OPS, "slotBitmapMask", "slotBitmapLowest", "slotBitmapTake", "slotBitmapRelease"),
+        notes="""The cache keeps one such word per 64 slots and searches the words in order, so
+the lowest set bit of the first non-zero word is the lowest free slot overall.""",
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Solver driver
 # ---------------------------------------------------------------------------
 
@@ -1303,6 +1568,7 @@ class Job:
     path: Path
     expected: str
     timeout: int = 0
+    solver: str = ""
 
 
 @dataclasses.dataclass
@@ -1435,6 +1701,32 @@ class Expr:
         raise ValueError(f"unsupported expression node {ast.dump(node)}")
 
 
+def join_table_statements(lines: List[str]) -> List[str]:
+    """Fold an `info[...] = .{ ... };` initializer that `zig fmt` spread over several
+    lines into its first line. The lines it occupied become empty, so every other
+    line keeps its number."""
+    out: List[str] = []
+    n = 0
+    while n < len(lines):
+        raw = lines[n]
+        if "info[" in raw and re.search(r"=\s*\.\{\s*$", raw):
+            parts = [raw.rstrip()]
+            end = n + 1
+            while end < len(lines) and not lines[end].strip().startswith("};"):
+                parts.append(lines[end].strip())
+                end += 1
+            if end < len(lines):
+                joined = " ".join(parts) + " };"
+                # A trailing comma before the closing brace is not part of the last field.
+                out.append(re.sub(r",\s*\};", " };", joined))
+                out.extend([""] * (end - n))
+                n = end + 1
+                continue
+        out.append(raw)
+        n += 1
+    return out
+
+
 def parse_opcode_table() -> Tuple[Dict[int, Tuple[int, int, int, int]], List[str]]:
     """Return {opcode: (gas, inputs, outputs, line)} from opcode_data.zig, plus parse errors."""
     names: Dict[str, int] = {}
@@ -1459,7 +1751,7 @@ def parse_opcode_table() -> Tuple[Dict[int, Tuple[int, int, int, int]], List[str
     )
     loop_re = re.compile(r"while\s*\(\s*i\s*(<=|<)\s*(\d+)\s*\)")
     loop: Optional[range] = None
-    lines = body.splitlines()
+    lines = join_table_statements(body.splitlines())
     for n, raw in enumerate(lines):
         lm = loop_re.search(raw)
         if lm:
@@ -1604,7 +1896,7 @@ def main() -> int:
 
     if args.list:
         for t in THEOREMS:
-            print(f"{t.name:44s} {t.logic}")
+            print(f"{t.name:44s} {t.logic}" + (f"  [{t.solver}]" if t.solver else ""))
         print("opcode_table_audit")
         return 0
 
@@ -1622,7 +1914,8 @@ def main() -> int:
         solvers = ["bitwuzla", "z3"]
     else:
         solvers = [args.solver]
-    missing = [s for s in solvers if not shutil.which(s)]
+    pinned_solvers = sorted({t.solver for t in THEOREMS if t.solver and re.search(args.only, t.name)})
+    missing = [s for s in list(solvers) + pinned_solvers if not shutil.which(s)]
     if not solvers or missing:
         print(f"error: solver not found on PATH: {missing or 'bitwuzla/z3'}", file=sys.stderr)
         return 2
@@ -1639,11 +1932,11 @@ def main() -> int:
             failures.append(f"{t.name}: {t.structural_error}")
         p = PROOFS / f"{t.name}.smt2"
         p.write_text(t.render(vacuity=False))
-        jobs.append(Job(t.name, "proof", p, "unsat", t.timeout))
+        jobs.append(Job(t.name, "proof", p, "unsat", t.timeout, t.solver))
         if t.hyps and not args.no_vacuity:
             v = PROOFS / "vacuity" / f"{t.name}.smt2"
             v.write_text(t.render(vacuity=True))
-            jobs.append(Job(t.name, "vacuity", v, "sat", t.timeout))
+            jobs.append(Job(t.name, "vacuity", v, "sat", t.timeout, t.solver))
 
     pin_errors = check_pins(args.update_pins)
     failures.extend(f"model pin: {e}" for e in pin_errors)
@@ -1656,7 +1949,11 @@ def main() -> int:
     outcomes: List[Outcome] = []
     workers = args.jobs or max(2, (os_cpu() or 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = [pool.submit(run_solver, s, j, max(args.timeout, j.timeout)) for j in jobs for s in solvers]
+        futs = [
+            pool.submit(run_solver, s, j, max(args.timeout, j.timeout))
+            for j in jobs
+            for s in ([j.solver] if j.solver else solvers)
+        ]
         for fut in futs:
             outcomes.append(fut.result())
         if fallback:

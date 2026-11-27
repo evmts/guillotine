@@ -723,34 +723,26 @@ pub fn Handlers(FrameType: type) type {
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
         /// Stack: [index] → [hash]
-        pub fn blobhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.BLOBHASH, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BLOBHASH requires 1 stack item");
-            }
-            const index = self.stack.peek_unsafe();
-            // Convert u256 to usize for array access
-            if (index > std.math.maxInt(usize)) {
-                self.stack.set_top_unsafe(0);
-                const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
-                return op_data.next_cursor.cursor;
-            }
+        ///
+        /// Written against the register ABI: the hash comes from the transaction
+        /// context the EVM already holds, so there is no host work to hand over to.
+        /// An index at or past the number of hashes, however large, gives zero.
+        ///
+        /// It continues without the post-instruction hook, as it did behind the
+        /// adapter: the reference interpreter the tracer compares against has no
+        /// versioned hashes, so it cannot confirm the value pushed here.
+        pub fn blobhash(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .BLOBHASH, cursor, s, gas_left);
+            if (comptime N.traced) (&self.getEvm().tracer).assert(s.size(self) >= 1, "BLOBHASH requires 1 stack item");
+            const index = s.peek_unsafe();
             // Versioned hashes are transaction-level context, not block data.
-            if (self.getEvm().get_blob_hash(index)) |hash| {
-                // Convert [32]u8 to u256
-                var hash_value: u256 = 0;
-                for (hash) |byte| {
-                    hash_value = (hash_value << 8) | @as(u256, byte);
-                }
-                const hash_word = @as(WordType, @truncate(hash_value));
-                self.stack.set_top_unsafe(hash_word);
-            } else {
-                // Index out of bounds - push zero
-                self.stack.set_top_unsafe(0);
-            }
-            const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+            const hash_word: WordType = if (self.getEvm().get_blob_hash(index)) |hash|
+                @truncate(memory_mod.loadWordBigEndian(&hash))
+            else
+                0;
+            s.set_top_unsafe(hash_word);
+            return N.next(self, .BLOBHASH, cursor, s, gas_left);
         }
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.

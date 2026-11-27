@@ -29,6 +29,23 @@ pub fn CallResult(config: anytype) type {
             };
         }
 
+        /// Successful result that takes `output` as it is, without copying it.
+        ///
+        /// For the interpreter: RETURN has already copied its output range into
+        /// the call arena, and every nested result lives there until the
+        /// transaction ends, so a second arena copy buys nothing. The result does
+        /// not own `output`; it must not be passed to `deinit`. A result handed to
+        /// a host goes through `toOwnedResult`, which makes the host's own copy.
+        pub fn success_adopting(gas_left: u64, output: []const u8) Self {
+            return Self{ .success = true, .gas_left = gas_left, .output = output };
+        }
+
+        /// Reverted result that takes `revert_data` as it is, without copying it.
+        /// Ownership is as for `success_adopting`.
+        pub fn revert_adopting(gas_left: u64, revert_data: []const u8) Self {
+            return Self{ .success = false, .gas_left = gas_left, .output = revert_data, .reverted = true };
+        }
+
         /// Failed result with no output. Allocates nothing, so it cannot fail.
         pub fn failed(gas_left: u64) Self {
             return Self{ .success = false, .gas_left = gas_left, .output = &.{} };

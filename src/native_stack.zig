@@ -19,6 +19,7 @@ extern "c" fn pthread_attr_getstack(
 extern "c" fn pthread_get_stackaddr_np(thread: std.c.pthread_t) ?*anyopaque;
 extern "c" fn pthread_get_stacksize_np(thread: std.c.pthread_t) usize;
 extern "c" fn getauxval(kind: c_ulong) c_ulong;
+extern "c" fn fork() c_int;
 
 /// `AT_EXECFN`: address of the executable path string the kernel copies to the very
 /// top of the main thread's stack mapping.
@@ -31,10 +32,52 @@ pub const unlimited_main_stack = 8 * 1024 * 1024;
 /// size only makes the reported low address higher, which is conservative.
 const max_main_stack = 256 * 1024 * 1024;
 
-/// Per-thread cache. Valid only while `tid` equals the calling thread's id, so a
-/// child process after `fork` (new tid, possibly now the main thread) queries again.
-threadlocal var cached_tid: i32 = 0;
+/// Per-thread cache of the stack's low address.
+///
+/// A thread's stack does not move, so the address is looked up once per thread.
+/// The one event that invalidates it is `fork`: the child's only thread keeps
+/// the thread-local value but may now be the process's main thread, whose stack
+/// is found differently. A `pthread_atfork` child handler advances
+/// `fork_generation`, and a cache entry is valid only for the generation it was
+/// made in. That check is two loads; asking the kernel for the thread id on
+/// every call, which is what the cache was keyed by before, is a system call
+/// per transaction.
 threadlocal var cached_low: usize = 0;
+threadlocal var cached_generation: u32 = 0;
+/// Thread id the entry was made for. Read only when no fork handler could be
+/// registered, where it is the fallback key.
+threadlocal var cached_tid: i32 = 0;
+
+/// Number of times this process has been the child of a `fork` since the handler
+/// was registered.
+var fork_generation = std.atomic.Value(u32).init(0);
+
+const ForkHandler = enum(u8) { unregistered, registered, unavailable };
+var fork_handler = std.atomic.Value(ForkHandler).init(.unregistered);
+
+extern "c" fn pthread_atfork(
+    prepare: ?*const fn () callconv(.c) void,
+    parent: ?*const fn () callconv(.c) void,
+    child: ?*const fn () callconv(.c) void,
+) c_int;
+
+fn noteForkChild() callconv(.c) void {
+    _ = fork_generation.fetchAdd(1, .monotonic);
+}
+
+/// True when a fork handler keeps `fork_generation` current. Registers it on first
+/// use. Two threads that race here may both register; the handler only counts, so
+/// a second registration is harmless.
+fn forkHandlerRegistered() bool {
+    switch (fork_handler.load(.acquire)) {
+        .registered => return true,
+        .unavailable => return false,
+        .unregistered => {},
+    }
+    const registered = pthread_atfork(null, null, &noteForkChild) == 0;
+    fork_handler.store(if (registered) .registered else .unavailable, .release);
+    return registered;
+}
 
 /// Lowest address of the calling thread's stack, or null when it cannot be determined.
 pub fn lowAddress() ?usize {
@@ -47,13 +90,27 @@ pub fn lowAddress() ?usize {
         return top - size;
     }
 
+    if (forkHandlerRegistered()) {
+        const generation = fork_generation.load(.monotonic);
+        if (cached_low != 0 and cached_generation == generation) return cached_low;
+        const low = queryLinux(std.os.linux.gettid()) orelse return null;
+        cached_generation = generation;
+        cached_low = low;
+        return low;
+    }
+
+    // No fork handler: key the cache by thread id, which a fork changes.
     const tid = std.os.linux.gettid();
     if (cached_tid == tid and cached_low != 0) return cached_low;
-    const low = if (tid == std.os.linux.getpid()) queryLinuxMainThread() else queryLinuxThread();
-    const known = low orelse return null;
+    const low = queryLinux(tid) orelse return null;
     cached_tid = tid;
-    cached_low = known;
-    return known;
+    cached_low = low;
+    return low;
+}
+
+/// Ask the system for the low address of the stack of thread `tid`, the caller.
+fn queryLinux(tid: i32) ?usize {
+    return if (tid == std.os.linux.getpid()) queryLinuxMainThread() else queryLinuxThread();
 }
 
 /// The main thread's stack is the kernel's grow-down `[stack]` mapping. glibc's
@@ -192,6 +249,45 @@ test "the current frame lies above the reported stack low address" {
     // No thread stack in practice is larger than 1 GiB.
     try std.testing.expect(here - low < 1024 * 1024 * 1024);
     try std.testing.expectEqual(low, lowAddress().?);
+}
+
+test "repeated lookups reuse the per-thread entry of the current fork generation" {
+    if (comptime !supported or builtin.os.tag != .linux) return error.SkipZigTest;
+    const low = lowAddress() orelse return error.TestUnexpectedResult;
+    try std.testing.expect(forkHandlerRegistered());
+    try std.testing.expectEqual(low, cached_low);
+    try std.testing.expectEqual(fork_generation.load(.monotonic), cached_generation);
+
+    // A stale generation, as a forked child would see it, forces a fresh lookup
+    // that finds the same stack.
+    cached_generation -%= 1;
+    cached_low = 1;
+    try std.testing.expectEqual(low, lowAddress().?);
+    try std.testing.expectEqual(low, cached_low);
+    try std.testing.expectEqual(fork_generation.load(.monotonic), cached_generation);
+}
+
+test "a forked child advances the fork generation and looks its stack up again" {
+    if (comptime !supported or builtin.os.tag != .linux) return error.SkipZigTest;
+    _ = lowAddress() orelse return error.TestUnexpectedResult;
+    const generation = fork_generation.load(.monotonic);
+
+    const pid = fork();
+    try std.testing.expect(pid >= 0);
+    if (pid == 0) {
+        // In the child: the handler ran, so the inherited entry is stale, and a
+        // fresh lookup is either unavailable or below the current frame.
+        var ok = fork_generation.load(.monotonic) == generation +% 1 and cached_generation == generation;
+        if (lowAddress()) |low| ok = ok and @frameAddress() > low and cached_generation == generation +% 1;
+        std.c._exit(if (ok) 0 else 1);
+    }
+    var status: c_int = 0;
+    try std.testing.expectEqual(pid, std.c.waitpid(pid, &status, 0));
+    // Exited normally (low seven bits clear) with status 0.
+    try std.testing.expectEqual(@as(c_int, 0), status & 0x7f);
+    try std.testing.expectEqual(@as(c_int, 0), (status >> 8) & 0xff);
+    // The parent's generation is untouched.
+    try std.testing.expectEqual(generation, fork_generation.load(.monotonic));
 }
 
 test "a spawned thread reports its own stack bounds, not the main thread's" {

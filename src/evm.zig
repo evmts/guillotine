@@ -10,6 +10,8 @@ const Account = @import("storage/database_interface_account.zig").Account;
 const SelfDestruct = @import("storage/self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("storage/created_contracts.zig").CreatedContracts;
 const AccessList = @import("storage/access_list.zig").AccessList;
+const slot_hash = @import("storage/slot_hash.zig");
+const verified_ops = @import("core/verified_ops.zig");
 const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
 const precompiles = @import("precompiles");
 const kzg_setup = @import("crypto").kzg_setup;
@@ -61,6 +63,15 @@ pub fn Evm(config: EvmConfig) type {
         });
         /// Set of storage slots, in first-touch order.
         const TouchedSlots = std.array_hash_map.Auto(u256, void);
+        const TouchedStorageRecord = struct {
+            address: primitives.Address,
+            slots: *TouchedSlots,
+            slot: u256,
+        };
+        /// True when calls record what they touch for `dumpState`.
+        pub const state_dump_enabled = config.track_state_dump;
+        /// Largest `return_buffer` kept after the data it held is cleared.
+        pub const max_retained_return_data: usize = 64 * 1024;
         const CallStackEntry = struct {
             caller: primitives.Address,
             value: config.WordType,
@@ -112,8 +123,13 @@ pub fn Evm(config: EvmConfig) type {
         /// One entry per active frame. Frames run at 0-based depths 0..max_call_depth
         /// inclusive (execution-specs STACK_DEPTH_LIMIT), hence the extra slot.
         call_stack: [config.max_call_depth + 1]CallStackEntry,
-        /// Current return data from last call (null if no return data available)
+        /// Current return data from last call (null if no return data available).
+        /// A view of the first bytes of `return_buffer`.
         return_data: ?[]const u8, // 24 bytes (optional adds 8 bytes for tag)
+        /// Storage behind `return_data`, owned by `allocator`. Its capacity is kept
+        /// across calls and transactions (up to `max_retained_return_data`), so a
+        /// call that returns data does not allocate once the buffer is large enough.
+        return_buffer: []u8 = &.{},
         /// Allocator for dynamic memory
         allocator: std.mem.Allocator, // 16 bytes (vtable ptr + context ptr)
 
@@ -186,6 +202,14 @@ pub fn Evm(config: EvmConfig) type {
         /// Addresses that calls, not the host, added to `touched_addresses`.
         /// `resetTouched` removes exactly these.
         transaction_touched: std.ArrayList(primitives.Address) = .empty,
+        /// The address `touchAddress` recorded last. Recording it again needs no
+        /// lookup. Cleared whenever an address can leave `touched_addresses`.
+        last_touched_address: ?primitives.Address = null,
+        /// The slot `touchStorageSlot` recorded last, with its address's slot set.
+        /// `slots` points into `touched_storage` and stays valid because every
+        /// insertion into that map goes through `touchStorageSlot`, which replaces
+        /// this record. Cleared with the map.
+        last_touched_storage: ?TouchedStorageRecord = null,
         /// EIP-161 (Spurious Dragon+): the accounts the current transaction touched
         /// in the consensus sense: targets of CALL and STATICCALL (zero-value calls
         /// included), SELFDESTRUCT beneficiaries and the block's coinbase. Every one
@@ -501,10 +525,7 @@ pub fn Evm(config: EvmConfig) type {
             }
             self.dispatch_cache.deinit();
             self.tracer.deinit();
-            // Free return_data if it exists
-            if (self.return_data) |data| {
-                self.allocator.free(data);
-            }
+            self.allocator.free(self.return_buffer);
             self.journal.deinit();
             self.created_contracts.deinit();
             self.self_destruct.deinit();
@@ -573,7 +594,7 @@ pub fn Evm(config: EvmConfig) type {
         pub fn resetForTx(self: *Self) void {
             self.depth = 0;
             self.clear_return_data();
-            self.access_list.clear();
+            self.access_list.clearKeepingAddresses(self.keptWarmPrecompiles());
             self.journal.clear();
             self.gas_refund_counter = 0;
             self.logs.clearRetainingCapacity();
@@ -589,9 +610,7 @@ pub fn Evm(config: EvmConfig) type {
             self.frame_memory.trim();
             self.frame_stacks.trim();
             self.resetTouched();
-            self.call_arena.resetRetainCapacity() catch |err| {
-                self.failHost(err);
-            };
+            self.call_arena.resetRetainCapacity();
         }
 
         /// Simulate an EVM operation without committing state changes.
@@ -656,6 +675,7 @@ pub fn Evm(config: EvmConfig) type {
         ///
         /// Note: Caller owns returned StateDump and must call deinit() to free.
         pub fn dumpState(self: *Self, allocator: std.mem.Allocator) !StateDump {
+            if (comptime !state_dump_enabled) return error.StateDumpDisabled;
             var state_dump = StateDump{
                 .accounts = std.StringHashMap(StateDump.AccountState).init(allocator),
             };
@@ -1015,7 +1035,7 @@ pub fn Evm(config: EvmConfig) type {
 
         fn resetTransactionState(self: *Self) void {
             self.depth = 0;
-            self.access_list.clear();
+            self.access_list.clearKeepingAddresses(self.keptWarmPrecompiles());
             self.journal.clear();
             self.gas_refund_counter = 0;
             self.logs.clearRetainingCapacity();
@@ -1023,19 +1043,11 @@ pub fn Evm(config: EvmConfig) type {
             self.self_destruct.clear();
             self.consensus_touched.clearRetainingCapacity();
             self.database.clear_transient_storage();
-            self.call_stack = @as([config.max_call_depth + 1]CallStackEntry, @splat(CallStackEntry{
-                .caller = primitives.Address.ZERO_ADDRESS,
-                .value = 0,
-                .is_static = false,
-            }));
             self.current_snapshot_id = 0;
             self.tx_sender_nonce_incremented = false;
             self.frame_memory.trim();
             self.frame_stacks.trim();
-            self.call_arena.resetRetainCapacity() catch |err| {
-                @branchHint(.cold);
-                log.warn("Arena reset failed: {s}", .{@errorName(err)});
-            };
+            self.call_arena.resetRetainCapacity();
             self.tracer.instruction_safety.count = 0;
             self.tracer.instruction_count = 0;
             self.tracer.schedule_index = 0;
@@ -1044,7 +1056,60 @@ pub fn Evm(config: EvmConfig) type {
             self.tracer.clearSteps();
         }
 
+        /// The addresses every transaction starts with warm, apart from its own
+        /// (EIP-2929): the fork's precompiles and the configured precompile
+        /// overrides. Empty before Berlin. They are the first entries of the access
+        /// list, in this order, so that they can stay there between transactions.
+        const warm_precompiles: []const primitives.Address = blk: {
+            // Comparing every override against the list is quadratic in addresses.
+            @setEvalBranchQuota(200_000);
+            if (!config.eips.hardfork.isAtLeast(.BERLIN)) break :blk &.{};
+            var list: []const primitives.Address = &.{};
+            const last = precompiles.lastContiguousPrecompile(config.eips.hardfork);
+            var index: u16 = 0x01;
+            while (index <= last) : (index += 1) {
+                const address = primitives.Address.fromU256(index);
+                if (precompiles.isPrecompile(address, config.eips.hardfork)) list = list ++ [_]primitives.Address{address};
+            }
+            if (config.eips.hardfork.isAtLeast(.OSAKA) and precompiles.isPrecompile(precompiles.P256VERIFY_ADDRESS, config.eips.hardfork)) {
+                list = list ++ [_]primitives.Address{precompiles.P256VERIFY_ADDRESS};
+            }
+            if (config.enable_precompiles) {
+                for (config.precompile_overrides) |override| {
+                    var known = false;
+                    for (list) |address| known = known or address.equals(override.address);
+                    if (!known) list = list ++ [_]primitives.Address{override.address};
+                }
+            }
+            const final = list;
+            break :blk final;
+        };
+
+        /// Number of leading access-list addresses that are exactly
+        /// `warm_precompiles`: all of them, or none. The access list is a public
+        /// field, so this is read from its content each time, not remembered.
+        fn keptWarmPrecompiles(self: *const Self) usize {
+            const keys = self.access_list.addresses.keys();
+            if (warm_precompiles.len == 0 or keys.len < warm_precompiles.len) return 0;
+            for (warm_precompiles, keys[0..warm_precompiles.len]) |expected, key| {
+                if (!expected.equals(key)) return 0;
+            }
+            return warm_precompiles.len;
+        }
+
+        /// Warm `warm_precompiles`. A transaction that finds them kept from the one
+        /// before (`AccessList.clearKeepingAddresses`) inserts nothing.
+        fn warmPrecompiles(self: *Self) !void {
+            if (self.keptWarmPrecompiles() == warm_precompiles.len) return;
+            try self.access_list.pre_warm_addresses(warm_precompiles);
+        }
+
         fn prewarmTransactionAccessList(self: *Self, params: CallParams) ?CallResult {
+            self.warmPrecompiles() catch |err| {
+                @branchHint(.cold);
+                log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
+            };
             config.eips.pre_warm_transaction_addresses(
                 &self.access_list,
                 self.origin,
@@ -1071,33 +1136,6 @@ pub fn Evm(config: EvmConfig) type {
                 }
             }
 
-            if (comptime config.eips.hardfork.isAtLeast(.BERLIN)) {
-                const last = comptime precompiles.lastContiguousPrecompile(config.eips.hardfork);
-                var precompile_index: u16 = 0x01;
-                while (precompile_index <= last) : (precompile_index += 1) {
-                    self.warmPrecompile(primitives.Address.fromU256(precompile_index)) catch |err| {
-                        @branchHint(.cold);
-                        log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                        return self.hostFailureResult(err);
-                    };
-                }
-                if (comptime config.eips.hardfork.isAtLeast(.OSAKA)) {
-                    self.warmPrecompile(precompiles.P256VERIFY_ADDRESS) catch |err| {
-                        @branchHint(.cold);
-                        log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                        return self.hostFailureResult(err);
-                    };
-                }
-                if (comptime config.enable_precompiles) {
-                    inline for (config.precompile_overrides) |override| {
-                        self.access_list.pre_warm_addresses(&[_]primitives.Address{override.address}) catch |err| {
-                            @branchHint(.cold);
-                            log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                            return self.hostFailureResult(err);
-                        };
-                    }
-                }
-            }
             return null;
         }
 
@@ -1746,8 +1784,9 @@ pub fn Evm(config: EvmConfig) type {
                 return PreflightResult{ .precompile_result = result };
             }
 
-            // Get contract code (from delegated address if applicable)
-            const code = try self.codeAt(code_address);
+            // Get contract code (from the delegate if applicable). Without delegation
+            // the account read above is the one the code belongs to.
+            const code = if (delegated) try self.codeAt(code_address) else try self.codeOfAccount(account);
             if (code.bytes.len == 0) {
                 return PreflightResult{ .empty_account = gas };
             }
@@ -1889,7 +1928,7 @@ pub fn Evm(config: EvmConfig) type {
                 return result;
             }
 
-            const code = try self.codeAt(code_address);
+            const code = if (delegated) try self.codeAt(code_address) else try self.codeOfAccount(target);
             if (code.bytes.len == 0) {
                 @branchHint(.unlikely);
                 return CallResult.succeeded_empty(params.gas);
@@ -2355,10 +2394,8 @@ pub fn Evm(config: EvmConfig) type {
             // The creation's snapshot stays open: `inner_call` commits it once the
             // result below exists and the caller's return data is stored, so a
             // failure after this point still undoes the deployment.
-            var final_result = if (result.output.len > 0)
-                try CallResult.success_with_output(self.getCallArenaAllocator(), result.gas_left, result.output)
-            else
-                CallResult.succeeded_empty(result.gas_left);
+            // `result.output` is already allocated in `call_arena`; adopt it directly.
+            var final_result = CallResult.success_adopting(result.gas_left, result.output);
             final_result.trace = result.trace;
             return final_result;
         }
@@ -2427,12 +2464,16 @@ pub fn Evm(config: EvmConfig) type {
         const AnalysisError = error{ InvalidOpcode, InvalidJumpDestination, CodeTooLarge, AllocationError };
 
         const Analysis = struct {
-            bytecode: Bytecode,
+            /// The dispatch schedule, with the jump table into it
+            /// (`schedule.jump_table`).
             schedule: Frame.Dispatch.DispatchSchedule,
-            jump_table: Frame.Dispatch.JumpTable,
-            allocator: std.mem.Allocator,
 
             /// Analyze `code`. The result keeps pointing at `code`, which must outlive it.
+            ///
+            /// Validation builds a per-byte bitmap of the code (instruction starts,
+            /// JUMPDESTs, fusion candidates). Only schedule construction reads it, so
+            /// it is freed before this returns: an analysis holds the schedule and
+            /// its jump table, nothing per code byte.
             fn init(allocator: std.mem.Allocator, code: []const u8, tracer: anytype) AnalysisError!Analysis {
                 var bytecode = Bytecode.initWithTracer(allocator, code, tracer) catch |e| {
                     return switch (e) {
@@ -2445,26 +2486,17 @@ pub fn Evm(config: EvmConfig) type {
                         error.OutOfMemory => error.AllocationError,
                     };
                 };
-                errdefer bytecode.deinit();
+                defer bytecode.deinit();
 
-                var schedule = Frame.Dispatch.DispatchSchedule.init(allocator, bytecode, &Frame.opcode_handlers, tracer) catch |err| {
+                const schedule = Frame.Dispatch.DispatchSchedule.init(allocator, bytecode, &Frame.opcode_handlers, tracer) catch |err| {
                     log.warn("DispatchSchedule.init failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
                     return error.AllocationError;
                 };
-                errdefer schedule.deinit();
-
-                const jump_table = Frame.Dispatch.createJumpTable(allocator, &schedule) catch |err| {
-                    log.warn("createJumpTable failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
-                    return error.AllocationError;
-                };
-
-                return .{ .bytecode = bytecode, .schedule = schedule, .jump_table = jump_table, .allocator = allocator };
+                return .{ .schedule = schedule };
             }
 
             fn deinit(self: *Analysis) void {
-                if (self.jump_table.entries.len > 0) self.allocator.free(self.jump_table.entries);
                 self.schedule.deinit();
-                self.bytecode.deinit();
             }
         };
 
@@ -2505,6 +2537,61 @@ pub fn Evm(config: EvmConfig) type {
             /// Random slots probed for a victim before the sweep.
             const eviction_probes = 16;
 
+            /// Table hash of a keccak256 code hash: its first eight bytes. A digest is
+            /// uniformly distributed already; equality still compares all 32 bytes.
+            pub const CodeHashContext = struct {
+                pub fn hash(_: @This(), key: [32]u8) u64 {
+                    return std.mem.readInt(u64, key[0..8], .little);
+                }
+                pub fn eql(_: @This(), a: [32]u8, b: [32]u8) bool {
+                    return std.mem.eql(u8, &a, &b);
+                }
+            };
+
+            /// Set of free slot indexes as 64-bit words: bit `i` of word `w` is slot
+            /// `w * 64 + i`. Taking a free slot is one count-trailing-zeros per word
+            /// (four words for the default 256 entries).
+            pub const FreeSlots = struct {
+                pub const word_count = (max_entries + 63) / 64;
+                words: [word_count]u64,
+
+                /// Every slot free.
+                pub fn initFull() FreeSlots {
+                    var words: [word_count]u64 = undefined;
+                    for (&words, 0..) |*word, index| word.* = verified_ops.slotBitmapFullWord(max_entries, index);
+                    return .{ .words = words };
+                }
+
+                /// Lowest free slot, or null when none is free. Does not take it.
+                pub fn lowest(self: *const FreeSlots) ?usize {
+                    for (self.words, 0..) |word, index| {
+                        if (verified_ops.slotBitmapLowest(word)) |bit| return index * 64 + bit;
+                    }
+                    return null;
+                }
+
+                pub fn isFree(self: *const FreeSlots, slot: usize) bool {
+                    return self.words[slot / 64] & verified_ops.slotBitmapMask(slot) != 0;
+                }
+
+                /// Mark `slot` in use.
+                pub fn take(self: *FreeSlots, slot: usize) void {
+                    self.words[slot / 64] = verified_ops.slotBitmapTake(self.words[slot / 64], slot);
+                }
+
+                /// Mark `slot` free.
+                pub fn release(self: *FreeSlots, slot: usize) void {
+                    self.words[slot / 64] = verified_ops.slotBitmapRelease(self.words[slot / 64], slot);
+                }
+
+                /// Number of free slots.
+                pub fn count(self: *const FreeSlots) usize {
+                    var total: usize = 0;
+                    for (self.words) |word| total += @popCount(word);
+                    return total;
+                }
+            };
+
             pub const Entry = struct {
                 /// Copy of the code the analysis points into.
                 code: []const u8,
@@ -2525,9 +2612,14 @@ pub fn Evm(config: EvmConfig) type {
                 spared_by: u64,
             };
 
-            entries: std.AutoHashMapUnmanaged([32]u8, *Entry),
+            /// Cached entries by code hash. The key is a keccak256 digest, so its
+            /// first eight bytes serve as the table hash (`CodeHashContext`).
+            entries: std.HashMapUnmanaged([32]u8, *Entry, CodeHashContext, std.hash_map.default_max_load_percentage),
             /// Every cached entry, at the index its `slot` names.
             slots: [max_entries]?*Entry,
+            /// One bit per slot, set while the slot is free. Admission takes the
+            /// lowest set bit instead of scanning `slots`.
+            free_slots: FreeSlots,
             /// Sum of `bytes` over the cached entries.
             bytes: usize,
             /// State of the xorshift64 generator that picks eviction probes.
@@ -2546,6 +2638,7 @@ pub fn Evm(config: EvmConfig) type {
                 return .{
                     .entries = .empty,
                     .slots = @splat(null),
+                    .free_slots = FreeSlots.initFull(),
                     .bytes = 0,
                     .random_state = 0x9E3779B97F4A7C15,
                     .allocator = allocator,
@@ -2591,6 +2684,7 @@ pub fn Evm(config: EvmConfig) type {
             fn evictSlot(self: *DispatchCache, index: usize) void {
                 const entry = self.slots[index].?;
                 self.slots[index] = null;
+                self.free_slots.release(index);
                 self.bytes -= entry.bytes;
                 self.evictions += 1;
                 const removed = self.entries.remove(entry.hash);
@@ -2636,21 +2730,19 @@ pub fn Evm(config: EvmConfig) type {
                 return false;
             }
 
+            /// Lowest free slot, in O(1). Null when every slot holds an entry.
             fn freeSlot(self: *const DispatchCache) ?usize {
-                for (self.slots, 0..) |slot, index| {
-                    if (slot == null) return index;
-                }
-                return null;
+                return self.free_slots.lowest();
             }
 
-            /// Bytes `analysis` and its copy of the code hold.
+            /// Bytes `analysis` and its copy of the code hold: the entry, the code,
+            /// the schedule, the wide PUSH operands and the jump table. The
+            /// validation bitmap is gone by the time an analysis exists.
             fn analysisBytes(code: []const u8, analysis: *const Analysis) usize {
                 return @sizeOf(Entry) + code.len +
-                    std.mem.sliceAsBytes(analysis.bytecode.packed_bitmap).len +
                     std.mem.sliceAsBytes(analysis.schedule.items).len +
-                    std.mem.sliceAsBytes(analysis.schedule.jumpdests).len +
                     analysis.schedule.push_values_arena.queryCapacity() +
-                    std.mem.sliceAsBytes(analysis.jump_table.entries).len;
+                    analysis.schedule.jump_table.byteSize();
             }
 
             /// The pinned analysis of `code`, stored under `hash`: the cached one, or a
@@ -2694,6 +2786,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.entries.put(self.allocator, hash, entry) catch return error.AllocationError;
                 entry.slot = slot;
                 self.slots[slot] = entry;
+                self.free_slots.take(slot);
                 self.bytes += bytes;
                 return entry;
             }
@@ -2713,13 +2806,9 @@ pub fn Evm(config: EvmConfig) type {
             errdefer if (execution_trace) |*trace| trace.deinit();
 
             const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-            const output_data = frame.output_data;
-            const out_copy = if (output_data.len > 0) blk: {
-                const buf = try self.getCallArenaAllocator().alloc(u8, output_data.len);
-                @memcpy(buf, output_data);
-                break :blk buf;
-            } else &[_]u8{};
-            var result = try CallResult.revert_with_data(self.getCallArenaAllocator(), gas_left, out_copy);
+            // REVERT copied its data into the call arena (`frame.output_data`), which
+            // outlives the frame, so the result takes that copy as it is.
+            var result = CallResult.revert_adopting(gas_left, frame.output_data);
             result.trace = execution_trace;
             return result;
         }
@@ -2773,26 +2862,35 @@ pub fn Evm(config: EvmConfig) type {
             frame.contract_address = address;
             defer frame.deinit(frame_allocator);
 
-            try config.eips.warm_contract_for_execution(&self.access_list, address);
+            // The transaction's entry frame warms its own address. A nested frame's
+            // address is warm already: CALL-family opcodes access their target before
+            // they call, CREATE pre-warms the new address, and DELEGATECALL and
+            // CALLCODE run in the address of the frame that is executing.
+            if (self.depth == 1) try config.eips.warm_contract_for_execution(&self.access_list, address);
 
-            const tracer_ptr = @as(?@TypeOf(&self.tracer), &self.tracer);
+            // Analysis reports to the tracer only in builds that have one. Without it
+            // the analysis passes compile their tracer hooks, and the work that only
+            // feeds them, away.
             const cached: ?*DispatchCache.Entry = cached: {
                 if (comptime tracing_enabled) break :cached null;
                 const hash = code.hash orelse break :cached null;
-                break :cached try self.dispatch_cache.acquire(hash, code.bytes, tracer_ptr);
+                break :cached try self.dispatch_cache.acquire(hash, code.bytes, null);
             };
             defer if (cached) |entry| self.dispatch_cache.release(entry);
 
             var frame_analysis: ?Analysis = null;
             defer if (frame_analysis) |*owned| owned.deinit();
             const analysis: *const Analysis = if (cached) |entry| &entry.analysis else uncached: {
-                frame_analysis = try Analysis.init(arena_allocator, code.bytes, tracer_ptr);
+                frame_analysis = if (comptime tracing_enabled)
+                    try Analysis.init(arena_allocator, code.bytes, @as(?@TypeOf(&self.tracer), &self.tracer))
+                else
+                    try Analysis.init(arena_allocator, code.bytes, null);
                 break :uncached &frame_analysis.?;
             };
             const code_bytes: []const u8 = if (cached) |entry| entry.code else code.bytes;
 
             var termination_reason: ?FrameTermination = null;
-            frame.interpret(&analysis.schedule, &analysis.jump_table, code_bytes) catch |err| switch (err) {
+            frame.interpret(&analysis.schedule, &analysis.schedule.jump_table, code_bytes) catch |err| switch (err) {
                 error.Stop => termination_reason = error.Stop,
                 error.Return => termination_reason = error.Return,
                 error.SelfDestruct => termination_reason = error.SelfDestruct,
@@ -2809,7 +2907,9 @@ pub fn Evm(config: EvmConfig) type {
                 error.Return => frame.output_data,
             } else frame.output_data;
 
-            var result = try CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, out_slice);
+            // RETURN copied its output into the call arena (`frame.output_data`), which
+            // outlives the frame, so the result takes that copy as it is.
+            var result = CallResult.success_adopting(gas_left, out_slice);
             result.trace = execution_trace;
             return result;
         }
@@ -2929,7 +3029,13 @@ pub fn Evm(config: EvmConfig) type {
         /// (EIP-7702) has the designator `0xef0100 || delegate` as its code. An account
         /// that does not exist has empty code: calling it succeeds and EXTCODE* see nothing.
         fn codeAt(self: *Self, address: primitives.Address) !Code {
-            const account = (try self.database.get_account(address.bytes)) orelse return .{ .bytes = &.{}, .hash = null };
+            return self.codeOfAccount(try self.database.get_account(address.bytes));
+        }
+
+        /// `codeAt` for an account the caller has already read; null is an account
+        /// that does not exist.
+        fn codeOfAccount(self: *Self, maybe_account: ?Account) !Code {
+            const account = maybe_account orelse return .{ .bytes = &.{}, .hash = null };
             if (account.get_effective_code_address()) |delegate| {
                 const designator = try self.getCallArenaAllocator().alloc(u8, eips.DELEGATION_DESIGNATOR_LENGTH);
                 @memcpy(designator[0..3], &eips.DELEGATION_PREFIX);
@@ -2998,21 +3104,44 @@ pub fn Evm(config: EvmConfig) type {
             return self.journal.create_snapshot();
         }
 
-        /// Record `address` as touched by a call, for the state dump.
+        /// Record `address` as touched by a call, for the state dump. Recording
+        /// the address recorded last costs one comparison.
         fn touchAddress(self: *Self, address: primitives.Address) !void {
+            if (comptime !state_dump_enabled) return;
+            if (self.last_touched_address) |last| {
+                if (last.equals(address)) return;
+            }
             const entry = try self.touched_addresses.getOrPut(address);
-            if (entry.found_existing) return;
-            self.transaction_touched.append(self.allocator, address) catch |err| {
-                _ = self.touched_addresses.remove(address);
-                return err;
-            };
+            if (!entry.found_existing) {
+                self.transaction_touched.append(self.allocator, address) catch |err| {
+                    _ = self.touched_addresses.remove(address);
+                    return err;
+                };
+            }
+            // Published only now: the address is in the set.
+            self.last_touched_address = address;
         }
 
-        /// Record `slot` of `address` as touched by a call.
+        /// Record `slot` of `address` as touched by a call. Recording the slot
+        /// recorded last costs one comparison; another slot of the same address
+        /// skips the per-address lookup.
         fn touchStorageSlot(self: *Self, address: primitives.Address, slot: u256) !void {
+            if (comptime !state_dump_enabled) return;
+            if (self.last_touched_storage) |*last| {
+                if (last.address.equals(address)) {
+                    if (last.slot == slot) return;
+                    try last.slots.put(self.allocator, slot, {});
+                    last.slot = slot;
+                    return;
+                }
+            }
+            // An insertion can move the map's values, so the record is dropped first
+            // and replaced only once the slot is in its set.
+            self.last_touched_storage = null;
             const entry = try self.touched_storage.getOrPut(address);
             if (!entry.found_existing) entry.value_ptr.* = .empty;
             try entry.value_ptr.put(self.allocator, slot, {});
+            self.last_touched_storage = .{ .address = address, .slots = entry.value_ptr, .slot = slot };
         }
 
         /// Forget every address and storage slot that calls have touched so far.
@@ -3022,11 +3151,15 @@ pub fn Evm(config: EvmConfig) type {
         pub fn resetTouched(self: *Self) void {
             for (self.transaction_touched.items) |address| _ = self.touched_addresses.remove(address);
             self.transaction_touched.clearRetainingCapacity();
+            self.last_touched_address = null;
             self.clearTouchedStorage();
+            // Entries that are warm right now must be recorded again when accessed.
+            self.access_list.clearRecorded();
         }
 
         /// Free every touched-slot set and empty the map.
         fn clearTouchedStorage(self: *Self) void {
+            self.last_touched_storage = null;
             var it = self.touched_storage.valueIterator();
             while (it.next()) |slots| slots.deinit(self.allocator);
             self.touched_storage.clearRetainingCapacity();
@@ -3034,11 +3167,16 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Record a storage change in the journal
         pub fn record_storage_change(self: *Self, address: primitives.Address, slot: u256, original_value: u256) !void {
-            return self.noting(self.recordStorageChangeUnnoted(address, slot, original_value));
+            return self.record_storage_change_hashed(address, slot, slot_hash.hash(address.bytes, slot), original_value);
         }
 
-        fn recordStorageChangeUnnoted(self: *Self, address: primitives.Address, slot: u256, original_value: u256) !void {
-            try self.journal.record_storage_change(self.current_snapshot_id, address, slot, original_value);
+        /// `record_storage_change` for a caller that already has the slot's `slot_hash`.
+        pub fn record_storage_change_hashed(self: *Self, address: primitives.Address, slot: u256, hash: u64, original_value: u256) !void {
+            return self.noting(self.recordStorageChangeUnnoted(address, slot, hash, original_value));
+        }
+
+        fn recordStorageChangeUnnoted(self: *Self, address: primitives.Address, slot: u256, hash: u64, original_value: u256) !void {
+            try self.journal.record_storage_change_hashed(self.current_snapshot_id, address, slot, hash, original_value);
             // Track address and slot for state dump
             try self.touchAddress(address);
             try self.touchStorageSlot(address, slot);
@@ -3049,10 +3187,9 @@ pub fn Evm(config: EvmConfig) type {
             return self.journal.get_original_storage(address, slot);
         }
 
-        /// Mark `address` warm if it is a precompile in the configured fork.
-        fn warmPrecompile(self: *Self, address: primitives.Address) !void {
-            if (!precompiles.isPrecompile(address, config.eips.hardfork)) return;
-            try self.access_list.pre_warm_addresses(&[_]primitives.Address{address});
+        /// `get_original_storage` for a caller that already has the slot's `slot_hash`.
+        pub fn get_original_storage_hashed(self: *Self, address: primitives.Address, slot: u256, hash: u64) ?u256 {
+            return self.journal.get_original_storage_hashed(address, slot, hash);
         }
 
         /// EIP-7702 (Prague+): when the transaction's target is a delegated EOA, its
@@ -3073,9 +3210,17 @@ pub fn Evm(config: EvmConfig) type {
         }
 
         fn accessAddressUnnoted(self: *Self, address: primitives.Address) !u64 {
-            const cost = try self.access_list.access_address(address);
-            // Track address for state dump
-            try self.touchAddress(address);
+            const access = try self.access_list.accessAddressEntry(address);
+            const cost = access.cost;
+            // Track address for state dump. The access list entry remembers that the
+            // address is recorded, so only its first access in a transaction looks
+            // the touched set up.
+            if (comptime state_dump_enabled) {
+                if (!access.recorded.*) {
+                    try self.touchAddress(address);
+                    access.recorded.* = true;
+                }
+            }
             // Before Berlin (EIP-2929) there is no cold surcharge: every access costs the
             // opcode's flat static price. Reporting the warm cost makes callers charge
             // no surcharge.
@@ -3085,14 +3230,27 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Access a storage slot and return the gas cost (EIP-2929)
         pub fn access_storage_slot(self: *Self, contract_address: primitives.Address, slot: u256) !u64 {
-            return self.noting(self.accessStorageSlotUnnoted(contract_address, slot));
+            return self.access_storage_slot_hashed(contract_address, slot, slot_hash.hash(contract_address.bytes, slot));
         }
 
-        fn accessStorageSlotUnnoted(self: *Self, contract_address: primitives.Address, slot: u256) !u64 {
-            const cost = try self.access_list.access_storage_slot(contract_address, slot);
-            // Track address and slot for state dump
-            try self.touchAddress(contract_address);
-            try self.touchStorageSlot(contract_address, slot);
+        /// `access_storage_slot` for a caller that already has the slot's `slot_hash`.
+        pub fn access_storage_slot_hashed(self: *Self, contract_address: primitives.Address, slot: u256, hash: u64) !u64 {
+            return self.noting(self.accessStorageSlotUnnoted(contract_address, slot, hash));
+        }
+
+        fn accessStorageSlotUnnoted(self: *Self, contract_address: primitives.Address, slot: u256, hash: u64) !u64 {
+            const access = try self.access_list.accessStorageSlotEntry(contract_address, slot, hash);
+            const cost = access.cost;
+            // Track address and slot for state dump. The access list entry remembers
+            // that the slot is recorded, so a warm SLOAD or SSTORE looks nothing up
+            // in the touched sets. The mark is set only once both records are made.
+            if (comptime state_dump_enabled) {
+                if (!access.recorded.*) {
+                    try self.touchAddress(contract_address);
+                    try self.touchStorageSlot(contract_address, slot);
+                    access.recorded.* = true;
+                }
+            }
             // Before Berlin (EIP-2929) there is no cold surcharge.
             if (comptime !config.eips.hardfork.isAtLeast(.BERLIN)) return primitives.GasConstants.WarmStorageReadCost;
             return cost;
@@ -3203,6 +3361,15 @@ pub fn Evm(config: EvmConfig) type {
             };
         }
 
+        /// `get_storage` for a caller that already has the slot's `slot_hash`. A
+        /// database without hashed lookups ignores the hash.
+        pub fn get_storage_hashed(self: *Self, address: primitives.Address, slot: u256, hash: u64) u256 {
+            if (comptime @hasDecl(Db, "read_storage_hashed")) {
+                return self.database.read_storage_hashed(address.bytes, slot, hash);
+            }
+            return self.get_storage(address, slot);
+        }
+
         /// Set storage value
         pub fn set_storage(self: *Self, address: primitives.Address, slot: u256, value: u256) !void {
             return self.noting(self.setStorageUnnoted(address, slot, value));
@@ -3212,8 +3379,12 @@ pub fn Evm(config: EvmConfig) type {
             // In static context, storage writes are not allowed per EIP-214
             // This check is critical for security and cannot be removed
             if (self.is_static_context()) return error.StaticCallViolation;
-            const original_value = self.get_storage(address, slot);
-            try self.record_storage_change(address, slot, original_value);
+            const hash = slot_hash.hash(address.bytes, slot);
+            const original_value = self.get_storage_hashed(address, slot, hash);
+            try self.record_storage_change_hashed(address, slot, hash, original_value);
+            if (comptime @hasDecl(Db, "set_storage_hashed")) {
+                return self.database.set_storage_hashed(address.bytes, slot, hash, value);
+            }
             try self.database.set_storage(address.bytes, slot, value);
         }
 
@@ -3227,8 +3398,9 @@ pub fn Evm(config: EvmConfig) type {
             return self.return_data;
         }
 
-        /// Set return data from a call, reusing buffer when possible
-        /// This takes ownership of the data and will free any existing return_data
+        /// Set return data from a call. The data is copied into `return_buffer`,
+        /// which is reused: once the buffer has grown to fit, a call that returns
+        /// data performs no host allocation.
         pub fn set_return_data(self: *Self, data: []const u8) !void {
             return self.noting(self.setReturnDataUnnoted(data));
         }
@@ -3240,28 +3412,41 @@ pub fn Evm(config: EvmConfig) type {
                 return;
             }
 
-            if (self.return_data) |existing| {
-                if (existing.ptr == data.ptr and existing.len == data.len) return;
-                if (existing.len == data.len) {
-                    // Same size: reuse the buffer. `data` may alias it, so move, not copy.
-                    std.mem.copyForwards(u8, @constCast(existing), data);
-                    return;
-                }
+            if (data.len <= self.return_buffer.len) {
+                // `data` may be a view of this buffer (the current return data), and
+                // then starts at or after its first byte: a forward move is safe.
+                if (data.ptr != self.return_buffer.ptr) std.mem.copyForwards(u8, self.return_buffer[0..data.len], data);
+                self.return_data = self.return_buffer[0..data.len];
+                return;
             }
 
             // Copy first: `data` may point into the buffer being replaced.
-            const new_buf = self.allocator.alloc(u8, data.len) catch return error.AllocationError;
-            @memcpy(new_buf, data);
-            if (self.return_data) |existing| self.allocator.free(existing);
-            self.return_data = new_buf;
+            const capacity = returnBufferCapacity(data.len);
+            const new_buf = self.allocator.alloc(u8, capacity) catch return error.AllocationError;
+            @memcpy(new_buf[0..data.len], data);
+            self.allocator.free(self.return_buffer);
+            self.return_buffer = new_buf;
+            self.return_data = new_buf[0..data.len];
         }
 
-        /// Clear return data buffer (for CREATE/CREATE2 per EIP-211)
+        /// Capacity to allocate for `len` bytes of return data: the next power of
+        /// two up to `max_retained_return_data`, so that return data of varying
+        /// small sizes settles on one buffer; larger data gets exactly its size.
+        fn returnBufferCapacity(len: usize) usize {
+            if (len >= max_retained_return_data) return len;
+            return @max(64, std.math.ceilPowerOfTwoAssert(usize, len));
+        }
+
+        /// Clear return data buffer (for CREATE/CREATE2 per EIP-211). The buffer's
+        /// capacity is kept for the next call unless it is larger than
+        /// `max_retained_return_data`, which is released here.
         pub fn clear_return_data(self: *Self) void {
-            if (self.return_data) |data| {
-                self.allocator.free(data);
-            }
             self.return_data = null;
+            if (self.return_buffer.len > max_retained_return_data) {
+                @branchHint(.unlikely);
+                self.allocator.free(self.return_buffer);
+                self.return_buffer = &.{};
+            }
         }
 
         /// Check if returndata should be cleared after CREATE/CREATE2 (EIP-211)

@@ -43,8 +43,10 @@ const EvmPrague = evm.Evm(.{ .enable_fusion = true, .eips = .{ .hardfork = .PRAG
 const EvmPragueNoFusion = evm.Evm(.{ .enable_fusion = false, .eips = .{ .hardfork = .PRAGUE } });
 
 const CALLER = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xaa} };
-const CONTRACT_A = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x01} };
-const CONTRACT_B = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x02} };
+// Use ordinary contract addresses well clear of precompile addresses (0x01..0x11, 0x0100)
+// so deployed fuzz contracts actually execute instead of invoking precompiles.
+const CONTRACT_A = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xc1} };
+const CONTRACT_B = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xc2} };
 const BENEFICIARY = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0xbb} };
 
 fn makeBlockInfo(seed_byte: u8) BlockInfo {
@@ -181,9 +183,8 @@ fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const
                         const jd_pc = out.items.len + 11;
                         if (jd_pc <= 0xffff) {
                             try out.appendSlice(allocator, &.{
-                                0x80, 0x63, 0x00, 0x00, 0x00, imm & 0x0f,
-                                0x14, 0x61, @intCast((jd_pc >> 8) & 0xff), @intCast(jd_pc & 0xff), 0x57,
-                                0x5b,
+                                0x80, 0x63, 0x00,                          0x00,                   0x00, imm & 0x0f,
+                                0x14, 0x61, @intCast((jd_pc >> 8) & 0xff), @intCast(jd_pc & 0xff), 0x57, 0x5b,
                             });
                         }
                     },
@@ -256,7 +257,7 @@ fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const
                             0x60, 0x04, // argsSize
                             0x60, 0x00, // argsOffset
                             0x60, arg & 0x0f, // value
-                            0x60, 0x02, // address = CONTRACT_B (0x...02)
+                            0x60, CONTRACT_B.bytes[19], // address = CONTRACT_B
                             0x61, 0xc3, 0x50, // gas = 50000
                             0xf1, // CALL
                             0x60, 0x00, 0x52, // store success
@@ -265,19 +266,22 @@ fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const
                     1 => { // STATICCALL CONTRACT_B (must reject SSTORE/LOG/CREATE!)
                         try out.appendSlice(allocator, &.{
                             0x60, 0x20, 0x60, 0x00, 0x60, 0x04, 0x60, 0x00,
-                            0x60, 0x02, 0x61, 0xc3, 0x50, 0xfa, 0x60, 0x00, 0x52,
+                            0x60, CONTRACT_B.bytes[19], 0x61, 0xc3, 0x50, 0xfa, 0x60, 0x00,
+                            0x52,
                         });
                     },
                     2 => { // DELEGATECALL CONTRACT_B
                         try out.appendSlice(allocator, &.{
                             0x60, 0x20, 0x60, 0x00, 0x60, 0x04, 0x60, 0x00,
-                            0x60, 0x02, 0x61, 0xc3, 0x50, 0xf4, 0x60, 0x00, 0x52,
+                            0x60, CONTRACT_B.bytes[19], 0x61, 0xc3, 0x50, 0xf4, 0x60, 0x00,
+                            0x52,
                         });
                     },
                     3 => { // CALLCODE CONTRACT_B
                         try out.appendSlice(allocator, &.{
                             0x60, 0x20, 0x60, 0x00, 0x60, 0x04, 0x60, 0x00,
-                            0x60, 0x00, 0x60, 0x02, 0x61, 0xc3, 0x50, 0xf2, 0x60, 0x00, 0x52,
+                            0x60, 0x00, 0x60, CONTRACT_B.bytes[19], 0x61, 0xc3, 0x50, 0xf2,
+                            0x60, 0x00, 0x52,
                         });
                     },
                     4 => { // CREATE minimal contract returning 1 byte (0x00)
@@ -289,7 +293,9 @@ fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const
                             0x60, 0x1b, // offset (27)
                             0x60, arg & 0x03, // value
                             0xf0, // CREATE
-                            0x60, 0x20, 0x52,
+                            0x60,
+                            0x20,
+                            0x52,
                         });
                     },
                     5 => { // CREATE2 with fuzz salt
@@ -301,14 +307,16 @@ fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const
                             0x60, 0x1b, // offset
                             0x60, 0x00, // value
                             0xf5, // CREATE2
-                            0x60, 0x20, 0x52,
+                            0x60,
+                            0x20,
+                            0x52,
                         });
                     },
                     6 => { // EXTCODESIZE, EXTCODEHASH, BALANCE on CONTRACT_B
                         try out.appendSlice(allocator, &.{
-                            0x60, 0x02, 0x3b, 0x50, // EXTCODESIZE
-                            0x60, 0x02, 0x3f, 0x50, // EXTCODEHASH
-                            0x60, 0x02, 0x31, 0x50, // BALANCE
+                            0x60, CONTRACT_B.bytes[19], 0x3b, 0x50, // EXTCODESIZE
+                            0x60, CONTRACT_B.bytes[19], 0x3f, 0x50, // EXTCODEHASH
+                            0x60, CONTRACT_B.bytes[19], 0x31, 0x50, // BALANCE
                         });
                     },
                     7 => { // RETURNDATASIZE + RETURNDATACOPY (if non-empty)
@@ -485,7 +493,7 @@ pub fn fuzzDifferentialFusionAndSimulate(_: void, input: []const u8) !void {
     if (input.len < 4) return;
     const allocator = fuzz_alloc.get();
 
-    const mode = input[0] % 7;
+    const mode = input[0] % 8;
     const gas_bucket = input[1] % 6;
     const gas_limit: u64 = switch (gas_bucket) {
         0 => 21_000, // exact intrinsic gas boundary
@@ -608,6 +616,128 @@ pub fn fuzzCreateAndCreate2Parity(_: void, input: []const u8) !void {
     }
 }
 
+/// Emit `PUSH2 target`.
+fn appendPush2(out: *std.ArrayList(u8), allocator: std.mem.Allocator, target: usize) !void {
+    try out.appendSlice(allocator, &.{ 0x61, @intCast((target >> 8) & 0xff), @intCast(target & 0xff) });
+}
+
+/// Program made of gadgets that each leave the stack as they found it:
+/// static JUMP, static JUMPI (taken, not taken, falling into a JUMPDEST, to an
+/// invalid target), ISZERO+PUSH+JUMPI, a dynamic JUMP, a bounded loop, fused and
+/// plain memory accesses inside and past the current memory, and calls whose
+/// return data is copied back (in range and out of range). It ends by returning
+/// MSIZE and the first memory word.
+///
+/// These are the paths that enter a successor block from the jump handler, read
+/// the frame's inline memory address, and reuse the return-data buffer.
+fn buildJumpMemoryReturnProgram(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(allocator);
+
+    var i: usize = 0;
+    while (i + 1 < bytes.len and out.items.len < 700) : (i += 2) {
+        const sel = bytes[i];
+        const imm = bytes[i + 1];
+        const start = out.items.len;
+        switch (sel % 10) {
+            0 => { // static JUMP over an INVALID
+                try appendPush2(&out, allocator, start + 5);
+                try out.appendSlice(allocator, &.{ 0x56, 0xfe, 0x5b });
+            },
+            1 => { // static JUMPI over a headless block
+                try out.appendSlice(allocator, &.{ 0x60, imm & 1 });
+                try appendPush2(&out, allocator, start + 9);
+                try out.appendSlice(allocator, &.{ 0x57, 0x60, imm, 0x50, 0x5b });
+            },
+            2 => { // ISZERO PUSH2 JUMPI over a headless block
+                try out.appendSlice(allocator, &.{ 0x60, imm & 1, 0x15 });
+                try appendPush2(&out, allocator, start + 10);
+                try out.appendSlice(allocator, &.{ 0x57, 0x60, imm, 0x50, 0x5b });
+            },
+            3 => { // static JUMPI directly followed by a JUMPDEST; sometimes an invalid target
+                try out.appendSlice(allocator, &.{ 0x60, imm & 1 });
+                try appendPush2(&out, allocator, if ((imm & 6) == 6) start + 1 else start + 6);
+                try out.appendSlice(allocator, &.{ 0x57, 0x5b });
+            },
+            4 => { // fused PUSH+MSTORE / PUSH+MSTORE8, then fused PUSH+MLOAD
+                const offset: usize = @as(usize, imm) * 9;
+                try out.appendSlice(allocator, &.{ 0x60, sel });
+                try appendPush2(&out, allocator, offset);
+                try out.append(allocator, if ((sel & 16) == 0) @as(u8, 0x52) else @as(u8, 0x53));
+                try appendPush2(&out, allocator, offset / 2);
+                try out.appendSlice(allocator, &.{ 0x51, 0x50 });
+            },
+            5 => { // unfused memory access through DUP: MSTORE(off, off); MLOAD(off)
+                try appendPush2(&out, allocator, @as(usize, imm) * 5);
+                try out.appendSlice(allocator, &.{ 0x80, 0x80, 0x52, 0x51, 0x50 });
+            },
+            6 => { // CALL contract B, copy its whole return data to memory
+                try out.appendSlice(allocator, &.{ 0x60, imm & 0x3f, 0x5f, 0x60, 0x20, 0x5f, 0x5f, 0x73 });
+                try out.appendSlice(allocator, &CONTRACT_B.bytes);
+                try out.appendSlice(allocator, &.{ 0x5a, 0xf1, 0x50, 0x3d, 0x5f, 0x5f, 0x3e });
+            },
+            7 => { // RETURNDATACOPY of a fuzzed size: halts when it exceeds the buffer
+                try out.appendSlice(allocator, &.{ 0x60, imm & 0x7f, 0x5f, 0x60, 0x40, 0x3e });
+            },
+            8 => { // dynamic JUMP over an INVALID
+                try appendPush2(&out, allocator, start + 7);
+                try out.appendSlice(allocator, &.{ 0x80, 0x50, 0x56, 0xfe, 0x5b });
+            },
+            else => { // bounded loop closed by a static JUMPI
+                try out.appendSlice(allocator, &.{ 0x60, (imm % 5) + 1, 0x5b, 0x60, 0x01, 0x90, 0x03, 0x80 });
+                try appendPush2(&out, allocator, start + 2);
+                try out.appendSlice(allocator, &.{ 0x57, 0x50 });
+            },
+        }
+    }
+    // MSTORE(0x20, MSIZE); RETURN(0, 0x40)
+    try out.appendSlice(allocator, &.{ 0x59, 0x60, 0x20, 0x52, 0x60, 0x40, 0x5f, 0xf3 });
+    return out.toOwnedSlice(allocator);
+}
+
+/// Static-jump folding, inline frame memory and return-data reuse: fusion ON vs
+/// fusion OFF, and `simulate()` vs `call()`, on gadget programs.
+pub fn fuzzStaticJumpsMemoryAndReturnData(_: void, input: []const u8) !void {
+    if (input.len < 4) return;
+    const allocator = fuzz_alloc.get();
+
+    const gas_limit: u64 = switch (input[0] % 5) {
+        0 => 21_500, // runs out inside the first blocks
+        1 => 30_000,
+        2 => 80_000,
+        3 => 400_000,
+        else => 3_000_000,
+    };
+    const seed_byte = input[1];
+    const calldata = input[2..@min(input.len, 2 + 16)];
+
+    const code_a = try buildJumpMemoryReturnProgram(allocator, input[2..]);
+    defer allocator.free(code_a);
+
+    // Contract B returns or reverts with data of a size the fuzzer picks.
+    const code_b: []const u8 = switch (input[2] % 5) {
+        0 => &.{ 0x36, 0x5f, 0x5f, 0x37, 0x36, 0x5f, 0xf3 }, // echo calldata
+        1 => &.{ 0x36, 0x5f, 0x5f, 0x37, 0x36, 0x5f, 0xfd }, // revert with calldata
+        2 => &.{ 0x61, 0x12, 0x34, 0x5f, 0x52, 0x60, 0x80, 0x5f, 0xf3 }, // return 128 bytes
+        3 => &.{0x00}, // return nothing
+        else => &.{ 0x60, 0x01, 0x5f, 0x55, 0x61, 0x02, 0x00, 0x5f, 0xf3 }, // SSTORE, return 512 bytes
+    };
+
+    try assertDifferentialParity(EvmFusionOn, EvmFusionOff, allocator, code_a, code_b, calldata, gas_limit, 0, seed_byte);
+}
+
+const jump_memory_corpus: []const []const u8 = &.{
+    &.{ 4, 0, 0, 0, 1, 1, 1, 0, 2, 0, 2, 1, 3, 0, 3, 1, 3, 6, 9, 3, 8, 0 }, // every jump gadget
+    &.{ 4, 1, 0, 0, 4, 1, 4, 200, 20, 255, 5, 3, 5, 250, 4, 0 }, // memory inside and past the end
+    &.{ 4, 2, 0, 0, 6, 32, 6, 1, 7, 0, 7, 32, 6, 63, 7, 33 }, // echo, copy in range, then one byte too far
+    &.{ 4, 3, 1, 0, 6, 8, 7, 8, 6, 0, 7, 0, 7, 1 }, // revert data reused by a smaller call
+    &.{ 4, 4, 2, 0, 6, 0, 7, 127, 6, 0, 7, 64, 4, 9 }, // 128-byte return data
+    &.{ 4, 5, 4, 0, 6, 0, 6, 0, 7, 100, 9, 4, 9, 0 }, // 512-byte return data, loops
+    &.{ 0, 6, 0, 0, 9, 4, 9, 4, 9, 4, 1, 1, 2, 0 }, // out of gas inside a loop block
+    &.{ 1, 7, 3, 0, 3, 7, 0, 0 }, // static JUMPI to an invalid target, taken
+    &.{ 2, 8, 3, 0, 3, 6, 0, 0 }, // static JUMPI to an invalid target, not taken
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{ 0, 4, 0, 0, 0x60, 0x01, 0x60, 0x02, 0x01, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 },
     &.{ 1, 4, 0, 1, 0, 5, 1, 9, 2, 7, 3, 4, 4, 16, 5, 3 },
@@ -632,4 +762,23 @@ test "fuzz multi-hardfork differential EVM execution (FRONTIER, BERLIN, SHANGHAI
 
 test "fuzz CREATE and CREATE2 deployment parity and EIP-3541/EIP-170 invariants" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCreateAndCreate2Parity), .{ .corpus = seed_corpus });
+}
+
+test "fuzz static-jump folding, inline frame memory and return-data reuse: fusion ON vs OFF vs simulate()" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzStaticJumpsMemoryAndReturnData), .{ .corpus = jump_memory_corpus });
+}
+
+test "differential_evm: gadget programs agree for every selector pair" {
+    // Two gadgets per program, every ordered pair of selectors, three immediates.
+    var input: [8]u8 = undefined;
+    for ([_]u8{ 0, 1, 77 }) |imm| {
+        var first: u8 = 0;
+        while (first < 10) : (first += 1) {
+            var second: u8 = 0;
+            while (second < 10) : (second += 1) {
+                input = .{ 4, imm, first, imm, second, imm ^ 0x55, first, imm };
+                try fuzzStaticJumpsMemoryAndReturnData({}, &input);
+            }
+        }
+    }
 }

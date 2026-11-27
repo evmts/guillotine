@@ -150,5 +150,7 @@ test {
     _ = @import("build_config.zig");
     _ = @import("r1a_core_regressions_test.zig");
     _ = @import("r1_integration_regressions.zig");
+    _ = @import("statepath_regressions_test.zig");
+    _ = @import("dispatchpath_regressions_test.zig");
     _ = @import("state_root.zig");
 }

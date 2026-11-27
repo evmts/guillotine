@@ -21,6 +21,9 @@ pub fn Handlers(FrameType: type) type {
         // inside the current memory, so there is no expansion and no dynamic gas. Every
         // other case tail-calls the general handler, which charges expansion gas, grows
         // memory, and reports errors.
+        /// Bytes in an EVM word.
+        const word_size = 32;
+
         const mload_general_handler = handler_abi.wrap(FrameType, mload_general);
         const mstore_general_handler = handler_abi.wrap(FrameType, mstore_general);
         const mstore8_general_handler = handler_abi.wrap(FrameType, mstore8_general);
@@ -37,8 +40,9 @@ pub fn Handlers(FrameType: type) type {
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
-            if (self.memory.word_ptr_in_bounds(s.peek_unsafe())) |word| {
+            if (self.memory.word_in_bounds(s.peek_unsafe())) {
                 @branchHint(.likely);
+                const word = self.memory.word_ptr_unchecked(s.peek_unsafe());
                 N.before(self, .MLOAD, cursor, s, gas);
                 s.set_top_unsafe(@truncate(memory_mod.loadWordBigEndian(word)));
                 return N.next(self, .MLOAD, cursor, s, gas);
@@ -58,12 +62,54 @@ pub fn Handlers(FrameType: type) type {
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
-            if (self.memory.word_ptr_in_bounds(s.peek_unsafe())) |word| {
+            if (self.memory.word_in_bounds(s.peek_unsafe())) {
                 @branchHint(.likely);
+                const word = self.memory.word_ptr_unchecked(s.peek_unsafe());
                 N.before(self, .MSTORE, cursor, s, gas);
                 _ = s.pop_unsafe();
                 memory_mod.storeWordBigEndian(word, s.pop_unsafe());
                 return N.next(self, .MSTORE, cursor, s, gas);
+            }
+            return @call(handler_abi.tail_mod, N.outlined(&mstore_grow), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+        }
+
+        /// MSTORE to a word past the end of memory: charge the expansion, grow, store.
+        /// Entered by tail call from `mstore`.
+        ///
+        /// Code that bumps a free-memory pointer grows memory on every allocation, so
+        /// this runs in loops. It works on the handler registers like the in-bounds
+        /// path: no write-back of the stack and gas to the frame, and the word is
+        /// stored straight into the grown memory.
+        ///
+        /// It completes only the case in which nothing can go wrong: an offset
+        /// inside the memory limit, an expansion the frame can pay, and a growth the
+        /// host can provide. In every other case it has changed nothing, and it
+        /// tail-calls the general handler, which repeats the work and reports the
+        /// halt. Builds with instruction hooks use the general handler throughout.
+        fn mstore_grow(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (comptime !N.traced) grown: {
+                var s = N.StackView.init(sp, t0, t1, t2, t3);
+                const offset = s.peek_unsafe();
+                if (!verified_ops.checkMemoryBoundsFast(offset, word_size, MEMORY_LIMIT)) break :grown;
+                const end: usize = @as(usize, @truncate(offset)) + word_size;
+                const cost = self.memory.get_expansion_cost(end);
+                const gas_after = verified_ops.chargeGasChecked(FrameType.GasType, gas, cost) orelse break :grown;
+                // A failed growth leaves memory as it was; the general handler then
+                // fails the same way and reports it.
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), end) catch break :grown;
+                if (!self.memory.word_in_bounds(offset)) break :grown;
+                _ = s.pop_unsafe();
+                memory_mod.storeWordBigEndian(self.memory.word_ptr_unchecked(offset), s.pop_unsafe());
+                return N.next(self, .MSTORE, cursor, s, gas_after);
             }
             return @call(handler_abi.tail_mod, mstore_general_handler, .{ self, cursor, sp, gas, t0, t1, t2, t3 });
         }
@@ -80,8 +126,9 @@ pub fn Handlers(FrameType: type) type {
             t3: u64,
         ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
-            if (self.memory.byte_ptr_in_bounds(s.peek_unsafe())) |byte| {
+            if (self.memory.byte_in_bounds(s.peek_unsafe())) {
                 @branchHint(.likely);
+                const byte = self.memory.byte_ptr_unchecked(s.peek_unsafe());
                 N.before(self, .MSTORE8, cursor, s, gas);
                 _ = s.pop_unsafe();
                 byte.* = @truncate(s.pop_unsafe());

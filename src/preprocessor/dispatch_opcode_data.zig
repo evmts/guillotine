@@ -46,10 +46,11 @@ pub fn itemCount(comptime opcode: UnifiedOpcode) usize {
         .PUSH_MSTORE_POINTER,
         .PUSH_MSTORE8_POINTER,
         .PUSH_ADD_DUP1_POINTER,
-        .JUMP_TO_STATIC_LOCATION,
-        .JUMPI_TO_STATIC_LOCATION,
-        .ISZERO_JUMPI,
         => 2,
+        // A static jump carries its target cursor and the target block's metadata.
+        .JUMP_TO_STATIC_LOCATION => 3,
+        // The conditional forms also carry the fall-through block's metadata.
+        .JUMPI_TO_STATIC_LOCATION, .ISZERO_JUMPI => 4,
         .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16 => 3,
         .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24 => 4,
         .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => 5,

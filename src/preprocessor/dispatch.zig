@@ -182,7 +182,9 @@ pub fn Preprocessor(FrameType: type) type {
                 // Static jump operations with jump_static metadata
                 .JUMP_TO_STATIC_LOCATION, .JUMPI_TO_STATIC_LOCATION => {
                     tracerAssert(frame, self.cursor[1] == .jump_static, "Static jump: expected .jump_static metadata");
+                    tracerAssert(frame, self.cursor[2] == .jump_dest, "Static jump: expected the target block's .jump_dest metadata");
                     if (opcode == .JUMPI_TO_STATIC_LOCATION) {
+                        tracerAssert(frame, self.cursor[3] == .jump_dest, "JUMPI_TO_STATIC: expected the fall-through block's .jump_dest metadata");
                         tracerAssert(frame, frame.stack.size() >= 1, "JUMPI_TO_STATIC: stack underflow, requires condition");
                     }
                 },
@@ -378,6 +380,8 @@ pub fn Preprocessor(FrameType: type) type {
                 // Three-opcode fusions
                 .ISZERO_JUMPI => {
                     tracerAssert(frame, self.cursor[1] == .jump_static, "ISZERO_JUMPI: expected .jump_static metadata");
+                    tracerAssert(frame, self.cursor[2] == .jump_dest, "ISZERO_JUMPI: expected the target block's .jump_dest metadata");
+                    tracerAssert(frame, self.cursor[3] == .jump_dest, "ISZERO_JUMPI: expected the fall-through block's .jump_dest metadata");
                     tracerAssert(frame, frame.stack.size() >= 1, "Dispatch validation failed"); // Requires value to check
                 },
                 .PUSH_ADD_DUP1_INLINE => {
@@ -457,20 +461,49 @@ pub fn Preprocessor(FrameType: type) type {
                 bytecode.get_unsafe(@intCast(next_pc)) != @backingInt(Opcode.JUMPDEST);
         }
 
+        /// A static jump whose target is resolved once the whole schedule exists.
         const UnresolvedJump = struct {
-            schedule_index: usize, // Index in schedule where jump_static metadata is
-            target_pc: ?FrameType.PcType, // PC of the jump destination; null when the pushed value exceeds PcType
+            /// Index of the jump's `jump_static` item. The target block's
+            /// `jump_dest` metadata is the item after it.
+            schedule_index: usize,
+            /// PC of the jump destination; null when the pushed value exceeds PcType.
+            target_pc: ?FrameType.PcType,
         };
 
+        /// A JUMPDEST found while building: its PC and its handler's schedule index.
         const JumpDestEntry = struct {
             pc: FrameType.PcType,
             schedule_index: usize,
-
-            fn lessThan(context: void, a: JumpDestEntry, b: JumpDestEntry) bool {
-                _ = context;
-                return a.pc < b.pc;
-            }
         };
+
+        /// How the item for one iterator step ends its basic block.
+        const BlockEnd = enum {
+            /// The block continues, or ends without falling through.
+            none,
+            /// A gas-observing instruction or a dynamic JUMPI: the next block is
+            /// entered by falling through and gets a BLOCK_BEGIN.
+            fallthrough,
+            /// A static JUMPI or ISZERO_JUMPI: the handler enters the fall-through
+            /// block itself, from metadata stored with the jump.
+            folded,
+        };
+
+        /// How the schedule item built from `op_data` ends its block. The item's last
+        /// bytecode instruction decides, and the iterator already knows it, so the
+        /// code is not scanned again (`blockBeginFollows` does that scan for
+        /// consumers that have only PCs). No fused item holds a block-ending
+        /// instruction before its last one: every fusion is PUSH, ISZERO or ADD
+        /// followed by one final instruction.
+        fn blockEndOf(comptime Iterator: type, op_data: anytype) BlockEnd {
+            return switch (op_data) {
+                .regular => |data| if (Iterator.endsBlockWithFallthrough(data.opcode)) .fallthrough else .none,
+                .jumpi => .fallthrough,
+                .push_jumpi_fusion, .iszero_jumpi => .folded,
+                else => .none,
+            };
+        }
+
+        const zero_block: Metadata.JumpDestMetadata = .{ .gas = 0, .min_stack = 0, .max_stack = 0 };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -499,7 +532,20 @@ pub fn Preprocessor(FrameType: type) type {
             var unresolved_jumps = ArrayList(UnresolvedJump, null).empty;
             defer unresolved_jumps.deinit(allocator);
 
+            // Bytecode validation counted the instructions and JUMPDESTs, so the lists
+            // start at their final size instead of growing from nothing. Most
+            // instructions take one or two items; the lists still grow when needed.
+            const BytecodeType = switch (@typeInfo(@TypeOf(bytecode))) {
+                .pointer => |pointer| pointer.child,
+                else => @TypeOf(bytecode),
+            };
+            if (comptime @hasField(BytecodeType, "opcode_count") and @hasField(BytecodeType, "jumpdest_count")) {
+                try schedule_items.ensureTotalCapacity(allocator, bytecode.opcode_count * 2 + 8);
+                try jumpdest_entries.ensureTotalCapacityPrecise(allocator, bytecode.jumpdest_count);
+            }
+
             var iter = bytecode.createIterator();
+            const Iterator = @TypeOf(iter);
 
             const first_block_info = calculateFirstBlockInfo(bytecode);
 
@@ -509,7 +555,6 @@ pub fn Preprocessor(FrameType: type) type {
                 try schedule_items.append(allocator, .{ .first_block_gas = first_block_info });
             }
 
-            var opcode_count: usize = 0;
             // Every iteration consumes at least one byte of code, so the loop ends after
             // at most `bytecode.len()` steps.
             while (true) {
@@ -517,7 +562,6 @@ pub fn Preprocessor(FrameType: type) type {
                 const maybe = iter.next();
                 if (maybe == null) break;
                 const op_data = maybe.?;
-                opcode_count += 1;
 
                 switch (op_data) {
                     .regular => |data| {
@@ -537,13 +581,15 @@ pub fn Preprocessor(FrameType: type) type {
                         try processPushOpcode(&schedule_items, allocator, opcode_handlers, data);
                     },
                     .jumpdest => |data| {
-                        // Record this JUMPDEST's location in schedule for single-pass resolution
-                        // We store the index where the JUMPDEST handler will be placed
-                        const jumpdest_schedule_idx = schedule_items.items.len;
-
+                        // The iterator walks the code forward, so JUMPDESTs arrive in
+                        // strictly increasing PC order and need no sorting.
+                        if (jumpdest_entries.items.len > 0) {
+                            const previous = jumpdest_entries.items[jumpdest_entries.items.len - 1].pc;
+                            if (instr_pc <= previous) return error.JumpDestsNotMonotonic;
+                        }
                         try jumpdest_entries.append(allocator, .{
                             .pc = @intCast(instr_pc),
-                            .schedule_index = jumpdest_schedule_idx,
+                            .schedule_index = schedule_items.items.len,
                         });
 
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.JUMPDEST)] });
@@ -577,11 +623,11 @@ pub fn Preprocessor(FrameType: type) type {
                     },
                     .push_jump_fusion => |data| {
                         if (tracer) |t| t.onFusionDetected(@intCast(instr_pc), "push_jump", 2);
-                        try Self.handleStaticJumpFusion(&schedule_items, &unresolved_jumps, allocator, data.value, .push_jump, tracer, @intCast(instr_pc));
+                        try Self.handleStaticJumpFusion(&schedule_items, &unresolved_jumps, allocator, data.value, .JUMP_TO_STATIC_LOCATION, tracer, @intCast(instr_pc));
                     },
                     .push_jumpi_fusion => |data| {
                         if (tracer) |t| t.onFusionDetected(@intCast(instr_pc), "push_jumpi", 3);
-                        try Self.handleStaticJumpFusion(&schedule_items, &unresolved_jumps, allocator, data.value, .push_jumpi, tracer, @intCast(instr_pc));
+                        try Self.handleStaticJumpFusion(&schedule_items, &unresolved_jumps, allocator, data.value, .JUMPI_TO_STATIC_LOCATION, tracer, @intCast(instr_pc));
                     },
                     .push_mload_fusion => |data| {
                         try Self.handleMemoryFusion(&schedule_items, allocator, arena_allocator, data.value, .push_mload);
@@ -600,16 +646,8 @@ pub fn Preprocessor(FrameType: type) type {
                     },
                     .iszero_jumpi => |ij| {
                         // The target is a constant, so it resolves at build time exactly
-                        // like PUSH+JUMPI: the metadata holds the JUMPDEST's schedule
-                        // cursor, or the invalid-jump item when the target is not a JUMPDEST.
-                        const frame_handlers = @import("../frame/frame_handlers.zig");
-                        const handler = frame_handlers.getSyntheticHandler(FrameType, .ISZERO_JUMPI);
-                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
-                        const dest_pc: ?FrameType.PcType = if (ij.target > std.math.maxInt(FrameType.PcType)) null else @intCast(ij.target);
-                        const meta_index = schedule_items.items.len;
-                        const placeholder: *const anyopaque = @as(*const anyopaque, @ptrFromInt(1));
-                        try schedule_items.append(allocator, .{ .jump_static = .{ .dispatch = placeholder } });
-                        try unresolved_jumps.append(allocator, .{ .schedule_index = meta_index, .target_pc = dest_pc });
+                        // like PUSH+JUMPI.
+                        try Self.handleStaticJumpFusion(&schedule_items, &unresolved_jumps, allocator, ij.target, .ISZERO_JUMPI, tracer, @intCast(instr_pc));
                     },
                     .push_add_dup1 => |pad| {
                         if (tracer) |t| t.onFusionDetected(@intCast(instr_pc), "push_add_dup1", 3);
@@ -619,20 +657,30 @@ pub fn Preprocessor(FrameType: type) type {
 
                 // A non-taken JUMPI, or a gas-observing instruction (GAS, CALL*, CREATE*,
                 // SSTORE), falls through into a new basic block that no JUMPDEST heads.
-                // Insert BLOCK_BEGIN so that block's static gas is charged and its stack
-                // bounds are validated, exactly as a JUMPDEST would. A JUMPDEST that
-                // directly follows already does this itself.
+                // That block's static gas must be charged and its stack bounds validated,
+                // exactly as a JUMPDEST would. A JUMPDEST that directly follows does this
+                // itself, and code that ends here has no next block.
+                const block_end = blockEndOf(Iterator, op_data);
+                if (block_end == .none) continue;
                 const next_pc: usize = iter.pc;
-                if (try blockBeginFollows(iter.bytecode, instr_pc, next_pc)) {
-                    const block_info = @TypeOf(iter).calculateBlockInfo(iter.bytecode, @intCast(next_pc), 0);
-                    const frame_handlers = @import("../frame/frame_handlers.zig");
-                    const handler = frame_handlers.getSyntheticHandler(FrameType, .BLOCK_BEGIN);
-                    try schedule_items.append(allocator, .{ .opcode_handler = handler });
-                    try schedule_items.append(allocator, .{ .jump_dest = .{
-                        .gas = block_info.gas,
-                        .min_stack = block_info.min_stack,
-                        .max_stack = block_info.max_stack,
-                    } });
+                const headless = next_pc < bytecode.len() and
+                    iter.bytecode.get_unsafe(@intCast(next_pc)) != @backingInt(Opcode.JUMPDEST);
+                const block: Metadata.JumpDestMetadata = if (headless) info: {
+                    const block_info = Iterator.calculateBlockInfo(iter.bytecode, @intCast(next_pc), 0);
+                    break :info .{ .gas = block_info.gas, .min_stack = block_info.min_stack, .max_stack = block_info.max_stack };
+                } else zero_block;
+                switch (block_end) {
+                    .none => {},
+                    // The static jump enters the fall-through block itself: its item ends
+                    // with that block's metadata and no BLOCK_BEGIN is dispatched. When a
+                    // JUMPDEST follows, or the code ends, the metadata charges nothing.
+                    .folded => try schedule_items.append(allocator, .{ .jump_dest = block }),
+                    .fallthrough => if (headless) {
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        const handler = frame_handlers.getSyntheticHandler(FrameType, .BLOCK_BEGIN);
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                        try schedule_items.append(allocator, .{ .jump_dest = block });
+                    },
                 }
             }
 
@@ -654,24 +702,25 @@ pub fn Preprocessor(FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@backingInt(Opcode.STOP)] });
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
-
             errdefer allocator.free(final_schedule);
 
-            const jumpdest_array = try jumpdest_entries.toOwnedSlice(allocator);
-            errdefer allocator.free(jumpdest_array);
-            std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
+            // The one record of the code's JUMPDESTs: dynamic jumps look targets up in
+            // it at run time, and static jumps are resolved from it here.
+            var jump_table = try JumpTable.create(allocator, jumpdest_entries.items.len, final_schedule.ptr);
+            errdefer jump_table.deinit(allocator);
+            for (jumpdest_entries.items) |entry| try jump_table.insert(entry.pc, entry.schedule_index);
 
-            resolveStaticJumpsWithArray(final_schedule, &unresolved_jumps, jumpdest_array, invalid_jump_index, tracer);
+            resolveStaticJumps(final_schedule, unresolved_jumps.items, jump_table, invalid_jump_index, tracer);
 
             if (tracer) |t| {
                 t.onScheduleBuildComplete(final_schedule.len, 0); // No longer tracking u256 count
-                t.onJumpTableCreated(jumpdest_array.len);
+                t.onJumpTableCreated(jump_table.count());
             }
 
             return DispatchSchedule{
                 .items = final_schedule,
                 .has_first_block = has_first_block,
-                .jumpdests = jumpdest_array,
+                .jump_table = jump_table,
                 .allocator = allocator,
                 .push_values_arena = push_values_arena,
             };
@@ -731,12 +780,16 @@ pub fn Preprocessor(FrameType: type) type {
             }
         }
 
+        /// Append a static jump: its handler, the `jump_static` cursor and the target
+        /// block's `jump_dest` metadata. Both metadata items are placeholders until
+        /// `resolveStaticJumps` runs. The conditional forms get one more item, the
+        /// fall-through block's metadata, which `init` appends.
         fn handleStaticJumpFusion(
             schedule_items: anytype,
             unresolved_jumps: *ArrayList(UnresolvedJump, null),
             allocator: std.mem.Allocator,
             value: FrameType.WordType,
-            fusion_type: JumpFusionType,
+            comptime static_opcode: OpcodeSynthetic,
             tracer: anytype,
             jump_pc: u32,
         ) !void {
@@ -749,66 +802,52 @@ pub fn Preprocessor(FrameType: type) type {
             } else @intCast(value);
 
             const frame_handlers = @import("../frame/frame_handlers.zig");
-            const static_opcode: OpcodeSynthetic = switch (fusion_type) {
-                .push_jump => .JUMP_TO_STATIC_LOCATION,
-                .push_jumpi => .JUMPI_TO_STATIC_LOCATION,
-            };
             const static_handler = frame_handlers.getSyntheticHandler(FrameType, static_opcode);
             try schedule_items.append(allocator, .{ .opcode_handler = static_handler });
 
             const meta_index = schedule_items.items.len;
             const placeholder: *const anyopaque = @as(*const anyopaque, @ptrFromInt(1));
             try schedule_items.append(allocator, .{ .jump_static = .{ .dispatch = placeholder } });
+            try schedule_items.append(allocator, .{ .jump_dest = zero_block });
             try unresolved_jumps.append(allocator, .{ .schedule_index = meta_index, .target_pc = dest_pc });
         }
 
-        fn resolveStaticJumpsWithArray(
+        /// Number of schedule items between a JUMPDEST's handler and the first
+        /// instruction of its block: the handler and its `jump_dest` metadata.
+        pub const jumpdest_items = 2;
+
+        /// Point every static jump at its target.
+        ///
+        /// A jump to a JUMPDEST gets a copy of that JUMPDEST's block metadata and the
+        /// cursor of the instruction after it. The jump handler charges and validates
+        /// the block itself and continues there, so a taken static jump dispatches
+        /// once, not twice. A jump to anything else gets the invalid-jump item and
+        /// metadata that charges nothing.
+        fn resolveStaticJumps(
             schedule: []Item,
-            unresolved_jumps: *ArrayList(UnresolvedJump, null),
-            jumpdest_array: []const JumpDestEntry,
+            unresolved_jumps: []const UnresolvedJump,
+            jump_table: JumpTable,
             invalid_jump_index: usize,
             tracer: anytype,
         ) void {
-            for (unresolved_jumps.items) |unresolved| {
-                const target_pc = unresolved.target_pc orelse {
-                    schedule[unresolved.schedule_index].jump_static = .{
+            for (unresolved_jumps) |unresolved| {
+                const resolved: ?u32 = if (unresolved.target_pc) |target_pc| jump_table.findOffset(target_pc) else null;
+                const jumpdest_index = resolved orelse {
+                    @branchHint(.cold);
+                    if (unresolved.target_pc) |target_pc| {
+                        if (tracer) |t| t.onInvalidStaticJump(0, target_pc);
+                    }
+                    schedule[unresolved.schedule_index] = .{ .jump_static = .{
                         .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + invalid_jump_index)),
-                    };
+                    } };
+                    schedule[unresolved.schedule_index + 1] = .{ .jump_dest = zero_block };
                     continue;
                 };
-                var left: usize = 0;
-                var right: usize = jumpdest_array.len;
-
-                var found: ?usize = null;
-                while (left < right) {
-                    const mid = left + (right - left) / 2;
-                    const mid_pc = jumpdest_array[mid].pc;
-
-                    if (mid_pc == target_pc) {
-                        found = mid;
-                        break;
-                    } else if (mid_pc < target_pc) {
-                        left = mid + 1;
-                    } else {
-                        right = mid;
-                    }
-                }
-
-                if (found) |idx| {
-                    const target_schedule_idx = jumpdest_array[idx].schedule_index;
-                    schedule[unresolved.schedule_index].jump_static = .{
-                        .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + target_schedule_idx)),
-                    };
-                    if (tracer) |t| {
-                        t.onStaticJumpResolved(0, target_pc);
-                    }
-                } else {
-                    @branchHint(.cold);
-                    if (tracer) |t| t.onInvalidStaticJump(0, target_pc);
-                    schedule[unresolved.schedule_index].jump_static = .{
-                        .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + invalid_jump_index)),
-                    };
-                }
+                schedule[unresolved.schedule_index] = .{ .jump_static = .{
+                    .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + jumpdest_index + jumpdest_items)),
+                } };
+                schedule[unresolved.schedule_index + 1] = .{ .jump_dest = schedule[jumpdest_index + 1].jump_dest };
+                if (tracer) |t| t.onStaticJumpResolved(0, unresolved.target_pc.?);
             }
         }
 
@@ -824,11 +863,6 @@ pub fn Preprocessor(FrameType: type) type {
             push_mload,
             push_mstore,
             push_mstore8,
-        };
-
-        const JumpFusionType = enum {
-            push_jump,
-            push_jumpi,
         };
 
         fn getSyntheticOpcode(fusion_type: ValueFusionType, is_inline: bool) OpcodeSynthetic {
@@ -847,62 +881,16 @@ pub fn Preprocessor(FrameType: type) type {
             };
         }
 
-        /// Build the dynamic jump table for a schedule.
-        ///
-        /// The JUMPDEST positions come from the entries recorded while the schedule was
-        /// built. They are never recovered by comparing handler pointers: the optimizer
-        /// may merge handlers with identical machine code (JUMPDEST and BLOCK_BEGIN are
-        /// identical in untraced builds), so a handler address does not identify an opcode.
-        pub fn createJumpTable(
-            allocator: std.mem.Allocator,
-            schedule: *const DispatchSchedule,
-        ) !JumpTable {
-            return try createJumpTableFromArray(allocator, schedule.items, schedule.jumpdests);
-        }
-
-        fn createJumpTableFromArray(
-            allocator: std.mem.Allocator,
-            schedule: []const Item,
-            jumpdest_array: []const JumpDestEntry,
-        ) !JumpTable {
-            const log = @import("../log.zig");
-            const entries = try allocator.alloc(JumpTable.JumpTableEntry, jumpdest_array.len);
-            errdefer allocator.free(entries);
-
-            // Debug logging for jump table construction
-            log.debug("=== Jump Table Construction ===", .{});
-            log.debug("Total JUMPDESTs: {}", .{jumpdest_array.len});
-
-            for (jumpdest_array, 0..) |jumpdest, i| {
-                entries[i] = .{
-                    .pc = jumpdest.pc,
-                    .dispatch = Self{
-                        .cursor = schedule.ptr + jumpdest.schedule_index,
-                    },
-                };
-            }
-
-            // The binary search over the table requires strictly increasing PCs.
-            if (entries.len > 1) {
-                for (entries[0..entries.len -| 1], entries[1..]) |current, next| {
-                    if (current.pc >= next.pc) {
-                        log.err("JumpTable not properly sorted: PC {} >= {}", .{ current.pc, next.pc });
-                        return error.JumpTableNotSorted;
-                    }
-                }
-            }
-
-            return JumpTable{ .entries = entries };
-        }
-
         pub const DispatchSchedule = struct {
             items: []Item,
             /// True when `items[0]` is the first block's gas and stack metadata, false
             /// when the first item is already a handler (the first block charges nothing
             /// and has no stack requirements).
             has_first_block: bool,
-            /// Every JUMPDEST in the code with the schedule index of its handler, sorted by PC.
-            jumpdests: []JumpDestEntry,
+            /// Every JUMPDEST in the code with the schedule index of its handler: the
+            /// table dynamic jumps look their target up in. It is the only record of
+            /// the JUMPDESTs the schedule keeps, and it points into `items`.
+            jump_table: JumpTable,
             allocator: std.mem.Allocator,
             /// Arena holding the operands of fused PUSH+op handlers that are wider than
             /// 64 bits. Freed in one operation when the schedule is destroyed.
@@ -914,7 +902,7 @@ pub fn Preprocessor(FrameType: type) type {
 
             pub fn deinit(self: *DispatchSchedule) void {
                 self.push_values_arena.deinit();
-                self.allocator.free(self.jumpdests);
+                self.jump_table.deinit(self.allocator);
                 self.allocator.free(self.items);
             }
 
@@ -962,7 +950,18 @@ pub fn Preprocessor(FrameType: type) type {
                             // Skip the metadata that belongs to this handler: one item,
                             // or up to four inline limbs of a PUSH value.
                             switch (self.items[idx]) {
-                                .jump_dest, .push_pointer, .pc, .jump_static => idx += 1,
+                                .jump_dest, .push_pointer, .pc => idx += 1,
+                                // A static jump: its target cursor, the target block's
+                                // metadata and, for the conditional forms, the
+                                // fall-through block's metadata.
+                                .jump_static => {
+                                    idx += 1;
+                                    var blocks: usize = 0;
+                                    while (idx < end and blocks < 2 and self.items[idx] == .jump_dest) : (blocks += 1) {
+                                        idx += 1;
+                                    }
+                                    if (blocks == 0) return false;
+                                },
                                 .push_inline => {
                                     var limbs: usize = 0;
                                     while (idx < end and limbs < 4 and self.items[idx] == .push_inline) : (limbs += 1) {

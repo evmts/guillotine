@@ -1263,14 +1263,14 @@ test "R2A R2-14: Database.delete_account clears storage in base and overlay" {
     try std.testing.expectEqual(@as(usize, 3), db.undo_log.items.len);
     try std.testing.expect(!db.account_exists(doomed));
     try std.testing.expect(!(try db.has_storage(doomed)));
-    try std.testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(doomed));
-    try std.testing.expectEqual(@as(?usize, 1000), db.storage_slot_counts.get(neighbour));
+    try std.testing.expectEqual(@as(usize, 0), db.storage.nonZeroCount(doomed));
+    try std.testing.expectEqual(@as(usize, 1000), db.storage.nonZeroCount(neighbour));
 
     try db.revert_to_snapshot(snapshot);
     try std.testing.expectEqual(@as(u256, 5), try db.get_balance(doomed));
     try std.testing.expectEqual(@as(u256, 11), try db.get_storage(doomed, 1));
     try std.testing.expectEqual(@as(u256, 22), try db.get_storage(doomed, 2));
-    try std.testing.expectEqual(@as(?usize, 2), db.storage_slot_counts.get(doomed));
+    try std.testing.expectEqual(@as(usize, 2), db.storage.nonZeroCount(doomed));
 }
 
 // R2-04: only the exact 23-byte designator is a delegation, and setting other

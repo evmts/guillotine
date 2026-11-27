@@ -250,6 +250,7 @@ test {
     _ = @import("opcodes/opcode_synthetic.zig");
     _ = @import("storage/database.zig");
     _ = @import("storage/slot_store.zig");
+    _ = @import("storage/slot_hash.zig");
     _ = @import("storage/database_proxy.zig");
     _ = @import("storage/journal.zig");
     _ = @import("eips_and_hardforks/validator_deposits.zig");

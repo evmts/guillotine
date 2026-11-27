@@ -29,7 +29,8 @@ This module handles all persistent state for EVM execution including account bal
 - **`created_contracts.zig`** - Tracking of contracts created during transaction execution (EIP-6780)
 - **`self_destruct.zig`** - Self-destruct contract management with EIP-6780 compliance
 - **`database_proxy.zig`** - `DatabaseProxy`: pass-through, static (read-only, EIP-214) and write-buffering views of a database
-- **`slot_store.zig`** - `SlotStore`: storage slots of one database layer with a per-address key index
+- **`slot_store.zig`** - `SlotStore`: storage slots of one database layer with a per-address key list and non-zero count
+- **`slot_hash.zig`** - The one hash of `(address, slot)` shared by the access list, the journal and the slot stores, so SLOAD and SSTORE hash a slot once
 
 ### Benchmarking and Testing
 

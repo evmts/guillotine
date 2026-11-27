@@ -16,6 +16,8 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
         const config = FrameType.frame_config;
 
         // Use default configuration for CallParams - this maintains backward compatibility
@@ -574,14 +576,24 @@ pub fn Handlers(FrameType: type) type {
 
         /// STOP opcode (0x00) - Halt execution.
         /// Stack: [] → []
-        pub fn stop(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.STOP, cursor);
-
-            // EIP-3529 gas refund is applied at the transaction level in evm.zig,
-            // not within individual frames. The frame just stops execution.
-
-            self.afterComplete(.STOP);
-            return Error.Stop;
+        ///
+        /// Written against the register ABI: STOP does no host work, so it only writes
+        /// the live stack pointer and gas back to the frame and returns its exit code.
+        /// EIP-3529 gas refund is applied at the transaction level in evm.zig, not
+        /// within individual frames.
+        pub fn stop(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const s = N.StackView.init(sp, t0, t1, t2, t3);
+            N.before(self, .STOP, cursor, s, gas);
+            return N.exit(self, .STOP, s, gas, .stop);
         }
     };
 }
