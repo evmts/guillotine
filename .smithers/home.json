@@ -161,7 +161,7 @@
           "type": "code",
           "file": "execute.zig",
           "language": "zig",
-          "code": "const std = @import(\"std\");\nconst evm = @import(\"evm\");\nconst primitives = @import(\"voltaire\");\n\npub fn main() !void {\n    var gpa = std.heap.GeneralPurposeAllocator(.{}){};\n    defer _ = gpa.deinit();\n    const allocator = gpa.allocator();\n\n    var db = evm.Database.init(allocator);\n    defer db.deinit();\n\n    const code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };\n    const target = primitives.Address.fromHex(\"0x2000000000000000000000000000000000000002\") catch unreachable;\n    try db.set_code(target.bytes, &code);\n\n    var instance = try evm.MainnetEvm.init(allocator, &db, .{}, .{}, 0, null);\n    defer instance.deinit();\n    const res = instance.call(.{ .call = .{ .caller = [_]u8{0} ** 20, .to = target.bytes, .value = 0, .input = &.{}, .gas = 100_000 } });\n    std.debug.print(\"success={} output={x}\\n\", .{ res.success, res.output });\n}"
+          "code": "const std = @import(\"std\");\nconst evm = @import(\"evm\");\nconst primitives = @import(\"voltaire\");\n\npub fn main() !void {\n    var gpa = std.heap.GeneralPurposeAllocator(.{}){};\n    defer _ = gpa.deinit();\n    const allocator = gpa.allocator();\n\n    var db = evm.Database.init(allocator);\n    defer db.deinit();\n\n    const code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };\n    const target = try primitives.Address.fromHex(\n        \"0x2000000000000000000000000000000000000002\",\n    );\n    try db.set_code(target.bytes, &code);\n\n    var instance = try evm.MainnetEvm.init(allocator, &db, .{}, .{}, 0, null);\n    defer instance.deinit();\n    const res = instance.call(.{ .call = .{\n        .caller = @splat(0),\n        .to = target.bytes,\n        .value = 0,\n        .input = &.{},\n        .gas = 100_000,\n    } });\n    std.debug.print(\"success={} output={x}\\n\", .{ res.success, res.output });\n}"
         },
         {
           "type": "stats",
@@ -175,7 +175,7 @@
               "label": "Classic interpreter suite (M3 Max)"
             },
             {
-              "value": "55 Lean + 32 SMT",
+              "value": "183 Lean + 42 SMT",
               "label": "Machine-checked formal proofs"
             },
             {

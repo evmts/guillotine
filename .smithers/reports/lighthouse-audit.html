@@ -237,6 +237,7 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
       gap: 20px;
+      align-items: start;
     }
     .opp-list { display: flex; flex-direction: column; gap: 10px; }
     .opp-row {
@@ -376,6 +377,7 @@
       border-radius: 999px;
     }
     .audit-list { display: flex; flex-direction: column; }
+    .cat-section.hidden { display: none; }
     .audit-item { border-bottom: 1px solid var(--border); }
     .audit-item:last-child { border-bottom: none; }
     .audit-item.hidden { display: none; }
@@ -2070,11 +2072,11 @@
       </section>
 
     <footer class="footer">
-      Generated 2026-11-27T13:15:48.308Z by .smithers/reports/audit.mjs from Uphill telemetry and Smithers Cloud factory projections.
+      Generated 2026-11-27T13:20:59.602Z by .smithers/reports/audit.mjs from Uphill telemetry and Smithers Cloud factory projections.
     </footer>
   </main>
 
-  <script id="audit-summary-data" type="application/json">{"repository":"evmts/guillotine","version":"0.1.0","compositeScore":85,"generatedAt":"2026-11-27T13:15:48.308Z","categories":[{"name":"safety","title":"Safety & TigerStyle","score":90},{"name":"style","title":"Style & Limits","score":90},{"name":"footprint","title":"Footprint & Modularity","score":38},{"name":"verification","title":"Verification & Tests","score":90},{"name":"documentation","title":"Documentation","score":100},{"name":"factory","title":"Factory & Trust","score":100}]}</script>
+  <script id="audit-summary-data" type="application/json">{"repository":"evmts/guillotine","version":"0.1.0","compositeScore":85,"generatedAt":"2026-11-27T13:20:59.602Z","categories":[{"name":"safety","title":"Safety & TigerStyle","score":90},{"name":"style","title":"Style & Limits","score":90},{"name":"footprint","title":"Footprint & Modularity","score":38},{"name":"verification","title":"Verification & Tests","score":90},{"name":"documentation","title":"Documentation","score":100},{"name":"factory","title":"Factory & Trust","score":100}]}</script>
   <script>
     (function () {
       const root = document.documentElement;
@@ -2095,6 +2097,7 @@
       const searchInput = document.getElementById("audit-search");
       const buttons = Array.from(document.querySelectorAll(".filter-btn"));
       const items = Array.from(document.querySelectorAll(".audit-item"));
+      const sections = Array.from(document.querySelectorAll(".cat-section"));
 
       function applyFilters() {
         const q = (searchInput.value || "").trim().toLowerCase();
@@ -2107,6 +2110,10 @@
             (statusFilter === "issues" && band !== "pass");
           const matchText = !q || hay.includes(q);
           el.classList.toggle("hidden", !(matchStatus && matchText));
+        }
+        for (const sec of sections) {
+          const visible = sec.querySelector(".audit-item:not(.hidden)");
+          sec.classList.toggle("hidden", !visible);
         }
       }
 

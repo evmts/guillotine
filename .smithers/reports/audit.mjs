@@ -735,6 +735,7 @@ export function renderAuditHtml(model) {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
       gap: 20px;
+      align-items: start;
     }
     .opp-list { display: flex; flex-direction: column; gap: 10px; }
     .opp-row {
@@ -874,6 +875,7 @@ export function renderAuditHtml(model) {
       border-radius: 999px;
     }
     .audit-list { display: flex; flex-direction: column; }
+    .cat-section.hidden { display: none; }
     .audit-item { border-bottom: 1px solid var(--border); }
     .audit-item:last-child { border-bottom: none; }
     .audit-item.hidden { display: none; }
@@ -1084,6 +1086,7 @@ export function renderAuditHtml(model) {
       const searchInput = document.getElementById("audit-search");
       const buttons = Array.from(document.querySelectorAll(".filter-btn"));
       const items = Array.from(document.querySelectorAll(".audit-item"));
+      const sections = Array.from(document.querySelectorAll(".cat-section"));
 
       function applyFilters() {
         const q = (searchInput.value || "").trim().toLowerCase();
@@ -1096,6 +1099,10 @@ export function renderAuditHtml(model) {
             (statusFilter === "issues" && band !== "pass");
           const matchText = !q || hay.includes(q);
           el.classList.toggle("hidden", !(matchStatus && matchText));
+        }
+        for (const sec of sections) {
+          const visible = sec.querySelector(".audit-item:not(.hidden)");
+          sec.classList.toggle("hidden", !visible);
         }
       }
 

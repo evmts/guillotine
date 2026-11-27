@@ -229,7 +229,7 @@ function selectNote(path) {
     a.addEventListener("click", (e) => { e.preventDefault(); selectNote(a.dataset.note); window.scrollTo(0, 0); });
   }
   outlineEl.innerHTML = rendered.headings.length
-    ? rendered.headings.map(h => `<li style="padding-left:${(h.level - 2) * 12}px"><a href="#${esc(h.id)}">${esc(h.text)}</a></li>`).join("")
+    ? rendered.headings.map(h => `<li style="padding-left:${(h.level - 2) * 12}px"><a href="#${esc(h.id)}">${esc(h.text.replace(/`/g, ""))}</a></li>`).join("")
     : '<li class="input-file">No subsections</li>';
   backlinksEl.innerHTML = note.backlinks.length
     ? note.backlinks.map(p => {
@@ -240,7 +240,7 @@ function selectNote(path) {
   for (const btn of backlinksEl.querySelectorAll("button")) {
     btn.addEventListener("click", () => { selectNote(btn.dataset.note); window.scrollTo(0, 0); });
   }
-  inputsEl.innerHTML = note.inputs.map(f => `<li class="input-file">${esc(f)}</li>`).join("");
+  inputsEl.innerHTML = note.inputs.map(f => `<li class="input-file" title="${esc(f)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f)}</li>`).join("");
 }
 
 searchEl.addEventListener("input", () => renderNav(searchEl.value));
