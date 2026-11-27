@@ -41,3 +41,12 @@ pub const TracerConfig = struct {
         .enable_advanced_trace = true,
     };
 };
+
+test "TracerConfig presets match expected defaults" {
+    try std.testing.expect(!TracerConfig.disabled.enabled);
+    try std.testing.expect(TracerConfig.debug.enabled);
+    try std.testing.expect(TracerConfig.debug.enable_validation);
+    try std.testing.expect(!TracerConfig.debug.enable_step_capture);
+    try std.testing.expect(TracerConfig.full.enable_step_capture);
+    try std.testing.expect(TracerConfig.full.enable_advanced_trace);
+}

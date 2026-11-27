@@ -150,3 +150,8 @@ pub const AccessType = enum {
     call,
     selfdestruct,
 };
+
+test "AccessType enumerates EIP-2929 warm/cold access categories" {
+    try std.testing.expect(@typeInfo(AccessType).@"enum".fields.len == 6);
+    try std.testing.expect(AccessType.storage != AccessType.balance);
+}

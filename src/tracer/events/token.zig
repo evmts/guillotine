@@ -232,3 +232,19 @@ pub const TokenEvidence = struct {
     balance_mapping_detected: bool,
     allowance_mapping_detected: bool,
 };
+
+test "TokenEvidence tracks ERC20 heuristic signals" {
+    const ev = TokenEvidence{
+        .has_standard_events = true,
+        .has_standard_functions = true,
+        .follows_storage_pattern = true,
+        .decimals_in_range = true,
+        .symbol_looks_valid = true,
+        .name_looks_valid = true,
+        .total_supply_reasonable = true,
+        .balance_mapping_detected = true,
+        .allowance_mapping_detected = false,
+    };
+    try std.testing.expect(ev.has_standard_events);
+    try std.testing.expect(!ev.allowance_mapping_detected);
+}

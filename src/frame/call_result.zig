@@ -109,7 +109,12 @@ pub fn CallResult(config: anytype) type {
         }
 
         /// Create a successful call result with output and logs
-        pub fn success_with_logs(allocator: std.mem.Allocator, gas_left: u64, output: []const u8, logs: []const Log) !Self {
+        pub fn success_with_logs(
+            allocator: std.mem.Allocator,
+            gas_left: u64,
+            output: []const u8,
+            logs: []const Log,
+        ) !Self {
             // Deep copy logs
             const logs_copy = try allocator.alloc(Log, logs.len);
             for (logs, 0..) |log, i| {
@@ -235,7 +240,10 @@ pub fn CallResult(config: anytype) type {
             for (self.logs, 0..) |log, i| {
                 logs_copy[i] = .{
                     .address = log.address,
-                    .topics = if (log.topics.len == 0) try allocator.alloc(u256, 0) else try allocator.dupe(u256, log.topics),
+                    .topics = if (log.topics.len == 0)
+                        try allocator.alloc(u256, 0)
+                    else
+                        try allocator.dupe(u256, log.topics),
                     .data = if (log.data.len == 0) try allocator.alloc(u8, 0) else try allocator.dupe(u8, log.data),
                 };
             }

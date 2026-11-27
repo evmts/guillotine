@@ -127,3 +127,8 @@ pub const MultiSigType = enum {
     timelock_multi_sig,
     unknown,
 };
+
+test "MultiSigType covers common multisig wallet kinds" {
+    try std.testing.expect(@typeInfo(MultiSigType).@"enum".fields.len == 6);
+    try std.testing.expect(MultiSigType.gnosis_safe != MultiSigType.unknown);
+}

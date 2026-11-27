@@ -73,7 +73,12 @@ pub const BaseChain = enum {
     pub fn nextBaseFee(self: BaseChain, parent_timestamp: u64, child_timestamp: u64, parent: eip1559.Parent) !u256 {
         if (child_timestamp <= parent_timestamp) return error.TimestampNotIncreasing;
         const schedule_ = self.schedule();
-        return eip1559.nextBaseFee(self.eip1559Constants(), try schedule_.specAt(parent_timestamp), try schedule_.specAt(child_timestamp), parent);
+        return eip1559.nextBaseFee(
+            self.eip1559Constants(),
+            try schedule_.specAt(parent_timestamp),
+            try schedule_.specAt(child_timestamp),
+            parent,
+        );
     }
 
     pub fn name(self: BaseChain) []const u8 {

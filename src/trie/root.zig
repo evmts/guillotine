@@ -20,3 +20,11 @@ pub const ProofError = proof.ProofError;
 
 pub const key_to_nibbles = trie.key_to_nibbles;
 pub const nibbles_to_key = trie.nibbles_to_key;
+
+test "trie root re-exports nibble conversion helpers" {
+    const std = @import("std");
+    const allocator = std.testing.allocator;
+    const nibbles = try key_to_nibbles(allocator, &[_]u8{ 0xab, 0xcd });
+    defer allocator.free(nibbles);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0xa, 0xb, 0xc, 0xd }, nibbles);
+}

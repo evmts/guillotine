@@ -50,7 +50,10 @@ pub fn getOpcodeHandlers(
 
     // The default opcode handler used for any opcode that is not supported by the EVM
     const invalid = handler_abi.wrap(FrameType, struct {
-        fn handler(frame: *FrameType, cursor: [*]const FrameType.Dispatch.Item) FrameType.Error![*]const FrameType.Dispatch.Item {
+        fn handler(
+            frame: *FrameType,
+            cursor: [*]const FrameType.Dispatch.Item,
+        ) FrameType.Error![*]const FrameType.Dispatch.Item {
             _ = cursor;
             // Invalid opcodes consume all remaining gas and revert
             frame.gas_remaining = 0;
@@ -226,4 +229,8 @@ pub fn getSyntheticHandler(FrameType: type, synthetic_opcode: OpcodeSynthetic) F
         .BLOCK_BEGIN => &JumpSyntheticHandlers.block_begin,
         .INVALID_JUMP_TARGET => &JumpSyntheticHandlers.invalid_jump_target,
     };
+}
+
+test "frame_handlers exports handler lookup function" {
+    try std.testing.expect(@typeInfo(@TypeOf(getOpcodeHandlers)) == .@"fn");
 }

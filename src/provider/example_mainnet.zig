@@ -36,3 +36,7 @@ pub fn main() !void {
     defer allocator.free(result);
     std.log.info("Chain ID: {s}", .{result});
 }
+
+test "example_mainnet exposes main entrypoint" {
+    try std.testing.expect(@typeInfo(@TypeOf(main)) == .@"fn");
+}

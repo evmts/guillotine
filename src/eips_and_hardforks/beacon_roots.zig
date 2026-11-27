@@ -51,7 +51,10 @@ pub const HISTORY_BUFFER_LENGTH: u64 = 8191;
 
 /// Runtime bytecode of the canonical EIP-4788 contract, byte-for-byte as deployed on
 /// mainnet and as found in `pre` of the EEST `cancun/eip4788_beacon_root` fixtures.
-pub const BEACON_ROOTS_CODE = decodeHex("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
+pub const BEACON_ROOTS_CODE = decodeHex(
+    "3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f358015604957" ++
+        "62001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500",
+);
 
 fn decodeHex(comptime hex: []const u8) [hex.len / 2]u8 {
     var out: [hex.len / 2]u8 = undefined;
@@ -130,7 +133,11 @@ pub const BeaconRootsContract = struct {
         const timestamp = block_info.timestamp;
         const slots = computeSlots(timestamp);
         try database.set_storage(BEACON_ROOTS_ADDRESS.bytes, slots.timestamp_slot, timestamp);
-        try database.set_storage(BEACON_ROOTS_ADDRESS.bytes, slots.root_slot, std.mem.readInt(u256, &beacon_root, .big));
+        try database.set_storage(
+            BEACON_ROOTS_ADDRESS.bytes,
+            slots.root_slot,
+            std.mem.readInt(u256, &beacon_root, .big),
+        );
 
         log.debug("BeaconRoots: stored root for timestamp {} at slot {}", .{ timestamp, slots.timestamp_slot });
     }

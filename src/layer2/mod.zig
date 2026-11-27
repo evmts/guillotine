@@ -11,3 +11,10 @@ pub const BaseConfig = layer2_config.BaseConfig;
 pub const OpSpecId = optimism.OpSpecId;
 
 pub const executor = @import("executor.zig");
+
+test "layer2 root re-exports Optimism, Base, and Layer2Config" {
+    const std = @import("std");
+    const cfg: Layer2Config = .none;
+    try std.testing.expect(!cfg.isL2());
+    try std.testing.expectEqualStrings("mainnet", cfg.name());
+}

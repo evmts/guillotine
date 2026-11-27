@@ -47,12 +47,23 @@ pub const GrowingArenaAllocator = struct {
     }
 
     /// Initialize with separate initial and max capacities
-    pub fn initWithMaxCapacity(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32) !Self {
+    pub fn initWithMaxCapacity(
+        base_allocator: std.mem.Allocator,
+        initial_capacity: usize,
+        max_capacity: usize,
+        growth_factor: u32,
+    ) !Self {
         return initWithMaxCapacityAndTracer(base_allocator, initial_capacity, max_capacity, growth_factor, null);
     }
 
     /// Initialize with separate initial and max capacities and optional tracer
-    pub fn initWithMaxCapacityAndTracer(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32, tracer: ?*anyopaque) !Self {
+    pub fn initWithMaxCapacityAndTracer(
+        base_allocator: std.mem.Allocator,
+        initial_capacity: usize,
+        max_capacity: usize,
+        growth_factor: u32,
+        tracer: ?*anyopaque,
+    ) !Self {
         // CRITICAL: Validate growth factor to prevent infinite loops
         if (growth_factor <= 100) {
             log.err("Invalid growth_factor={d}. Must be > 100 (e.g., 150 = 50% growth)", .{growth_factor});
@@ -263,7 +274,10 @@ pub const GrowingArenaAllocator = struct {
                 const growth_factor_usize: usize = self.growth_factor;
                 const max_before_overflow: usize = std.math.maxInt(usize) / growth_factor_usize;
                 if (new_capacity > max_before_overflow) {
-                    log.err("Capacity growth would overflow: new_capacity={d}, growth_factor={d}", .{ new_capacity, self.growth_factor });
+                    log.err(
+                        "Capacity growth would overflow: new_capacity={d}, growth_factor={d}",
+                        .{ new_capacity, self.growth_factor },
+                    );
                     new_capacity = self.max_capacity;
                     break;
                 }
@@ -272,7 +286,10 @@ pub const GrowingArenaAllocator = struct {
 
                 // Detect if growth is insufficient (would loop forever)
                 if (grown <= new_capacity) {
-                    log.err("Growth calculation failed: {d} * {d} / 100 = {d} (no progress)", .{ new_capacity, self.growth_factor, grown });
+                    log.err(
+                        "Growth calculation failed: {d} * {d} / 100 = {d} (no progress)",
+                        .{ new_capacity, self.growth_factor, grown },
+                    );
                     new_capacity = self.max_capacity;
                     break;
                 }

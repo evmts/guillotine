@@ -23,11 +23,12 @@ pub fn Handlers(FrameType: type) type {
 
         /// KECCAK256 opcode (0x20) - Compute keccak hash
         inline fn emptyKeccakWord() WordType {
+            const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
             return switch (@bitSizeOf(WordType)) {
-                256 => @as(WordType, @truncate(@as(u256, 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470))),
+                256 => @as(WordType, @truncate(empty_hash)),
                 64 => @as(WordType, @as(u64, 0x0eab42de4c3ceb92)),
                 32 => @as(WordType, @as(u32, 0xf71837502)),
-                else => @as(WordType, @truncate(@as(u256, 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470))),
+                else => @as(WordType, @truncate(empty_hash)),
             };
         }
 

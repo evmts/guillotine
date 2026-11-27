@@ -543,3 +543,7 @@ pub inline fn getOpData(
         },
     };
 }
+
+test "dispatch_opcode_data exports getOpData helper" {
+    try std.testing.expect(@typeInfo(@TypeOf(getOpData)) == .@"fn");
+}

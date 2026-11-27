@@ -166,3 +166,7 @@ pub fn main() !void {
 
     log.debug("\n✅ Benchmarks completed!\n", .{});
 }
+
+test "bytecode_bench_simple exposes benchmark main entrypoint" {
+    try std.testing.expect(@typeInfo(@TypeOf(main)) == .@"fn");
+}

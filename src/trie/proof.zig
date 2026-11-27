@@ -67,7 +67,13 @@ pub const ProofNodes = struct {
     }
 
     /// Verify a key against the proof with expected root hash
-    pub fn verify(self: *const ProofNodes, allocator: Allocator, root_hash: [32]u8, key: []const u8, expected_value: ?[]const u8) !bool {
+    pub fn verify(
+        self: *const ProofNodes,
+        allocator: Allocator,
+        root_hash: [32]u8,
+        key: []const u8,
+        expected_value: ?[]const u8,
+    ) !bool {
         const nibbles = try trie.key_to_nibbles(allocator, key);
         defer allocator.free(nibbles);
 
@@ -164,7 +170,11 @@ pub const ProofNodes = struct {
 
     /// Resolves a child reference to its decoded proof node. Returns null for an
     /// empty reference. The node must be in the proof and hash to the reference.
-    fn resolve_child(self: *const ProofNodes, allocator: Allocator, child: primitives.Rlp.Data) !?primitives.Rlp.Decoded {
+    fn resolve_child(
+        self: *const ProofNodes,
+        allocator: Allocator,
+        child: primitives.Rlp.Data,
+    ) !?primitives.Rlp.Decoded {
         const reference = switch (child) {
             .String => |bytes| bytes,
             .List => return ProofError.CorruptedNode,
@@ -211,7 +221,9 @@ pub const ProofRetainer = struct {
         // Check if this node is on the path to our key
         if (path_prefix.len > self.key_nibbles.len) return false; // Path is longer than key, not relevant
 
-        if (!std.mem.eql(u8, path_prefix, self.key_nibbles[0..path_prefix.len])) return false; // Path doesn't match key prefix, not relevant
+        if (!std.mem.eql(u8, path_prefix, self.key_nibbles[0..path_prefix.len])) {
+            return false; // Path does not match key prefix
+        }
 
         // This node is on the path, encode and collect it
         const encoded = try node.encode(self.allocator);

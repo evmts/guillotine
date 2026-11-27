@@ -260,3 +260,13 @@ pub const JsonRpcResponse = struct {
         }
     }
 };
+
+test "JsonRpcResponse deinit handles empty optional fields" {
+    const resp = JsonRpcResponse{
+        .jsonrpc = "2.0",
+        .id = 1,
+        .result = null,
+        .error_info = null,
+    };
+    resp.deinit(std.testing.allocator);
+}

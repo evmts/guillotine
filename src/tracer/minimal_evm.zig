@@ -159,7 +159,8 @@ pub const MinimalEvm = struct {
         const selfdestructed_accounts_map = std.AutoHashMap(Address, void).init(arena_allocator);
         const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         const warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false) = .empty;
-        const warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false) = .empty;
+        const WarmStorageMap = std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false);
+        const warm_storage_slots: WarmStorageMap = .empty;
         var frames_list = std.ArrayList(*MinimalFrame).empty;
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
 

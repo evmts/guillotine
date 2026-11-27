@@ -80,7 +80,8 @@ pub fn Stack(config: StackConfig) type {
         /// Initialize a new stack (tracer parameter retained for API compatibility).
         pub fn initWithTracer(allocator: std.mem.Allocator, tracer: anytype) Error!Self {
             _ = tracer;
-            const memory = allocator.alignedAlloc(WordType, @fromBackingInt(@intCast(6)), buffer_len) catch return Error.AllocationError;
+            const align64: std.mem.Alignment = .@"64";
+            const memory = allocator.alignedAlloc(WordType, align64, buffer_len) catch return Error.AllocationError;
             errdefer allocator.free(memory);
             // Buffers can be recycled, so give the sentinel a defined value: an empty
             // stack's spill slot is read when a frame enters the handler chain.
@@ -146,7 +147,10 @@ pub fn Stack(config: StackConfig) type {
         }
 
         pub inline fn set_top_unsafe(self: *Self, value: WordType) void {
-            self.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()), "Stack underflow in set_top_unsafe");
+            self.assert(
+                @intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()),
+                "Stack underflow in set_top_unsafe",
+            );
             self.stack_ptr[0] = value;
         }
 
@@ -174,7 +178,10 @@ pub fn Stack(config: StackConfig) type {
         /// This is optimized for arithmetic operations like ADD, MUL, SUB, DIV.
         pub inline fn binary_op_unsafe(self: *Self, comptime op: fn (a: WordType, b: WordType) WordType) void {
             @branchHint(.likely);
-            self.assert(@intFromPtr(self.stack_ptr) + @sizeOf(WordType) < @intFromPtr(self.stack_base()), "Insufficient stack items for binary operation");
+            self.assert(
+                @intFromPtr(self.stack_ptr) + @sizeOf(WordType) < @intFromPtr(self.stack_base()),
+                "Insufficient stack items for binary operation",
+            );
             const top = self.stack_ptr[0];
             const second = self.stack_ptr[1];
             self.stack_ptr[1] = op(top, second);
@@ -201,7 +208,10 @@ pub fn Stack(config: StackConfig) type {
         // Unsafe generic dup without bounds checks (validated by planner)
         pub inline fn dup_n_unsafe(self: *Self, n: u8) void {
             self.assert(self.size_internal() >= n, "Insufficient stack items for dup_n_unsafe");
-            self.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()), "Stack overflow in dup_n_unsafe");
+            self.assert(
+                @intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()),
+                "Stack overflow in dup_n_unsafe",
+            );
             // In downward stack, nth-from-top is at index n-1
             const value = self.stack_ptr[n - 1];
             self.push_unsafe(value);

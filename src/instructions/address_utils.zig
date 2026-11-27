@@ -23,3 +23,16 @@ pub fn fromWord(comptime WordType: type, value: WordType) Address {
     std.mem.writeInt(u160, &addr_bytes, addr_value, .big);
     return Address{ .bytes = addr_bytes };
 }
+
+test "address_utils round-trip and upper-bit truncation" {
+    const addr = Address{ .bytes = .{
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22,
+        0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+    } };
+    const word = toWord(u256, addr);
+    try std.testing.expectEqualSlices(u8, &addr.bytes, &fromWord(u256, word).bytes);
+
+    // Upper 96 bits above 160 must be ignored by fromWord.
+    const polluted = word | (@as(u256, 0xdeadbeef) << 160);
+    try std.testing.expectEqualSlices(u8, &addr.bytes, &fromWord(u256, polluted).bytes);
+}

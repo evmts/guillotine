@@ -123,7 +123,12 @@ pub const L1BlockInfo = struct {
     /// L1 data fee plus (Isthmus+) operator fee charged up front on `gas_limit`
     /// (op-revm `tx_cost`). The unused part of the operator fee is refunded by
     /// `operatorFeeRefund` after execution.
-    pub fn txCost(self: *L1BlockInfo, enveloped_tx: []const u8, gas_limit: u64, spec_id: OpSpecId) OperatorFeeError!u256 {
+    pub fn txCost(
+        self: *L1BlockInfo,
+        enveloped_tx: []const u8,
+        gas_limit: u64,
+        spec_id: OpSpecId,
+    ) OperatorFeeError!u256 {
         const l1_cost = self.calculateTxL1Cost(enveloped_tx, spec_id);
         const operator = try self.operatorFee(enveloped_tx, gas_limit, spec_id);
         return l1_cost +| operator;
@@ -152,7 +157,8 @@ pub const L1BlockInfo = struct {
     /// (dataGas + overhead) * l1BaseFee * l1Scalar / 1e6
     pub fn calculateL1CostBedrock(self: L1BlockInfo, tx: []const u8, spec_id: OpSpecId) u256 {
         const data_gas = dataGas(tx, spec_id);
-        return ((data_gas +| (self.l1_fee_overhead orelse 0)) *| self.l1_base_fee *| self.l1_base_fee_scalar) / 1_000_000;
+        const gas_with_overhead = data_gas +| (self.l1_fee_overhead orelse 0);
+        return (gas_with_overhead *| self.l1_base_fee *| self.l1_base_fee_scalar) / 1_000_000;
     }
 
     /// dataGas * l1FeeScaled / 16e6. Falls back to Bedrock when the scalars are empty.
@@ -186,7 +192,12 @@ pub const L1BlockInfo = struct {
 
     /// Operator fee refund after execution: fee(gas_limit) - fee(gas_used).
     /// Net operator fee paid is therefore fee(gas_used). Callers skip deposits.
-    pub fn operatorFeeRefund(self: L1BlockInfo, gas_limit: u64, gas_used: u64, spec_id: OpSpecId) OperatorFeeError!u256 {
+    pub fn operatorFeeRefund(
+        self: L1BlockInfo,
+        gas_limit: u64,
+        gas_used: u64,
+        spec_id: OpSpecId,
+    ) OperatorFeeError!u256 {
         if (spec_id.isBefore(.ISTHMUS)) return 0;
         const charged = try self.operatorFeeInner(gas_limit, spec_id);
         const used = try self.operatorFeeInner(gas_used, spec_id);

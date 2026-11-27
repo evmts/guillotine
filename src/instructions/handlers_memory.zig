@@ -25,7 +25,16 @@ pub fn Handlers(FrameType: type) type {
         const mstore8_general_handler = handler_abi.wrap(FrameType, mstore8_general);
 
         /// MLOAD opcode (0x51) - Load word from memory.
-        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn mload(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             if (self.memory.word_ptr_in_bounds(s.peek_unsafe())) |word| {
                 @branchHint(.likely);
@@ -37,7 +46,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
-        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn mstore(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             if (self.memory.word_ptr_in_bounds(s.peek_unsafe())) |word| {
                 @branchHint(.likely);
@@ -50,7 +68,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
-        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn mstore8(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             if (self.memory.byte_ptr_in_bounds(s.peek_unsafe())) |byte| {
                 @branchHint(.likely);
@@ -120,7 +147,9 @@ pub fn Handlers(FrameType: type) type {
             }
 
             // Read 32 bytes from memory (EVM-compliant with automatic expansion)
-            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize))) catch |err| switch (err) {
+            const call_alloc = self.getEvm().getCallArenaAllocator();
+            const offset_u32: u32 = @intCast(offset_usize);
+            const value_u256 = self.memory.get_u256_evm(call_alloc, offset_u32) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.MLOAD);
                     return Error.OutOfBounds;
@@ -175,7 +204,9 @@ pub fn Handlers(FrameType: type) type {
 
             // Convert to u256 if necessary and store
             const value_u256 = @as(u256, value);
-            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
+            const call_alloc = self.getEvm().getCallArenaAllocator();
+            const offset_u32: u32 = @intCast(offset_usize);
+            self.memory.set_u256_evm(call_alloc, offset_u32, value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.MSTORE);
                     return Error.OutOfBounds;
@@ -195,7 +226,10 @@ pub fn Handlers(FrameType: type) type {
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
         /// Pops memory offset and value from stack, stores the least significant byte at that offset.
-        pub fn mstore8_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+        pub fn mstore8_general(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+        ) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MSTORE8, cursor);
             self.validateOpcodeHandler(.MSTORE8, cursor);
             const offset = self.stack.pop_unsafe();
@@ -225,7 +259,9 @@ pub fn Handlers(FrameType: type) type {
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
+            const call_alloc = self.getEvm().getCallArenaAllocator();
+            const offset_u32: u32 = @intCast(offset_usize);
+            self.memory.set_byte_evm(call_alloc, offset_u32, byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.MSTORE8);
                     return Error.OutOfBounds;
@@ -245,7 +281,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
-        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn msize(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .MSIZE, cursor, s, gas);
             s.push_unsafe(@as(WordType, @intCast(self.memory.size())));

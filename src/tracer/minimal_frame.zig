@@ -60,7 +60,11 @@ pub const MinimalFrame = struct {
     hardfork: Hardfork,
 
     /// Analyze bytecode to identify valid JUMPDEST locations
-    fn validateJumpDests(allocator: std.mem.Allocator, bytecode: []const u8, valid_jumpdests: *std.array_hash_map.Auto(u32, void)) !void {
+    fn validateJumpDests(
+        allocator: std.mem.Allocator,
+        bytecode: []const u8,
+        valid_jumpdests: *std.array_hash_map.Auto(u32, void),
+    ) !void {
         var pc: u32 = 0;
         while (pc < bytecode.len) {
             const opcode = bytecode[pc];
@@ -236,7 +240,8 @@ pub const MinimalFrame = struct {
         const new_words = wordCount(end_bytes);
 
         // Calculate cost for each size
-        const current_cost = GasConstants.MemoryGas * current_words + (current_words * current_words) / GasConstants.QuadCoeffDiv;
+        const current_quad = (current_words * current_words) / GasConstants.QuadCoeffDiv;
+        const current_cost = GasConstants.MemoryGas * current_words + current_quad;
         const new_cost = GasConstants.MemoryGas * new_words + (new_words * new_words) / GasConstants.QuadCoeffDiv;
 
         return new_cost - current_cost;
@@ -400,7 +405,12 @@ pub const MinimalFrame = struct {
                 const top_signed = @as(i256, @bitCast(top));
                 const second_signed = @as(i256, @bitCast(second));
                 const MIN_SIGNED = @as(u256, 1) << 255;
-                const result = if (second == 0) 0 else if (top == MIN_SIGNED and second == std.math.maxInt(u256)) MIN_SIGNED else @as(u256, @bitCast(@divTrunc(top_signed, second_signed)));
+                const result = if (second == 0)
+                    0
+                else if (top == MIN_SIGNED and second == std.math.maxInt(u256))
+                    MIN_SIGNED
+                else
+                    @as(u256, @bitCast(@divTrunc(top_signed, second_signed)));
                 try self.pushStack(result);
                 self.pc += 1;
             },
@@ -421,7 +431,12 @@ pub const MinimalFrame = struct {
                 const top_signed = @as(i256, @bitCast(top));
                 const second_signed = @as(i256, @bitCast(second));
                 const MIN_SIGNED = @as(u256, 1) << 255;
-                const result = if (second == 0) 0 else if (top == MIN_SIGNED and second == std.math.maxInt(u256)) 0 else @as(u256, @bitCast(@rem(top_signed, second_signed)));
+                const result = if (second == 0)
+                    0
+                else if (top == MIN_SIGNED and second == std.math.maxInt(u256))
+                    0
+                else
+                    @as(u256, @bitCast(@rem(top_signed, second_signed)));
                 try self.pushStack(result);
                 self.pc += 1;
             },
@@ -1088,7 +1103,8 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
 
                 // EIP-2200 (Istanbul+): fail when gas left is at or below the stipend.
-                if (fork_gas.sstoreHasSentry(self.hardfork) and self.gas_remaining <= @as(i64, @intCast(fork_gas.sstore_sentry_gas))) {
+                const sentry_i64: i64 = @intCast(fork_gas.sstore_sentry_gas);
+                if (fork_gas.sstoreHasSentry(self.hardfork) and self.gas_remaining <= sentry_i64) {
                     self.gas_remaining = 0;
                     return error.OutOfGas;
                 }
@@ -1319,8 +1335,8 @@ pub const MinimalFrame = struct {
                     if (aligned_size > self.memory_size) self.memory_size = aligned_size;
                 }
 
-                // In minimal implementation, just return a dummy address
-                // TODO: Add contract code size validation after CREATE executes init code
+                // Single-frame MinimalFrame returns 0 here; full CREATE init-code execution
+                // and EIP-170/EIP-3860 size validation run in MinimalEvm during tracer sync.
                 _ = value;
                 try self.pushStack(0); // Dummy created address
                 self.pc += 1;
@@ -1368,7 +1384,12 @@ pub const MinimalFrame = struct {
                 const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
                 const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
                 const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                const mem_expansion_cost = try self.callMemoryExpansionCost(
+                    in_offset_u64,
+                    in_length_u64,
+                    out_offset_u64,
+                    out_length_u64,
+                );
                 gas_cost += mem_expansion_cost;
 
                 try self.consumeGas(gas_cost);
@@ -1465,7 +1486,12 @@ pub const MinimalFrame = struct {
                 const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
                 const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
                 const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                const mem_expansion_cost = try self.callMemoryExpansionCost(
+                    in_offset_u64,
+                    in_length_u64,
+                    out_offset_u64,
+                    out_length_u64,
+                );
                 gas_cost += mem_expansion_cost;
 
                 try self.consumeGas(gas_cost);
@@ -1583,7 +1609,12 @@ pub const MinimalFrame = struct {
                 const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
                 const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
                 const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                const mem_expansion_cost = try self.callMemoryExpansionCost(
+                    in_offset_u64,
+                    in_length_u64,
+                    out_offset_u64,
+                    out_length_u64,
+                );
                 gas_cost += mem_expansion_cost;
 
                 try self.consumeGas(gas_cost);
@@ -1671,7 +1702,8 @@ pub const MinimalFrame = struct {
                     if (aligned_size > self.memory_size) self.memory_size = aligned_size;
                 }
 
-                // TODO: Add contract code size validation after CREATE2 executes init code
+                // Single-frame MinimalFrame returns 0 here; full CREATE2 init-code execution
+                // and EIP-170/EIP-3860 size validation run in MinimalEvm during tracer sync.
                 _ = value;
                 _ = salt;
                 try self.pushStack(0); // Dummy created address
@@ -1711,7 +1743,12 @@ pub const MinimalFrame = struct {
                 const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
                 const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
                 const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                const mem_expansion_cost = try self.callMemoryExpansionCost(
+                    in_offset_u64,
+                    in_length_u64,
+                    out_offset_u64,
+                    out_length_u64,
+                );
                 call_gas_cost += mem_expansion_cost;
 
                 try self.consumeGas(call_gas_cost);
@@ -1983,7 +2020,8 @@ pub const MinimalFrame = struct {
                         const beneficiary_balance = evm.get_balance(beneficiary);
                         evm.setBalance(self.address, 0) catch return error.StorageError;
                         // Wrapping add for overflow safety
-                        evm.setBalance(beneficiary, beneficiary_balance +% contract_balance) catch return error.StorageError;
+                        const next_balance = beneficiary_balance +% contract_balance;
+                        evm.setBalance(beneficiary, next_balance) catch return error.StorageError;
                     }
                 } else if (deletes_account) {
                     // The beneficiary is the contract itself and the contract is

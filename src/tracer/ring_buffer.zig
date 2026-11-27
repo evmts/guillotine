@@ -77,17 +77,24 @@ pub const RingBuffer = struct {
             const black = "\x1b[30m";
         };
 
-        try output.print(allocator, "\n{s}═══════════════════════════════════════════════════════════════════{s}\n", .{ Colors.bright_red, Colors.reset });
-        try output.print(allocator, "{s}  RECENT EXECUTION HISTORY (Last {} Instructions)  {s}\n", .{ Colors.bright_red, self.count, Colors.reset });
-        try output.print(allocator, "{s}═══════════════════════════════════════════════════════════════════{s}\n\n", .{ Colors.bright_red, Colors.reset });
+        const sep = "═══════════════════════════════════════════════════════════════════";
+        try output.print(allocator, "\n{s}{s}{s}\n", .{ Colors.bright_red, sep, Colors.reset });
+        try output.print(
+            allocator,
+            "{s}  RECENT EXECUTION HISTORY (Last {} Instructions)  {s}\n",
+            .{ Colors.bright_red, self.count, Colors.reset },
+        );
+        try output.print(allocator, "{s}{s}{s}\n\n", .{ Colors.bright_red, sep, Colors.reset });
 
         if (self.count == 0) {
             try output.print(allocator, "{s}  (No instructions executed yet){s}\n", .{ Colors.dim, Colors.reset });
             return output.toOwnedSlice(allocator);
         }
 
-        try output.print(allocator, "{s} Step  | Sched | Opcode           | Gas Before → After    | Stack | Memory{s}\n", .{ Colors.bold, Colors.reset });
-        try output.print(allocator, "{s}-------|-------|------------------|-----------------------|-------|--------{s}\n", .{ Colors.dim, Colors.reset });
+        const header = " Step  | Sched | Opcode           | Gas Before → After    | Stack | Memory";
+        const divider = "-------|-------|------------------|-----------------------|-------|--------";
+        try output.print(allocator, "{s}{s}{s}\n", .{ Colors.bold, header, Colors.reset });
+        try output.print(allocator, "{s}{s}{s}\n", .{ Colors.dim, divider, Colors.reset });
 
         var ordered_buffer: [CAPACITY]Entry = undefined;
         const entries = self.getOrdered(&ordered_buffer);
@@ -98,13 +105,21 @@ pub const RingBuffer = struct {
 
             const opcode_color = if (entry.is_synthetic) Colors.bg_green else Colors.yellow;
             if (entry.is_synthetic) {
-                try output.print(allocator, "{s}{s}⚡{s:<15}{s} | ", .{ opcode_color, Colors.black, entry.opcode_name, Colors.reset });
+                try output.print(
+                    allocator,
+                    "{s}{s}⚡{s:<15}{s} | ",
+                    .{ opcode_color, Colors.black, entry.opcode_name, Colors.reset },
+                );
             } else {
                 try output.print(allocator, "{s}{s:<16}{s} | ", .{ opcode_color, entry.opcode_name, Colors.reset });
             }
             const gas_used = entry.gas_before - entry.gas_after;
             const gas_color = if (gas_used > 100) Colors.red else if (gas_used > 20) Colors.yellow else Colors.green;
-            try output.print(allocator, "{s}{d:8} → {d:<8}{s} | ", .{ gas_color, entry.gas_before, entry.gas_after, Colors.reset });
+            try output.print(
+                allocator,
+                "{s}{d:8} → {d:<8}{s} | ",
+                .{ gas_color, entry.gas_before, entry.gas_after, Colors.reset },
+            );
             try output.print(allocator, "{s}{d:5}{s} | ", .{ Colors.dim, entry.stack_size, Colors.reset });
             try output.print(allocator, "{s}{d:6}{s}", .{ Colors.dim, entry.memory_size, Colors.reset });
             try output.print(allocator, "\n", .{});

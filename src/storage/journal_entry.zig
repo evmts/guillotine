@@ -67,7 +67,12 @@ pub fn JournalEntry(comptime config: JournalConfig) type {
         };
 
         /// Create a storage change entry
-        pub fn storage_change(snapshot_id: SnapshotIdType, address: Address, key: WordType, original_value: WordType) Self {
+        pub fn storage_change(
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            key: WordType,
+            original_value: WordType,
+        ) Self {
             return Self{
                 .snapshot_id = snapshot_id,
                 .data = .{ .storage_change = .{
@@ -122,7 +127,12 @@ pub fn JournalEntry(comptime config: JournalConfig) type {
         }
 
         /// Create an account destroyed entry
-        pub fn account_destroyed(snapshot_id: SnapshotIdType, address: Address, beneficiary: Address, balance: WordType) Self {
+        pub fn account_destroyed(
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            beneficiary: Address,
+            balance: WordType,
+        ) Self {
             return Self{
                 .snapshot_id = snapshot_id,
                 .data = .{ .account_destroyed = .{

@@ -245,7 +245,12 @@ pub const Emitter = struct {
     }
     /// CSET Xd, cond (CSINC Xd, XZR, XZR, !cond).
     pub fn cset(self: *Emitter, rd: Reg, cond: Cond) Error!void {
-        try self.emit(0x9A800400 | @as(u32, xzr) << 16 | @as(u32, @backingInt(cond.invert())) << 12 | @as(u32, xzr) << 5 | rd);
+        const encoded: u32 = 0x9A800400 |
+            (@as(u32, xzr) << 16) |
+            (@as(u32, @backingInt(cond.invert())) << 12) |
+            (@as(u32, xzr) << 5) |
+            rd;
+        try self.emit(encoded);
     }
 
     // ---------------------------------------------------------- load / store

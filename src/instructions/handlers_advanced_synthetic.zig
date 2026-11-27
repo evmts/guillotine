@@ -19,7 +19,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// ISZERO_JUMPI - Combined zero check and conditional jump
         /// Replaces ISZERO, PUSH target, JUMPI with a single operation
-        pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn iszero_jumpi(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .ISZERO_JUMPI, cursor, s, gas);
             const value = s.pop_unsafe();
@@ -31,7 +40,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_ADD_DUP1_INLINE - `PUSH v; ADD; DUP1` with `v` stored inline (fits 64 bits).
-        pub fn push_add_dup1_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_add_dup1_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_ADD_DUP1_INLINE, cursor, s, gas);
             push_add_dup1(&s, cursor[1].push_inline.value);
@@ -39,7 +57,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_ADD_DUP1_POINTER - `PUSH v; ADD; DUP1` with `v` wider than 64 bits.
-        pub fn push_add_dup1_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_add_dup1_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_ADD_DUP1_POINTER, cursor, s, gas);
             push_add_dup1(&s, cursor[1].push_pointer.value_ptr.*);
@@ -55,4 +82,8 @@ pub fn Handlers(FrameType: type) type {
             s.push_unsafe(result);
         }
     };
+}
+
+test "Handlers type constructor is generic over FrameType" {
+    try std.testing.expect(@typeInfo(@TypeOf(Handlers)) == .@"fn");
 }

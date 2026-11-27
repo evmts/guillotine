@@ -9,7 +9,14 @@ pub const HostInterface = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        inner_call: *const fn (ptr: *anyopaque, gas: u64, address: Address, value: u256, input: []const u8, call_type: CallType) CallResult,
+        inner_call: *const fn (
+            ptr: *anyopaque,
+            gas: u64,
+            address: Address,
+            value: u256,
+            input: []const u8,
+            call_type: CallType,
+        ) CallResult,
         get_balance: *const fn (ptr: *anyopaque, address: Address) u256,
         get_code: *const fn (ptr: *anyopaque, address: Address) []const u8,
         get_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) u256,
@@ -25,7 +32,14 @@ pub const HostInterface = struct {
         Create2,
     };
 
-    pub fn innerCall(self: HostInterface, gas: u64, address: Address, value: u256, input: []const u8, call_type: CallType) CallResult {
+    pub fn innerCall(
+        self: HostInterface,
+        gas: u64,
+        address: Address,
+        value: u256,
+        input: []const u8,
+        call_type: CallType,
+    ) CallResult {
         return self.vtable.inner_call(self.ptr, gas, address, value, input, call_type);
     }
 
@@ -95,11 +109,17 @@ pub const Host = struct {
     storage: std.HashMap(StorageSlotKey, u256, StorageSlotKeyContext, std.hash_map.default_max_load_percentage),
 
     pub fn init(allocator: std.mem.Allocator) !Self {
+        const StorageMap = std.HashMap(
+            StorageSlotKey,
+            u256,
+            StorageSlotKeyContext,
+            std.hash_map.default_max_load_percentage,
+        );
         return .{
             .allocator = allocator,
             .balances = std.AutoHashMap(Address, u256).init(allocator),
             .code = std.AutoHashMap(Address, []const u8).init(allocator),
-            .storage = std.HashMap(StorageSlotKey, u256, StorageSlotKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .storage = StorageMap.init(allocator),
         };
     }
 
@@ -137,7 +157,14 @@ pub const Host = struct {
         };
     }
 
-    fn innerCall(ptr: *anyopaque, gas: u64, address: Address, value: u256, input: []const u8, call_type: HostInterface.CallType) CallResult {
+    fn innerCall(
+        ptr: *anyopaque,
+        gas: u64,
+        address: Address,
+        value: u256,
+        input: []const u8,
+        call_type: HostInterface.CallType,
+    ) CallResult {
         _ = address;
         _ = value;
         _ = input;

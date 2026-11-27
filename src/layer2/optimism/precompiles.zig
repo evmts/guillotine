@@ -146,7 +146,10 @@ fn OutputOf(comptime Override: type) type {
     return @typeInfo(ret).error_union.payload;
 }
 
-fn adapt(comptime Override: type, comptime raw: RawFn) fn (std.mem.Allocator, []const u8, u64) anyerror!OutputOf(Override) {
+fn adapt(
+    comptime Override: type,
+    comptime raw: RawFn,
+) fn (std.mem.Allocator, []const u8, u64) anyerror!OutputOf(Override) {
     const Output = OutputOf(Override);
     return struct {
         fn run(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!Output {

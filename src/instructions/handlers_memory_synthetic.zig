@@ -25,7 +25,16 @@ pub fn Handlers(FrameType: type) type {
         const push_mstore8_pointer_general_handler = handler_abi.wrap(FrameType, push_mstore8_pointer_general);
 
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (fits in 8 bytes).
-        pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mload_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             if (self.memory.word_ptr_in_bounds(cursor[1].push_inline.value)) |word| {
                 @branchHint(.likely);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
@@ -37,7 +46,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (fits in 8 bytes).
-        pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mstore_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             if (self.memory.word_ptr_in_bounds(cursor[1].push_inline.value)) |word| {
                 @branchHint(.likely);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
@@ -49,7 +67,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (fits in 8 bytes).
-        pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mstore8_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             if (self.memory.byte_ptr_in_bounds(cursor[1].push_inline.value)) |byte| {
                 @branchHint(.likely);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
@@ -61,7 +88,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
-        pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mload_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             if (self.memory.word_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |word| {
                 @branchHint(.likely);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
@@ -73,7 +109,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
-        pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mstore_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             if (self.memory.word_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |word| {
                 @branchHint(.likely);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);
@@ -85,7 +130,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
-        pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mstore8_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             if (self.memory.byte_ptr_in_bounds(cursor[1].push_pointer.value_ptr.*)) |byte| {
                 @branchHint(.likely);
                 var s = N.StackView.init(sp, t0, t1, t2, t3);

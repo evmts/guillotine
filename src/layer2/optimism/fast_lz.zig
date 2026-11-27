@@ -16,7 +16,7 @@ const std = @import("std");
 ///
 /// Based on:
 /// - https://github.com/Vectorized/solady/blob/5315d937d79b335c668896d7533ac603adac5315/js/solady.js
-/// - https://github.com/ethereum-optimism/op-geth/blob/647c346e2bef36219cc7b47d76b1cb87e7ca29e4/core/types/rollup_cost.go#L411
+/// - op-geth core/types/rollup_cost.go#L411 (commit 647c346e)
 pub fn flzCompressLen(input: []const u8) u32 {
     // Early return for small inputs - algorithm requires at least 13 bytes.
     if (input.len < 13) {

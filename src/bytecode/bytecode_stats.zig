@@ -227,7 +227,12 @@ pub const BytecodeStats = struct {
         if (opcode_list.len >= 4) {
             var i: usize = 0;
             while (i < opcode_list.len - 3) : (i += 1) {
-                const key = PatternKey4{ .a = opcode_list[i], .b = opcode_list[i + 1], .c = opcode_list[i + 2], .d = opcode_list[i + 3] };
+                const key = PatternKey4{
+                    .a = opcode_list[i],
+                    .b = opcode_list[i + 1],
+                    .c = opcode_list[i + 2],
+                    .d = opcode_list[i + 3],
+                };
                 const entry = try pattern_map_4.getOrPut(key);
                 if (!entry.found_existing) {
                     entry.value_ptr.* = 0;
@@ -240,7 +245,13 @@ pub const BytecodeStats = struct {
         if (opcode_list.len >= 5) {
             var i: usize = 0;
             while (i < opcode_list.len - 4) : (i += 1) {
-                const key = PatternKey5{ .a = opcode_list[i], .b = opcode_list[i + 1], .c = opcode_list[i + 2], .d = opcode_list[i + 3], .e = opcode_list[i + 4] };
+                const key = PatternKey5{
+                    .a = opcode_list[i],
+                    .b = opcode_list[i + 1],
+                    .c = opcode_list[i + 2],
+                    .d = opcode_list[i + 3],
+                    .e = opcode_list[i + 4],
+                };
                 const entry = try pattern_map_5.getOrPut(key);
                 if (!entry.found_existing) {
                     entry.value_ptr.* = 0;
@@ -253,7 +264,14 @@ pub const BytecodeStats = struct {
         if (opcode_list.len >= 6) {
             var i: usize = 0;
             while (i < opcode_list.len - 5) : (i += 1) {
-                const key = PatternKey6{ .a = opcode_list[i], .b = opcode_list[i + 1], .c = opcode_list[i + 2], .d = opcode_list[i + 3], .e = opcode_list[i + 4], .f = opcode_list[i + 5] };
+                const key = PatternKey6{
+                    .a = opcode_list[i],
+                    .b = opcode_list[i + 1],
+                    .c = opcode_list[i + 2],
+                    .d = opcode_list[i + 3],
+                    .e = opcode_list[i + 4],
+                    .f = opcode_list[i + 5],
+                };
                 const entry = try pattern_map_6.getOrPut(key);
                 if (!entry.found_existing) {
                     entry.value_ptr.* = 0;
@@ -266,7 +284,15 @@ pub const BytecodeStats = struct {
         if (opcode_list.len >= 7) {
             var i: usize = 0;
             while (i < opcode_list.len - 6) : (i += 1) {
-                const key = PatternKey7{ .a = opcode_list[i], .b = opcode_list[i + 1], .c = opcode_list[i + 2], .d = opcode_list[i + 3], .e = opcode_list[i + 4], .f = opcode_list[i + 5], .g = opcode_list[i + 6] };
+                const key = PatternKey7{
+                    .a = opcode_list[i],
+                    .b = opcode_list[i + 1],
+                    .c = opcode_list[i + 2],
+                    .d = opcode_list[i + 3],
+                    .e = opcode_list[i + 4],
+                    .f = opcode_list[i + 5],
+                    .g = opcode_list[i + 6],
+                };
                 const entry = try pattern_map_7.getOrPut(key);
                 if (!entry.found_existing) {
                     entry.value_ptr.* = 0;
@@ -279,7 +305,16 @@ pub const BytecodeStats = struct {
         if (opcode_list.len >= 8) {
             var i: usize = 0;
             while (i < opcode_list.len - 7) : (i += 1) {
-                const key = PatternKey8{ .a = opcode_list[i], .b = opcode_list[i + 1], .c = opcode_list[i + 2], .d = opcode_list[i + 3], .e = opcode_list[i + 4], .f = opcode_list[i + 5], .g = opcode_list[i + 6], .h = opcode_list[i + 7] };
+                const key = PatternKey8{
+                    .a = opcode_list[i],
+                    .b = opcode_list[i + 1],
+                    .c = opcode_list[i + 2],
+                    .d = opcode_list[i + 3],
+                    .e = opcode_list[i + 4],
+                    .f = opcode_list[i + 5],
+                    .g = opcode_list[i + 6],
+                    .h = opcode_list[i + 7],
+                };
                 const entry = try pattern_map_8.getOrPut(key);
                 if (!entry.found_existing) {
                     entry.value_ptr.* = 0;
@@ -691,7 +726,8 @@ pub const BytecodeStats = struct {
             }
         }
 
-        try writer.print("\nContract type: {s}\n", .{if (self.is_create_code) "Create/Deploy code" else "Runtime code"});
+        const contract_kind = if (self.is_create_code) "Create/Deploy code" else "Runtime code";
+        try writer.print("\nContract type: {s}\n", .{contract_kind});
         try writer.writeAll("======================\n");
 
         return try list.toOwnedSlice();

@@ -71,7 +71,9 @@ pub const Program = struct {
         const top = @intFromPtr(ctx.stack_ptr);
         if (base < limit or base - limit != root.stack_capacity * 32) return error.InvalidContext;
         if (top < limit or top > base or (top - limit) % 32 != 0) return error.InvalidContext;
-        if (ctx.memory_len % 32 != 0 or ctx.memory_len > ctx.memory_cap or ctx.memory_len > ctx.memory_limit) return error.InvalidContext;
+        if (ctx.memory_len % 32 != 0 or ctx.memory_len > ctx.memory_cap or ctx.memory_len > ctx.memory_limit) {
+            return error.InvalidContext;
+        }
         if (ctx.memory_cost != root.helpers.memoryCost(ctx.memory_len / 32)) return error.InvalidContext;
         if (ctx.memory_cap > 0 and ctx.memory_ptr == null) return error.InvalidContext;
         ctx.output_offset = 0;
@@ -201,11 +203,26 @@ fn opInfo(op: u8, options: Options) ?OpInfo {
         0x18 => .{ .kind = .xor, .pops = 2, .pushes = 1, .gas = 3 },
         0x19 => .{ .kind = .not, .pops = 1, .pushes = 1, .gas = 3 },
         0x1A => .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("byte") },
-        0x1B => if (options.shifts) .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("shl") } else undefined_op,
-        0x1C => if (options.shifts) .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("shr") } else undefined_op,
-        0x1D => if (options.shifts) .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("sar") } else undefined_op,
-        0x1E => if (options.clz) .{ .kind = .unary_helper, .pops = 1, .pushes = 1, .gas = 5, .helper = helperOffset("clz") } else undefined_op,
-        0x20 => if (options.keccak256) .{ .kind = .keccak, .pops = 2, .pushes = 1, .gas = 30, .helper = helperOffset("keccak256") } else null,
+        0x1B => if (options.shifts)
+            .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("shl") }
+        else
+            undefined_op,
+        0x1C => if (options.shifts)
+            .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("shr") }
+        else
+            undefined_op,
+        0x1D => if (options.shifts)
+            .{ .kind = .binary_helper, .pops = 2, .pushes = 1, .gas = 3, .helper = helperOffset("sar") }
+        else
+            undefined_op,
+        0x1E => if (options.clz)
+            .{ .kind = .unary_helper, .pops = 1, .pushes = 1, .gas = 5, .helper = helperOffset("clz") }
+        else
+            undefined_op,
+        0x20 => if (options.keccak256)
+            .{ .kind = .keccak, .pops = 2, .pushes = 1, .gas = 30, .helper = helperOffset("keccak256") }
+        else
+            null,
         0x35 => .{ .kind = .calldataload, .pops = 1, .pushes = 1, .gas = 3, .helper = helperOffset("calldataload") },
         0x36 => .{ .kind = .calldatasize, .pops = 0, .pushes = 1, .gas = 2 },
         0x50 => .{ .kind = .pop, .pops = 1, .pushes = 0, .gas = 2 },
@@ -218,7 +235,10 @@ fn opInfo(op: u8, options: Options) ?OpInfo {
         0x59 => .{ .kind = .msize, .pops = 0, .pushes = 1, .gas = 2 },
         0x5A => .{ .kind = .gas, .pops = 0, .pushes = 1, .gas = 2 },
         0x5B => .{ .kind = .jumpdest, .pops = 0, .pushes = 0, .gas = 1 },
-        0x5E => if (options.mcopy) .{ .kind = .mcopy, .pops = 3, .pushes = 0, .gas = 3, .helper = helperOffset("mcopy") } else undefined_op,
+        0x5E => if (options.mcopy)
+            .{ .kind = .mcopy, .pops = 3, .pushes = 0, .gas = 3, .helper = helperOffset("mcopy") }
+        else
+            undefined_op,
         0x5F => if (options.push0) .{ .kind = .push, .pops = 0, .pushes = 1, .gas = 2 } else undefined_op,
         0x60...0x7F => .{ .kind = .push, .pops = 0, .pushes = 1, .gas = 3 },
         0x80...0x8F => .{ .kind = .dup, .pops = op - 0x7F, .pushes = op - 0x7F + 1, .gas = 3 },

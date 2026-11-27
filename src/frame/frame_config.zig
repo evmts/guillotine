@@ -26,7 +26,8 @@ pub const FrameConfig = struct {
     /// The initial allocation created by the EVM. Defaults to 4096
     memory_initial_capacity: usize = 4096,
 
-    /// The limit on how much the EVM should be allowed to allocate. Default is 0xffffff. This should be plenty for most bytecode and gas limits
+    /// Allocation limit for the EVM. Default is 0xffffff, which fits typical
+    /// bytecode and gas limits while bounding memory expansion.
     memory_limit: u64 = 0xFFFFFF,
 
     /// Database implementation type for storage operations (always required).
@@ -76,7 +77,8 @@ pub const FrameConfig = struct {
         // Validate memory configuration
         const min_memory_for_stack = self.get_requested_alloc();
         if (self.memory_limit < min_memory_for_stack) {
-            @compileError(std.fmt.comptimePrint("memory_limit ({d}) is too small for stack_size ({d}) * WordType ({d} bytes) = {d} bytes minimum required", .{
+            const msg = "memory_limit ({d}) is too small for stack_size ({d}) * WordType ({d} bytes) = {d} bytes";
+            @compileError(std.fmt.comptimePrint(msg, .{
                 self.memory_limit,
                 self.stack_size,
                 @sizeOf(self.WordType),
@@ -94,7 +96,8 @@ pub const FrameConfig = struct {
         // Ensure memory limit is reasonable for initcode size
         const min_memory_for_initcode = self.max_initcode_size * 2; // Account for code + potential memory expansion
         if (self.memory_limit < min_memory_for_initcode) {
-            @compileError(std.fmt.comptimePrint("memory_limit ({d}) may be insufficient for max_initcode_size ({d}). Consider at least {d} bytes", .{
+            const msg = "memory_limit ({d}) may be insufficient for max_initcode_size ({d}); need >= {d} bytes";
+            @compileError(std.fmt.comptimePrint(msg, .{
                 self.memory_limit,
                 self.max_initcode_size,
                 min_memory_for_initcode,

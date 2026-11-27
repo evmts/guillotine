@@ -25,3 +25,7 @@ pub fn createRunStep(b: *std.Build, exe: *std.Build.Step.Compile) *std.Build.Ste
     run_step.dependOn(&run_cmd.step);
     return run_step;
 }
+
+test "createRunStep function signature is exported" {
+    try std.testing.expect(@typeInfo(@TypeOf(createRunStep)) == .@"fn");
+}

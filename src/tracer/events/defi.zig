@@ -164,3 +164,8 @@ pub const CurvePoolType = enum {
     factory_meta,
     stable_ng,
 };
+
+test "CurvePoolType covers expected pool variants" {
+    try std.testing.expect(@typeInfo(CurvePoolType).@"enum".fields.len >= 8);
+    try std.testing.expectEqual(CurvePoolType.plain, @as(CurvePoolType, .plain));
+}

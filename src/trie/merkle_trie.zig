@@ -69,7 +69,13 @@ pub const MerkleTrie = struct {
     }
 
     /// Verify a Merkle proof
-    pub fn verify_proof(self: *const MerkleTrie, expected_root_hash: [32]u8, key: []const u8, proof_nodes: []const []const u8, expected_value: ?[]const u8) !bool {
+    pub fn verify_proof(
+        self: *const MerkleTrie,
+        expected_root_hash: [32]u8,
+        key: []const u8,
+        proof_nodes: []const []const u8,
+        expected_value: ?[]const u8,
+    ) !bool {
         // Create a proof nodes collection
         var proof = ProofNodes.init(self.allocator);
         defer proof.deinit();

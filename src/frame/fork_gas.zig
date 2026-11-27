@@ -197,8 +197,24 @@ pub fn selfdestructRefund(hardfork: Hardfork) u64 {
 
 const testing = std.testing;
 
-const net_metered_forks = [_]Hardfork{ .CONSTANTINOPLE, .ISTANBUL, .BERLIN, .LONDON, .SHANGHAI, .CANCUN, .PRAGUE, .OSAKA };
-const legacy_forks = [_]Hardfork{ .FRONTIER, .HOMESTEAD, .TANGERINE_WHISTLE, .SPURIOUS_DRAGON, .BYZANTIUM, .PETERSBURG };
+const net_metered_forks = [_]Hardfork{
+    .CONSTANTINOPLE,
+    .ISTANBUL,
+    .BERLIN,
+    .LONDON,
+    .SHANGHAI,
+    .CANCUN,
+    .PRAGUE,
+    .OSAKA,
+};
+const legacy_forks = [_]Hardfork{
+    .FRONTIER,
+    .HOMESTEAD,
+    .TANGERINE_WHISTLE,
+    .SPURIOUS_DRAGON,
+    .BYZANTIUM,
+    .PETERSBURG,
+};
 
 test "sstoreScheme: only Constantinople and Istanbul+ use net metering" {
     for (legacy_forks) |fork| try testing.expectEqual(SstoreScheme.legacy, sstoreScheme(fork));

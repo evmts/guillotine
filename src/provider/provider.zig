@@ -310,7 +310,16 @@ pub const Provider = struct {
         return try validation.parseHexU256(result);
     }
 
-    pub fn call(self: *Provider, from: ?Address, to: Address, gas: ?u64, gasPrice: ?u256, value: ?u256, data: []const u8, blockTag: []const u8) ProviderError![]u8 {
+    pub fn call(
+        self: *Provider,
+        from: ?Address,
+        to: Address,
+        gas: ?u64,
+        gasPrice: ?u256,
+        value: ?u256,
+        data: []const u8,
+        blockTag: []const u8,
+    ) ProviderError![]u8 {
         try validation.validateBlockTag(blockTag);
 
         var callObj = std.json.ObjectMap.init(self.allocator);
@@ -422,3 +431,15 @@ pub const Block = struct {
 };
 
 const primitives = @import("voltaire");
+
+test "Block deinit frees owned hash slice" {
+    const allocator = std.testing.allocator;
+    const hash = try allocator.dupe(u8, "0x00");
+    const block = Block{
+        .hash = hash,
+        .number = 1,
+        .timestamp = 1_700_000_000,
+        .allocator = allocator,
+    };
+    block.deinit(allocator);
+}

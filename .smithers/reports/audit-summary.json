@@ -4,15 +4,15 @@
   "version": "0.1.0",
   "zigVersion": "0.17.1",
   "hardfork": "OSAKA",
-  "generatedAt": "2026-11-27T08:07:13.963Z",
-  "compositeScore": 80,
+  "generatedAt": "2026-11-27T08:50:53.242Z",
+  "compositeScore": 85,
   "compositeBand": "average",
   "totals": {
     "categories": 6,
     "metrics": 23,
-    "passing": 14,
-    "warning": 6,
-    "failing": 3
+    "passing": 17,
+    "warning": 4,
+    "failing": 2
   },
   "factoryMeta": {
     "flows": 11,
@@ -33,7 +33,7 @@
     "leanTheorems": 183,
     "leanNoSorry": "29 / 29 pass",
     "smtProofs": 42,
-    "inlineTestCoverage": "77.10"
+    "inlineTestCoverage": "100"
   },
   "trustMatrix": [
     {
@@ -132,8 +132,8 @@
       "name": "safety",
       "title": "Safety & TigerStyle",
       "description": "Mission-critical EVM safety invariants from CLAUDE.md and TigerStyle across Zig and Rust FFI code.",
-      "score": 82,
-      "band": "average",
+      "score": 90,
+      "band": "pass",
       "metrics": [
         {
           "name": "zig-no-panic",
@@ -141,17 +141,17 @@
           "description": "Never use @panic or unreachable in production src/**/*.zig, validate inputs and return typed errors instead.",
           "kind": "check",
           "unit": null,
-          "value": 0.9673202614379085,
-          "displayValue": "148 / 153 pass",
+          "value": 0.9803921568627451,
+          "displayValue": "150 / 153 pass",
           "target": null,
           "displayTarget": "100% pass",
           "better": "lower",
           "weight": 2,
-          "score": 97,
+          "score": 98,
           "band": "pass",
           "itemCount": 153,
-          "failingCount": 5,
-          "passingCount": 148,
+          "failingCount": 3,
+          "passingCount": 150,
           "failingItems": [
             {
               "name": "src/modules.build.zig",
@@ -159,24 +159,14 @@
               "note": "line 74: @panic() in production code"
             },
             {
-              "name": "src/preprocessor/dispatch_pretty_print.zig",
-              "value": false,
-              "note": "line 770: unreachable in production code"
-            },
-            {
-              "name": "src/preprocessor/handler_abi.zig",
-              "value": false,
-              "note": "line 341: unreachable in production code"
-            },
-            {
               "name": "src/stack/stack.zig",
               "value": false,
-              "note": "line 119: @panic() in production code"
+              "note": "line 120: @panic() in production code"
             },
             {
               "name": "src/tracer/tracer.zig",
               "value": false,
-              "note": "line 889: unreachable in production code"
+              "note": "line 950: unreachable in production code"
             }
           ],
           "passingSample": [
@@ -374,8 +364,8 @@
           "description": "Add tracer.assert() invariant checks to production EVM functions to raise assertion density toward TigerStyle levels.",
           "kind": "count",
           "unit": null,
-          "value": 0.89,
-          "displayValue": "0.89",
+          "value": 0.87,
+          "displayValue": "0.87",
           "target": 25,
           "displayTarget": ">= 25",
           "better": "higher",
@@ -394,27 +384,25 @@
           "description": "Replace .unwrap() and .expect() in Rust FFI crates (lib/ark, lib/foundry-compilers) with Result propagation.",
           "kind": "check",
           "unit": null,
-          "value": 0.5,
-          "displayValue": "1 / 2 pass",
+          "value": 1,
+          "displayValue": "2 / 2 pass",
           "target": null,
           "displayTarget": "100% pass",
           "better": "lower",
           "weight": 1.5,
-          "score": 50,
-          "band": "average",
+          "score": 100,
+          "band": "pass",
           "itemCount": 2,
-          "failingCount": 1,
-          "passingCount": 1,
-          "failingItems": [
-            {
-              "name": "lib/foundry-compilers/src/lib.rs",
-              "value": false,
-              "note": "line 40: .unwrap()/.expect() in Rust FFI crate"
-            }
-          ],
+          "failingCount": 0,
+          "passingCount": 2,
+          "failingItems": [],
           "passingSample": [
             {
               "name": "lib/ark/src/lib.rs",
+              "value": true
+            },
+            {
+              "name": "lib/foundry-compilers/src/lib.rs",
               "value": true
             }
           ]
@@ -456,8 +444,8 @@
       "name": "style",
       "title": "Style & Limits",
       "description": "TigerStyle structural bounds (70-line functions, 120-char lines) and canonical Zig formatting.",
-      "score": 80,
-      "band": "average",
+      "score": 90,
+      "band": "pass",
       "metrics": [
         {
           "name": "zig-fmt",
@@ -534,22 +522,22 @@
           "description": "Keep every production Zig runtime function at or below 70 lines (TigerStyle limit), decompose large handlers.",
           "kind": "count",
           "unit": null,
-          "value": 152,
-          "displayValue": "152",
+          "value": 125,
+          "displayValue": "125",
           "target": 70,
           "displayTarget": "<= 70",
           "better": "lower",
           "weight": 2,
-          "score": 66,
+          "score": 73,
           "band": "average",
           "itemCount": 114,
-          "failingCount": 26,
-          "passingCount": 88,
+          "failingCount": 23,
+          "passingCount": 91,
           "failingItems": [
             {
               "name": "src/tracer/minimal_frame.zig",
-              "value": 1659,
-              "note": "executeOpcode() is 1659 lines (TigerStyle limit 70)"
+              "value": 1692,
+              "note": "executeOpcode() is 1692 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/log.zig",
@@ -563,13 +551,13 @@
             },
             {
               "name": "src/bytecode/bytecode_stats.zig",
-              "value": 248,
-              "note": "analyze() is 248 lines (TigerStyle limit 70)"
+              "value": 283,
+              "note": "analyze() is 283 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/bytecode/bytecode_analyze.zig",
-              "value": 214,
-              "note": "bytecodeAnalyze() is 214 lines (TigerStyle limit 70)"
+              "value": 216,
+              "note": "bytecodeAnalyze() is 216 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/preprocessor/dispatch_opcode_data.zig",
@@ -587,39 +575,19 @@
               "note": "main() is 162 lines (TigerStyle limit 70)"
             },
             {
-              "name": "src/bytecode/bytecode_c.zig",
-              "value": 158,
-              "note": "evm_bytecode_opcode_name() is 158 lines (TigerStyle limit 70)"
-            },
-            {
-              "name": "src/opcodes/opcode.zig",
-              "value": 156,
-              "note": "name() is 156 lines (TigerStyle limit 70)"
-            },
-            {
               "name": "src/frame/frame_handlers.zig",
-              "value": 155,
-              "note": "getOpcodeHandlers() is 155 lines (TigerStyle limit 70)"
-            },
-            {
-              "name": "src/tracer/pc_tracker.zig",
-              "value": 152,
-              "note": "getOpcodeName() is 152 lines (TigerStyle limit 70)"
+              "value": 158,
+              "note": "getOpcodeHandlers() is 158 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/layer2/evm_host.zig",
-              "value": 139,
-              "note": "runFrame() is 139 lines (TigerStyle limit 70)"
+              "value": 149,
+              "note": "runFrame() is 149 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/trie/hash_builder_complete.zig",
               "value": 135,
               "note": "next() is 135 lines (TigerStyle limit 70)"
-            },
-            {
-              "name": "src/modules.build.zig",
-              "value": 128,
-              "note": "createModules() is 128 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/storage/rpc_client.zig",
@@ -628,13 +596,28 @@
             },
             {
               "name": "src/evm_arena_allocator.zig",
-              "value": 114,
-              "note": "alloc() is 114 lines (TigerStyle limit 70)"
+              "value": 120,
+              "note": "alloc() is 120 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/tracer/tracer.zig",
-              "value": 103,
-              "note": "recordSteps() is 103 lines (TigerStyle limit 70)"
+              "value": 117,
+              "note": "recordSteps() is 117 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/tracer/minimal_evm_sync.zig",
+              "value": 106,
+              "note": "executeMinimalEvmForOpcode() is 106 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/layer2/executor.zig",
+              "value": 98,
+              "note": "execute() is 98 lines (TigerStyle limit 70)"
+            },
+            {
+              "name": "src/modules.build.zig",
+              "value": 98,
+              "note": "createModules() is 98 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/tracer/minimal_evm.zig",
@@ -642,29 +625,19 @@
               "note": "execute() is 97 lines (TigerStyle limit 70)"
             },
             {
-              "name": "src/tracer/minimal_evm_sync.zig",
-              "value": 95,
-              "note": "executeMinimalEvmForOpcode() is 95 lines (TigerStyle limit 70)"
-            },
-            {
-              "name": "src/layer2/executor.zig",
-              "value": 90,
-              "note": "execute() is 90 lines (TigerStyle limit 70)"
-            },
-            {
               "name": "src/provider/config.zig",
               "value": 88,
               "note": "initWithOptions() is 88 lines (TigerStyle limit 70)"
             },
             {
-              "name": "src/evm_c_api.zig",
-              "value": 77,
-              "note": "convertCallResult() is 77 lines (TigerStyle limit 70)"
+              "name": "src/provider/provider.zig",
+              "value": 82,
+              "note": "call() is 82 lines (TigerStyle limit 70)"
             },
             {
-              "name": "src/provider/provider.zig",
-              "value": 73,
-              "note": "call() is 73 lines (TigerStyle limit 70)"
+              "name": "src/evm_c_api.zig",
+              "value": 79,
+              "note": "convertCallResult() is 79 lines (TigerStyle limit 70)"
             },
             {
               "name": "src/trie/proof.zig",
@@ -679,28 +652,40 @@
           ],
           "passingSample": [
             {
+              "name": "src/tracer/ring_buffer.zig",
+              "value": 70
+            },
+            {
+              "name": "src/tracer/events/events.zig",
+              "value": 67
+            },
+            {
+              "name": "src/storage/state_root.zig",
+              "value": 63
+            },
+            {
               "name": "src/layer2/optimism/fast_lz.zig",
               "value": 62
             },
             {
-              "name": "src/storage/state_root.zig",
-              "value": 59
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": 61
             },
             {
               "name": "src/storage/forked_storage.zig",
               "value": 55
             },
             {
-              "name": "src/tracer/ring_buffer.zig",
-              "value": 55
+              "name": "src/provider/transport/http_simple.zig",
+              "value": 53
             },
             {
               "name": "src/frame/fork_gas.zig",
               "value": 51
             },
             {
-              "name": "src/provider/transport/http_simple.zig",
-              "value": 49
+              "name": "src/storage/database.zig",
+              "value": 51
             },
             {
               "name": "src/trie/optimized_branch.zig",
@@ -713,18 +698,6 @@
             {
               "name": "src/eips_and_hardforks/eips.zig",
               "value": 45
-            },
-            {
-              "name": "src/storage/database.zig",
-              "value": 43
-            },
-            {
-              "name": "src/frame/frame_config.zig",
-              "value": 41
-            },
-            {
-              "name": "src/storage/memory_database.zig",
-              "value": 40
             }
           ]
         },
@@ -734,17 +707,17 @@
           "description": "Keep production Zig lines at or below 120 characters (TigerStyle limit).",
           "kind": "check",
           "unit": null,
-          "value": 0.477124183006536,
-          "displayValue": "73 / 153 pass",
+          "value": 0.9150326797385621,
+          "displayValue": "140 / 153 pass",
           "target": null,
           "displayTarget": "100% pass",
           "better": "lower",
           "weight": 1,
-          "score": 48,
-          "band": "fail",
+          "score": 92,
+          "band": "pass",
           "itemCount": 153,
-          "failingCount": 80,
-          "passingCount": 73,
+          "failingCount": 13,
+          "passingCount": 140,
           "failingItems": [
             {
               "name": "src/bytecode/bytecode.zig",
@@ -752,39 +725,9 @@
               "note": "line 86: 130 chars (limit 120)"
             },
             {
-              "name": "src/bytecode/bytecode_analyze.zig",
-              "value": false,
-              "note": "line 151: 127 chars (limit 120)"
-            },
-            {
-              "name": "src/bytecode/bytecode_c.zig",
-              "value": false,
-              "note": "line 50: 123 chars (limit 120)"
-            },
-            {
-              "name": "src/bytecode/bytecode_stats.zig",
-              "value": false,
-              "note": "line 230: 138 chars (limit 120)"
-            },
-            {
-              "name": "src/eips_and_hardforks/authorization_processor.zig",
-              "value": false,
-              "note": "line 188: 159 chars (limit 120)"
-            },
-            {
-              "name": "src/eips_and_hardforks/beacon_roots.zig",
-              "value": false,
-              "note": "line 54: 238 chars (limit 120)"
-            },
-            {
               "name": "src/eips_and_hardforks/eips.zig",
               "value": false,
               "note": "line 210: 134 chars (limit 120)"
-            },
-            {
-              "name": "src/eips_and_hardforks/historical_block_hashes.zig",
-              "value": false,
-              "note": "line 52: 205 chars (limit 120)"
             },
             {
               "name": "src/evm.zig",
@@ -792,74 +735,9 @@
               "note": "line 30: 125 chars (limit 120)"
             },
             {
-              "name": "src/evm_arena_allocator.zig",
-              "value": false,
-              "note": "line 50: 139 chars (limit 120)"
-            },
-            {
-              "name": "src/evm_c_api.zig",
-              "value": false,
-              "note": "line 351: 144 chars (limit 120)"
-            },
-            {
-              "name": "src/frame/call_params.zig",
-              "value": false,
-              "note": "line 92: 143 chars (limit 120)"
-            },
-            {
-              "name": "src/frame/call_result.zig",
-              "value": false,
-              "note": "line 112: 124 chars (limit 120)"
-            },
-            {
-              "name": "src/frame/fork_gas.zig",
-              "value": false,
-              "note": "line 200: 123 chars (limit 120)"
-            },
-            {
               "name": "src/frame/frame.zig",
               "value": false,
               "note": "line 62: 128 chars (limit 120)"
-            },
-            {
-              "name": "src/frame/frame_config.zig",
-              "value": false,
-              "note": "line 29: 144 chars (limit 120)"
-            },
-            {
-              "name": "src/frame/frame_handlers.zig",
-              "value": false,
-              "note": "line 53: 130 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_advanced_synthetic.zig",
-              "value": false,
-              "note": "line 22: 210 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_arithmetic.zig",
-              "value": false,
-              "note": "line 22: 201 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_arithmetic_synthetic.zig",
-              "value": false,
-              "note": "line 21: 213 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_bitwise.zig",
-              "value": false,
-              "note": "line 19: 201 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_bitwise_synthetic.zig",
-              "value": false,
-              "note": "line 18: 213 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_comparison.zig",
-              "value": false,
-              "note": "line 17: 200 chars (limit 120)"
             },
             {
               "name": "src/instructions/handlers_context.zig",
@@ -867,39 +745,9 @@
               "note": "line 74: 123 chars (limit 120)"
             },
             {
-              "name": "src/instructions/handlers_jump.zig",
-              "value": false,
-              "note": "line 29: 202 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_jump_synthetic.zig",
-              "value": false,
-              "note": "line 24: 221 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_keccak.zig",
-              "value": false,
-              "note": "line 27: 127 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_log.zig",
-              "value": false,
-              "note": "line 28: 124 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_memory.zig",
-              "value": false,
-              "note": "line 28: 203 chars (limit 120)"
-            },
-            {
               "name": "src/instructions/handlers_memory_synthetic.zig",
               "value": false,
-              "note": "line 28: 215 chars (limit 120)"
-            },
-            {
-              "name": "src/instructions/handlers_stack.zig",
-              "value": false,
-              "note": "line 20: 201 chars (limit 120)"
+              "note": "line 45: 126 chars (limit 120)"
             },
             {
               "name": "src/instructions/handlers_system.zig",
@@ -907,44 +755,34 @@
               "note": "line 110: 123 chars (limit 120)"
             },
             {
-              "name": "src/internal/safety_counter.zig",
+              "name": "src/log.zig",
               "value": false,
-              "note": "line 57: 171 chars (limit 120)"
+              "note": "line 241: 151 chars (limit 120)"
             },
             {
-              "name": "src/jit/arm64_emitter.zig",
+              "name": "src/preprocessor/dispatch.zig",
               "value": false,
-              "note": "line 248: 127 chars (limit 120)"
+              "note": "line 36: 224 chars (limit 120)"
             },
             {
-              "name": "src/jit/compiler.zig",
+              "name": "src/preprocessor/dispatch_opcode_data.zig",
               "value": false,
-              "note": "line 74: 138 chars (limit 120)"
+              "note": "line 194: 162 chars (limit 120)"
             },
             {
-              "name": "src/layer2/base/config.zig",
+              "name": "src/preprocessor/dispatch_pretty_print.zig",
               "value": false,
-              "note": "line 76: 147 chars (limit 120)"
+              "note": "line 178: 172 chars (limit 120)"
             },
             {
-              "name": "src/layer2/evm_host.zig",
+              "name": "src/tracer/lifecycle_events.zig",
               "value": false,
-              "note": "line 91: 165 chars (limit 120)"
+              "note": "line 219: 128 chars (limit 120)"
             },
             {
-              "name": "src/layer2/executor.zig",
+              "name": "src/trie/hash_builder_complete.zig",
               "value": false,
-              "note": "line 51: 122 chars (limit 120)"
-            },
-            {
-              "name": "src/layer2/optimism/fast_lz.zig",
-              "value": false,
-              "note": "line 19: 127 chars (limit 120)"
-            },
-            {
-              "name": "src/layer2/optimism/l1_block_info.zig",
-              "value": false,
-              "note": "line 126: 122 chars (limit 120)"
+              "note": "line 324: 134 chars (limit 120)"
             }
           ],
           "passingSample": [
@@ -961,11 +799,23 @@
               "value": true
             },
             {
+              "name": "src/bytecode/bytecode_analyze.zig",
+              "value": true
+            },
+            {
               "name": "src/bytecode/bytecode_bench_simple.zig",
               "value": true
             },
             {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": true
+            },
+            {
               "name": "src/bytecode/bytecode_config.zig",
+              "value": true
+            },
+            {
+              "name": "src/bytecode/bytecode_stats.zig",
               "value": true
             },
             {
@@ -977,23 +827,11 @@
               "value": true
             },
             {
-              "name": "src/eips_and_hardforks/hardfork.zig",
+              "name": "src/eips_and_hardforks/authorization_processor.zig",
               "value": true
             },
             {
-              "name": "src/eips_and_hardforks/validator_deposits.zig",
-              "value": true
-            },
-            {
-              "name": "src/eips_and_hardforks/validator_withdrawals.zig",
-              "value": true
-            },
-            {
-              "name": "src/evm_config.zig",
-              "value": true
-            },
-            {
-              "name": "src/frame/block_info_config.zig",
+              "name": "src/eips_and_hardforks/beacon_roots.zig",
               "value": true
             }
           ]
@@ -1004,29 +842,18 @@
           "description": "Resolve TODO, FIXME, XXX, and HACK markers in production src/**/*.zig instead of deferring work.",
           "kind": "check",
           "unit": null,
-          "value": 0.9869281045751634,
-          "displayValue": "151 / 153 pass",
+          "value": 1,
+          "displayValue": "153 / 153 pass",
           "target": null,
           "displayTarget": "100% pass",
           "better": "lower",
           "weight": 1,
-          "score": 99,
+          "score": 100,
           "band": "pass",
           "itemCount": 153,
-          "failingCount": 2,
-          "passingCount": 151,
-          "failingItems": [
-            {
-              "name": "src/frame/frame.zig",
-              "value": false,
-              "note": "line 162: unresolved work marker"
-            },
-            {
-              "name": "src/tracer/minimal_frame.zig",
-              "value": false,
-              "note": "line 1323: unresolved work marker"
-            }
-          ],
+          "failingCount": 0,
+          "passingCount": 153,
+          "failingItems": [],
           "passingSample": [
             {
               "name": "src/block/block_info.zig",
@@ -1084,7 +911,7 @@
       "name": "footprint",
       "title": "Footprint & Modularity",
       "description": "Source file and subsystem modularity limits to keep the EVM auditable.",
-      "score": 39,
+      "score": 38,
       "band": "fail",
       "metrics": [
         {
@@ -1093,17 +920,17 @@
           "description": "Keep production Zig files focused and under 500 lines, split monolithic modules like src/evm.zig.",
           "kind": "count",
           "unit": null,
-          "value": 1305,
-          "displayValue": "1305",
+          "value": 1353,
+          "displayValue": "1353",
           "target": 500,
           "displayTarget": "<= 500",
           "better": "lower",
           "weight": 2,
-          "score": 45,
+          "score": 43,
           "band": "fail",
           "itemCount": 153,
-          "failingCount": 62,
-          "passingCount": 91,
+          "failingCount": 64,
+          "passingCount": 89,
           "failingItems": [
             {
               "name": "src/evm.zig",
@@ -1112,12 +939,12 @@
             },
             {
               "name": "src/storage/database.zig",
-              "value": 3238,
+              "value": 3250,
               "note": ""
             },
             {
               "name": "src/tracer/minimal_frame.zig",
-              "value": 2652,
+              "value": 2690,
               "note": ""
             },
             {
@@ -1127,7 +954,7 @@
             },
             {
               "name": "src/bytecode/bytecode.zig",
-              "value": 2270,
+              "value": 2205,
               "note": ""
             },
             {
@@ -1142,7 +969,12 @@
             },
             {
               "name": "src/bytecode/bytecode_stats.zig",
-              "value": 1618,
+              "value": 1654,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_arithmetic.zig",
+              "value": 1519,
               "note": ""
             },
             {
@@ -1151,13 +983,13 @@
               "note": ""
             },
             {
-              "name": "src/frame/call_params.zig",
-              "value": 1424,
+              "name": "src/layer2/evm_host.zig",
+              "value": 1437,
               "note": ""
             },
             {
-              "name": "src/layer2/evm_host.zig",
-              "value": 1409,
+              "name": "src/frame/call_params.zig",
+              "value": 1428,
               "note": ""
             },
             {
@@ -1166,78 +998,83 @@
               "note": ""
             },
             {
+              "name": "src/instructions/handlers_memory.zig",
+              "value": 1384,
+              "note": ""
+            },
+            {
               "name": "src/jit/root.zig",
               "value": 1367,
               "note": ""
             },
             {
-              "name": "src/instructions/handlers_memory.zig",
-              "value": 1339,
-              "note": ""
-            },
-            {
-              "name": "src/instructions/handlers_arithmetic.zig",
-              "value": 1338,
-              "note": ""
-            },
-            {
               "name": "src/instructions/handlers_stack.zig",
-              "value": 1305,
+              "value": 1353,
               "note": ""
             },
             {
               "name": "src/tracer/tracer.zig",
-              "value": 1217,
+              "value": 1278,
               "note": ""
             },
             {
               "name": "src/instructions/handlers_jump.zig",
-              "value": 1198,
-              "note": ""
-            },
-            {
-              "name": "src/storage/journal.zig",
-              "value": 1136,
-              "note": ""
-            },
-            {
-              "name": "src/stack/stack.zig",
-              "value": 1121,
+              "value": 1231,
               "note": ""
             },
             {
               "name": "src/evm_c_api.zig",
-              "value": 1117,
+              "value": 1176,
+              "note": ""
+            },
+            {
+              "name": "src/storage/journal.zig",
+              "value": 1176,
+              "note": ""
+            },
+            {
+              "name": "src/stack/stack.zig",
+              "value": 1131,
               "note": ""
             },
             {
               "name": "src/storage/cache_storage.zig",
-              "value": 1094,
+              "value": 1098,
               "note": ""
             },
             {
               "name": "src/frame/call_result.zig",
-              "value": 1076,
+              "value": 1084,
               "note": ""
             },
             {
               "name": "src/preprocessor/dispatch_pretty_print.zig",
-              "value": 1015,
+              "value": 1019,
               "note": ""
             },
             {
               "name": "src/storage/access_list.zig",
-              "value": 1015,
+              "value": 1019,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_bitwise.zig",
+              "value": 1007,
               "note": ""
             },
             {
               "name": "src/preprocessor/dispatch.zig",
-              "value": 999,
+              "value": 1004,
               "note": ""
             },
             {
-              "name": "src/opcodes/opcode.zig",
-              "value": 983,
+              "name": "src/jit/compiler.zig",
+              "value": 967,
+              "note": ""
+            },
+            {
+              "name": "src/instructions/handlers_log.zig",
+              "value": 954,
               "note": ""
             },
             {
@@ -1246,28 +1083,8 @@
               "note": ""
             },
             {
-              "name": "src/jit/compiler.zig",
-              "value": 947,
-              "note": ""
-            },
-            {
-              "name": "src/instructions/handlers_log.zig",
-              "value": 941,
-              "note": ""
-            },
-            {
               "name": "src/memory/memory.zig",
-              "value": 940,
-              "note": ""
-            },
-            {
-              "name": "src/bytecode/bytecode_c.zig",
-              "value": 928,
-              "note": ""
-            },
-            {
-              "name": "src/instructions/handlers_bitwise.zig",
-              "value": 926,
+              "value": 949,
               "note": ""
             },
             {
@@ -1277,17 +1094,17 @@
             },
             {
               "name": "src/trie/proof.zig",
-              "value": 860,
+              "value": 872,
               "note": ""
             },
             {
               "name": "src/provider/transport/http_simple.zig",
-              "value": 831,
+              "value": 846,
               "note": ""
             },
             {
               "name": "src/tracer/minimal_evm.zig",
-              "value": 817,
+              "value": 818,
               "note": ""
             },
             {
@@ -1297,28 +1114,26 @@
             },
             {
               "name": "src/instructions/handlers_comparison.zig",
-              "value": 727,
+              "value": 781,
+              "note": ""
+            },
+            {
+              "name": "src/bytecode/bytecode_c.zig",
+              "value": 770,
               "note": ""
             },
             {
               "name": "src/eips_and_hardforks/authorization_processor.zig",
-              "value": 720,
+              "value": 725,
+              "note": ""
+            },
+            {
+              "name": "src/opcodes/opcode.zig",
+              "value": 724,
               "note": ""
             }
           ],
           "passingSample": [
-            {
-              "name": "src/instructions/handlers_arithmetic_synthetic.zig",
-              "value": 500
-            },
-            {
-              "name": "src/preprocessor/handler_abi.zig",
-              "value": 490
-            },
-            {
-              "name": "src/layer2/executor.zig",
-              "value": 483
-            },
             {
               "name": "src/storage/created_contracts.zig",
               "value": 479
@@ -1333,27 +1148,39 @@
             },
             {
               "name": "src/tracer/minimal_host.zig",
-              "value": 429
+              "value": 456
             },
             {
               "name": "src/provider/provider.zig",
-              "value": 425
+              "value": 446
+            },
+            {
+              "name": "src/tracer/pc_tracker.zig",
+              "value": 420
             },
             {
               "name": "src/memory/frame_memory_pool.zig",
-              "value": 412
+              "value": 416
             },
             {
               "name": "src/provider/rate_limiter.zig",
               "value": 412
             },
             {
+              "name": "src/frame/fork_gas.zig",
+              "value": 399
+            },
+            {
               "name": "src/storage/database_interface_account.zig",
               "value": 392
             },
             {
-              "name": "src/frame/fork_gas.zig",
-              "value": 383
+              "name": "src/eips_and_hardforks/beacon_roots.zig",
+              "value": 376
+            },
+            {
+              "name": "src/tracer/lifecycle_events.zig",
+              "value": 371
             }
           ]
         },
@@ -1363,8 +1190,8 @@
           "description": "Keep each src/ subsystem compact and modular, split sprawling subsystems into cohesive packages.",
           "kind": "size",
           "unit": "B",
-          "value": 532011,
-          "displayValue": "532011 B",
+          "value": 534766,
+          "displayValue": "534766 B",
           "target": 80000,
           "displayTarget": "<= 80000 B",
           "better": "lower",
@@ -1377,77 +1204,77 @@
           "failingItems": [
             {
               "name": "src/instructions",
-              "value": 617459,
+              "value": 627784,
               "note": ""
             },
             {
               "name": "src/(root)",
-              "value": 532011,
+              "value": 534766,
               "note": ""
             },
             {
               "name": "src/storage",
-              "value": 478675,
+              "value": 479676,
               "note": ""
             },
             {
               "name": "src/tracer",
-              "value": 297007,
+              "value": 299791,
               "note": ""
             },
             {
               "name": "src/layer2",
-              "value": 265683,
+              "value": 267168,
               "note": ""
             },
             {
               "name": "src/bytecode",
-              "value": 243811,
+              "value": 236216,
               "note": ""
             },
             {
               "name": "src/eips_and_hardforks",
-              "value": 185791,
+              "value": 185966,
               "note": ""
             },
             {
               "name": "src/frame",
-              "value": 170362,
+              "value": 170970,
               "note": ""
             },
             {
               "name": "src/preprocessor",
-              "value": 154061,
+              "value": 157404,
               "note": ""
             },
             {
               "name": "src/trie",
-              "value": 152979,
+              "value": 153441,
               "note": ""
             },
             {
               "name": "src/jit",
-              "value": 149348,
+              "value": 149656,
               "note": ""
             },
             {
               "name": "src/provider",
-              "value": 134660,
+              "value": 136075,
               "note": ""
             }
           ],
           "passingSample": [
             {
               "name": "src/memory",
-              "value": 67876
+              "value": 68308
             },
             {
               "name": "src/opcodes",
-              "value": 52757
+              "value": 43829
             },
             {
               "name": "src/stack",
-              "value": 43373
+              "value": 43548
             },
             {
               "name": "src/core",
@@ -1459,7 +1286,7 @@
             },
             {
               "name": "src/internal",
-              "value": 6178
+              "value": 6267
             }
           ]
         }
@@ -1469,8 +1296,8 @@
       "name": "verification",
       "title": "Verification & Tests",
       "description": "Formal verification proofs (Lean 4 & SMT-LIB2) and inline Zig unit test coverage.",
-      "score": 81,
-      "band": "average",
+      "score": 90,
+      "band": "pass",
       "metrics": [
         {
           "name": "lean-no-sorry",
@@ -1587,14 +1414,14 @@
           "description": "Add inline `test` blocks inside production src/**/*.zig files (CLAUDE.md requires tests in source files).",
           "kind": "count",
           "unit": null,
-          "value": 77.1,
-          "displayValue": "77.10",
+          "value": 100,
+          "displayValue": "100",
           "target": 95,
           "displayTarget": ">= 95",
           "better": "higher",
           "weight": 1.5,
-          "score": 62,
-          "band": "average",
+          "score": 93,
+          "band": "pass",
           "itemCount": 0,
           "failingCount": 0,
           "passingCount": 0,
@@ -1979,33 +1806,6 @@
   ],
   "opportunities": [
     {
-      "category": "style",
-      "metric": "line-length",
-      "item": null,
-      "items": 80,
-      "gain": 9,
-      "value": false,
-      "target": true
-    },
-    {
-      "category": "safety",
-      "metric": "rust-no-unwrap",
-      "item": "lib/foundry-compilers/src/lib.rs",
-      "items": 1,
-      "gain": 8,
-      "value": false,
-      "target": true
-    },
-    {
-      "category": "verification",
-      "metric": "inline-test-coverage",
-      "item": null,
-      "items": 1,
-      "gain": 8,
-      "value": 77.1,
-      "target": 95
-    },
-    {
       "category": "verification",
       "metric": "smt-proofs",
       "item": null,
@@ -2029,7 +1829,7 @@
       "item": null,
       "items": 1,
       "gain": 3,
-      "value": 0.89,
+      "value": 0.87,
       "target": 25
     },
     {
@@ -2037,7 +1837,7 @@
       "metric": "file-lines",
       "item": "src/evm.zig",
       "items": 1,
-      "gain": 3,
+      "gain": 2,
       "value": 8743,
       "target": 500
     },
@@ -2046,8 +1846,8 @@
       "metric": "file-lines",
       "item": "src/storage/database.zig",
       "items": 1,
-      "gain": 3,
-      "value": 3238,
+      "gain": 2,
+      "value": 3250,
       "target": 500
     },
     {
@@ -2055,8 +1855,8 @@
       "metric": "file-lines",
       "item": "src/tracer/minimal_frame.zig",
       "items": 1,
-      "gain": 3,
-      "value": 2652,
+      "gain": 2,
+      "value": 2690,
       "target": 500
     },
     {
@@ -2064,7 +1864,7 @@
       "metric": "file-lines",
       "item": "src/instructions/handlers_context.zig",
       "items": 1,
-      "gain": 3,
+      "gain": 2,
       "value": 2470,
       "target": 500
     },
@@ -2073,8 +1873,8 @@
       "metric": "file-lines",
       "item": "src/bytecode/bytecode.zig",
       "items": 1,
-      "gain": 3,
-      "value": 2270,
+      "gain": 2,
+      "value": 2205,
       "target": 500
     },
     {
@@ -2082,7 +1882,7 @@
       "metric": "file-lines",
       "item": "src/eips_and_hardforks/eips.zig",
       "items": 1,
-      "gain": 3,
+      "gain": 2,
       "value": 2072,
       "target": 500
     },
@@ -2091,7 +1891,7 @@
       "metric": "file-lines",
       "item": "src/instructions/handlers_system.zig",
       "items": 1,
-      "gain": 3,
+      "gain": 2,
       "value": 1744,
       "target": 500
     },
@@ -2100,8 +1900,17 @@
       "metric": "file-lines",
       "item": "src/bytecode/bytecode_stats.zig",
       "items": 1,
-      "gain": 3,
-      "value": 1618,
+      "gain": 2,
+      "value": 1654,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/instructions/handlers_arithmetic.zig",
+      "items": 1,
+      "gain": 2,
+      "value": 1519,
       "target": 500
     },
     {
@@ -2109,115 +1918,269 @@
       "metric": "file-lines",
       "item": "src/instructions/handlers_storage.zig",
       "items": 1,
-      "gain": 3,
+      "gain": 2,
       "value": 1459,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/layer2/evm_host.zig",
+      "items": 1,
+      "gain": 2,
+      "value": 1437,
+      "target": 500
+    },
+    {
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/frame/call_params.zig",
+      "items": 1,
+      "gain": 2,
+      "value": 1428,
       "target": 500
     }
   ],
   "changes": [
     {
+      "category": "safety",
+      "metric": "zig-assertion-density",
+      "item": null,
+      "change": "worse",
+      "before": 0.89,
+      "after": 0.87
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/bytecode/bytecode_analyze.zig",
+      "change": "worse",
+      "before": 214,
+      "after": 216
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/bytecode/bytecode_stats.zig",
+      "change": "worse",
+      "before": 248,
+      "after": 283
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/eips_and_hardforks/beacon_roots.zig",
+      "change": "worse",
+      "before": 19,
+      "after": 23
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/eips_and_hardforks/historical_block_hashes.zig",
+      "change": "worse",
+      "before": 18,
+      "after": 22
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/evm_arena_allocator.zig",
+      "change": "worse",
+      "before": 114,
+      "after": 120
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/evm_c_api.zig",
+      "change": "worse",
+      "before": 77,
+      "after": 79
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/frame/frame_config.zig",
+      "change": "worse",
+      "before": 41,
+      "after": 43
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/frame/frame_handlers.zig",
+      "change": "worse",
+      "before": 155,
+      "after": 158
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/instructions/handlers_arithmetic_synthetic.zig",
+      "change": "worse",
+      "before": 10,
+      "after": 17
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/layer2/base/config.zig",
+      "change": "worse",
+      "before": 7,
+      "after": 10
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/layer2/evm_host.zig",
+      "change": "worse",
+      "before": 139,
+      "after": 149
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/layer2/executor.zig",
+      "change": "worse",
+      "before": 90,
+      "after": 98
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/log_wasm.zig",
+      "change": "worse",
+      "before": 20,
+      "after": 24
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/preprocessor/handler_abi.zig",
+      "change": "worse",
+      "before": 22,
+      "after": 28
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/provider/provider.zig",
+      "change": "worse",
+      "before": 73,
+      "after": 82
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/provider/simple_provider.zig",
+      "change": "worse",
+      "before": 10,
+      "after": 15
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/provider/transport/http_simple.zig",
+      "change": "worse",
+      "before": 49,
+      "after": 53
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/root.zig",
+      "change": "worse",
+      "before": 18,
+      "after": 23
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/storage/database.zig",
+      "change": "worse",
+      "before": 43,
+      "after": 51
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/storage/state_root.zig",
+      "change": "worse",
+      "before": 59,
+      "after": 63
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/tracer/events/events.zig",
+      "change": "worse",
+      "before": 26,
+      "after": 67
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/tracer/minimal_evm_sync.zig",
+      "change": "worse",
+      "before": 95,
+      "after": 106
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/tracer/minimal_frame.zig",
+      "change": "worse",
+      "before": 1659,
+      "after": 1692
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/tracer/minimal_host.zig",
+      "change": "worse",
+      "before": 15,
+      "after": 22
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/tracer/ring_buffer.zig",
+      "change": "worse",
+      "before": 55,
+      "after": 70
+    },
+    {
+      "category": "style",
+      "metric": "function-length",
+      "item": "src/tracer/tracer.zig",
+      "change": "worse",
+      "before": 103,
+      "after": 117
+    },
+    {
       "category": "footprint",
       "metric": "file-lines",
-      "item": "src/core/verified_ops.zig",
+      "item": "src/build.zig",
       "change": "worse",
-      "before": 386,
-      "after": 521
+      "before": 28,
+      "after": 32
     },
     {
       "category": "footprint",
-      "metric": "subsystem-size",
-      "item": "src/core",
+      "metric": "file-lines",
+      "item": "src/bytecode/bytecode_analyze.zig",
       "change": "worse",
-      "before": 37301,
-      "after": 42256
+      "before": 652,
+      "after": 654
     },
     {
-      "category": "factory",
-      "metric": "factory-projection",
-      "item": null,
-      "change": "new",
-      "before": null,
-      "after": null
-    },
-    {
-      "category": "factory",
-      "metric": "remote-cache-trust",
-      "item": null,
-      "change": "new",
-      "before": null,
-      "after": null
-    },
-    {
-      "category": "factory",
-      "metric": "wiki-freshness",
-      "item": null,
-      "change": "new",
-      "before": null,
-      "after": null
-    },
-    {
-      "category": "factory",
-      "metric": "release-alignment",
-      "item": null,
-      "change": "new",
-      "before": null,
-      "after": null
-    },
-    {
-      "category": "factory",
-      "metric": "workflow-security",
-      "item": null,
-      "change": "new",
-      "before": null,
-      "after": null
-    },
-    {
-      "category": "verification",
-      "metric": "lean-theorems",
-      "item": null,
-      "change": "better",
-      "before": 43,
-      "after": 183
-    },
-    {
-      "category": "documentation",
-      "metric": "broken-links",
-      "item": "CLAUDE.md",
-      "change": "better",
-      "before": false,
-      "after": true
-    },
-    {
-      "category": "documentation",
-      "metric": "subdir-readme",
-      "item": "src/core",
-      "change": "better",
-      "before": false,
-      "after": true
-    },
-    {
-      "category": "documentation",
-      "metric": "subdir-readme",
-      "item": "src/jit",
-      "change": "better",
-      "before": false,
-      "after": true
-    },
-    {
-      "category": "documentation",
-      "metric": "subdir-readme",
-      "item": "src/layer2",
-      "change": "better",
-      "before": false,
-      "after": true
-    },
-    {
-      "category": "documentation",
-      "metric": "subdir-readme",
-      "item": "src/tracer",
-      "change": "better",
-      "before": false,
-      "after": true
+      "category": "footprint",
+      "metric": "file-lines",
+      "item": "src/bytecode/bytecode_bench_simple.zig",
+      "change": "worse",
+      "before": 169,
+      "after": 173
     }
   ]
 }

@@ -767,7 +767,7 @@ pub fn getDebugInfo(
                     const pushed_target = switch (op_data) {
                         .push_jump_fusion => |fusion| fusion.value,
                         .push_jumpi_fusion => |fusion| fusion.value,
-                        else => unreachable,
+                        else => return error.UnexpectedJumpFusionMetadata,
                     };
                     const expected_target: ?u32 = std.math.cast(u32, pushed_target);
 
@@ -835,7 +835,7 @@ pub fn getDebugInfo(
                 if (schedule_idx < schedule_items.len) {
                     const fused_value: u256 = switch (op_data) {
                         inline .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion, .push_and_fusion, .push_or_fusion, .push_xor_fusion, .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion, .push_add_dup1 => |fusion| fusion.value,
-                        else => unreachable,
+                        else => return error.UnexpectedPushFusionMetadata,
                     };
                     const metadata_item = schedule_items[schedule_idx];
                     switch (kindOf(Item, metadata_item, if (fused_value <= std.math.maxInt(u64)) .push_inline else .push_pointer)) {
@@ -1011,4 +1011,8 @@ fn addValidationError(debug_info: anytype, schedule_idx: usize, pc: anytype, mes
         .expected = expected,
         .actual = actual,
     });
+}
+
+test "dispatch_pretty_print exports getDebugInfo formatter" {
+    try std.testing.expect(@typeInfo(@TypeOf(getDebugInfo)) == .@"fn");
 }

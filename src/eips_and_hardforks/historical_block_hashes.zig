@@ -49,7 +49,10 @@ pub const HISTORY_SERVE_WINDOW: u64 = 8191;
 
 /// Runtime bytecode of the canonical EIP-2935 contract, byte-for-byte as in
 /// execution-specs `tests/eest/prague/eip2935_historical_block_hashes_from_state/contract_deploy_tx.json`.
-pub const HISTORY_CODE = decodeHex("3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500");
+pub const HISTORY_CODE = decodeHex(
+    "3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257" ++
+        "611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500",
+);
 
 fn decodeHex(comptime hex: []const u8) [hex.len / 2]u8 {
     var out: [hex.len / 2]u8 = undefined;
@@ -111,7 +114,11 @@ pub const HistoricalBlockHashesContract = struct {
 
         const parent_number = block_info.number - 1;
         const slot = computeSlot(parent_number);
-        try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, slot, std.mem.readInt(u256, &block_info.parent_hash, .big));
+        try database.set_storage(
+            HISTORY_CONTRACT_ADDRESS.bytes,
+            slot,
+            std.mem.readInt(u256, &block_info.parent_hash, .big),
+        );
 
         log.debug("HistoricalBlockHashes: stored hash of block {} at slot {}", .{ parent_number, slot });
     }

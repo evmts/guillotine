@@ -5,67 +5,101 @@ const std = @import("std");
 pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
     const Self = DispatchType;
 
-    // Performance note: JumpTable is a compact array of structs rather than a sparse bitmap. A sparse bitmap would provide O(1) lookups
-    // But at the cost of cpu cache utilization. For the scale of how many jump destinations contracts have it is more performant to
-    // Create a compact data structure where all to most of the items fit in a single cache line and can be quickly binary searched
+    // Performance note: JumpTable is a compact array of structs rather than a sparse bitmap.
+    // A sparse bitmap would provide O(1) lookups at the cost of CPU cache utilization.
+    // For contract jump table sizes, a compact cache-line-friendly array with binary search is faster.
     //
     // Optimization: We use interpolated search to start at an estimated position based on the assumption that
     // JUMPDESTs are roughly evenly distributed through bytecode. This reduces average search iterations significantly
     // for large jump tables while maintaining O(log n) worst case performance
     return struct {
-        /// Jump table entry for dynamic jumps
+        const CursorPtr = @FieldType(Self, "cursor");
+
+        /// Jump table entry for dynamic jumps (legacy sorted-array representation)
         pub const JumpTableEntry = struct {
             pc: FrameType.PcType,
             dispatch: Self,
         };
 
-        entries: []const JumpTableEntry,
+        /// Compact 8-byte open-addressed hash bucket for O(1) dynamic JUMP lookup.
+        pub const Bucket = extern struct {
+            pc: u32,
+            offset: u32,
+        };
 
-        /// Find the dispatch for a given PC using binary search with interpolated starting point
-        pub fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
-            // Early return for empty table
+        pub const EMPTY_PC: u32 = std.math.maxInt(u32);
+        pub const HASH_MULT: u32 = 0x9E3779B1;
+
+        entries: []const JumpTableEntry = &.{},
+        buckets: []const Bucket = &.{},
+        schedule_base: ?CursorPtr = null,
+        mask: usize = 0,
+        shift: u5 = 0,
+
+        /// Compute power-of-2 bucket count for `jumpdest_count` entries (<=50% load factor).
+        pub fn bucketCapacity(jumpdest_count: usize) usize {
+            if (jumpdest_count == 0) return 0;
+            const needed = @max(jumpdest_count * 2, 4);
+            return std.math.ceilPowerOfTwoAssert(usize, needed);
+        }
+
+        /// Populate `buckets` with `EMPTY_PC` and insert all `(pc, schedule_index)` pairs.
+        pub fn initBuckets(
+            buckets: []Bucket,
+            schedule_base: CursorPtr,
+            jumpdests: anytype,
+        ) @This() {
+            if (buckets.len == 0) {
+                return .{ .entries = &.{}, .buckets = &.{}, .schedule_base = schedule_base, .mask = 0, .shift = 0 };
+            }
+            @memset(buckets, .{ .pc = EMPTY_PC, .offset = 0 });
+            const mask = buckets.len - 1;
+            const log2_cap: u6 = @intCast(@ctz(buckets.len));
+            const shift: u5 = @intCast(32 - log2_cap);
+            for (jumpdests) |jd| {
+                const key: u32 = @intCast(jd.pc);
+                var idx: usize = @intCast((key *% HASH_MULT) >> shift);
+                while (buckets[idx].pc != EMPTY_PC) {
+                    idx = (idx + 1) & mask;
+                }
+                buckets[idx] = .{ .pc = key, .offset = @intCast(jd.schedule_index) };
+            }
+            return .{
+                .entries = &.{},
+                .buckets = buckets,
+                .schedule_base = schedule_base,
+                .mask = mask,
+                .shift = shift,
+            };
+        }
+
+        /// Find the dispatch for a given PC: O(1) hash lookup when `buckets` is populated,
+        /// falling back to binary search over `entries` for legacy/test tables.
+        pub inline fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
+            if (self.buckets.len > 0) {
+                const key: u32 = @intCast(target_pc);
+                var idx: usize = @intCast((key *% HASH_MULT) >> self.shift);
+                while (true) {
+                    const b = self.buckets[idx];
+                    if (b.pc == key) return Self{ .cursor = self.schedule_base.? + b.offset };
+                    if (b.pc == EMPTY_PC) return null;
+                    idx = (idx + 1) & self.mask;
+                }
+            }
+            return self.findJumpTargetLegacy(target_pc);
+        }
+
+        fn findJumpTargetLegacy(self: @This(), target_pc: FrameType.PcType) ?Self {
             if (self.entries.len == 0) return null;
-
-            // Quick check: if target is outside bounds, return early
             if (target_pc < self.entries[0].pc or target_pc > self.entries[self.entries.len - 1].pc) {
                 return null;
             }
-
             var left: usize = 0;
             var right: usize = self.entries.len;
-
-            // Interpolated search optimization: Start at the expected position
-            // Since JUMPDESTs are roughly evenly distributed through bytecode,
-            // we can estimate where the target_pc would be in our sorted array
-            const max_pc = self.entries[self.entries.len - 1].pc;
-            const min_pc = self.entries[0].pc;
-
-            if (max_pc > min_pc) {
-                // Calculate interpolated starting position
-                const pc_range = max_pc - min_pc;
-                const target_offset = target_pc - min_pc;
-                const estimated_index = (target_offset * self.entries.len) / pc_range;
-
-                // Start our search at the interpolated position
-                // We'll expand outward from this point
-                const start_idx = @min(estimated_index, self.entries.len - 1);
-
-                // Check if we got lucky with our estimate
-                if (self.entries[start_idx].pc == target_pc) {
-                    return self.entries[start_idx].dispatch;
-                }
-
-                // Determine which direction to search based on our estimate
-                if (self.entries[start_idx].pc < target_pc) {
-                    left = start_idx + 1;
-                } else {
-                    right = start_idx;
-                }
-            }
-
-            // Standard binary search from the adjusted bounds
             const has_frame_config = @hasField(FrameType, "frame_config");
-            var loop_counter = if (has_frame_config) FrameType.frame_config.createLoopSafetyCounter().init(FrameType.frame_config.loop_quota orelse 0) else {};
+            var loop_counter = if (has_frame_config)
+                FrameType.frame_config.createLoopSafetyCounter().init(FrameType.frame_config.loop_quota orelse 0)
+            else {};
             while (left < right) {
                 if (has_frame_config) loop_counter.inc();
                 const mid = left + (right - left) / 2;
@@ -84,10 +118,21 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
         /// Find the PC for a given dispatch pointer
         /// This is used by tracers to determine the current PC when landing on a jump destination
         pub fn findPc(self: @This(), dispatch: Self) ?FrameType.PcType {
-            // Linear search through entries to find matching dispatch
-            // This is OK since jump tables are typically small and this is only called on jumps
+            if (self.buckets.len > 0) {
+                const base = self.schedule_base orelse return null;
+                const target_addr = @intFromPtr(dispatch.cursor);
+                const base_addr = @intFromPtr(base);
+                if (target_addr < base_addr) return null;
+                const elem_size = @sizeOf(std.meta.Child(CursorPtr));
+                const diff = target_addr - base_addr;
+                if (diff % elem_size != 0) return null;
+                const target_off = diff / elem_size;
+                for (self.buckets) |b| {
+                    if (b.pc != EMPTY_PC and b.offset == target_off) return @intCast(b.pc);
+                }
+                return null;
+            }
             for (self.entries) |entry| {
-                // Compare dispatch cursors
                 if (@intFromPtr(entry.dispatch.cursor) == @intFromPtr(dispatch.cursor)) {
                     return entry.pc;
                 }

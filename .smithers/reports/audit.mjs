@@ -124,7 +124,13 @@ function formatTarget(metric) {
 
 export function buildAuditModel(rootDir = REPO_ROOT, opts = {}) {
   const reportPath = join(rootDir, REPORT_JSON_REL);
-  if (opts.runUphill || !existsSync(reportPath)) {
+  const summaryPath = join(rootDir, SUMMARY_JSON_REL);
+  if (opts.runUphill) {
+    runUphill(rootDir);
+  } else if (!existsSync(reportPath)) {
+    if (existsSync(summaryPath)) {
+      return JSON.parse(readFileSync(summaryPath, "utf8"));
+    }
     runUphill(rootDir);
   }
   if (!existsSync(reportPath)) {

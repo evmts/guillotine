@@ -95,7 +95,10 @@ pub fn executeMinimalEvmForOpcode(
                 // Don't panic on any errors - just log and continue
                 var actual_opcode: u8 = 0;
                 if (mf.pc < mf.bytecode.len) actual_opcode = mf.bytecode[mf.pc];
-                tracer.debug("Regular opcode {s} failed at PC={d}, bytecode[PC]=0x{x:0>2}: {any}", .{ @tagName(opcode), mf.pc, actual_opcode, e });
+                tracer.debug(
+                    "Regular opcode {s} failed at PC={d}, bytecode[PC]=0x{x:0>2}: {any}",
+                    .{ @tagName(opcode), mf.pc, actual_opcode, e },
+                );
                 return;
             };
         } else {
@@ -132,7 +135,9 @@ pub fn executeMinimalEvmForOpcode(
                 // We need to manually advance PC past the JUMP/JUMPI instruction
                 if (evm.getCurrentFrame()) |mf| {
                     const current_pc = mf.pc;
-                    if (current_pc < mf.bytecode.len and (mf.bytecode[current_pc] == 0x56 or mf.bytecode[current_pc] == 0x57)) {
+                    const is_jump = current_pc < mf.bytecode.len and
+                        (mf.bytecode[current_pc] == 0x56 or mf.bytecode[current_pc] == 0x57);
+                    if (is_jump) {
                         // We're at a JUMP/JUMPI instruction that failed, skip it
                         mf.pc = current_pc + 1;
                         return;
@@ -162,8 +167,18 @@ pub fn executeMinimalEvmForOpcode(
 
     // If we hit max steps, log a warning but don't panic
     if (steps_executed == max_steps) {
-        tracer.debug("Warning: Synthetic {s} hit max steps limit ({d}). Last error: {?}", .{ @tagName(opcode), max_steps, last_error });
+        tracer.debug(
+            "Warning: Synthetic {s} hit max steps limit ({d}). Last error: {?}",
+            .{ @tagName(opcode), max_steps, last_error },
+        );
     } else if (last_error) |err| {
-        tracer.debug("Synthetic {s} stopped after {d} steps with error: {any}", .{ @tagName(opcode), steps_executed, err });
+        tracer.debug(
+            "Synthetic {s} stopped after {d} steps with error: {any}",
+            .{ @tagName(opcode), steps_executed, err },
+        );
     }
+}
+
+test "SyntheticOpcodeSteps defines bounded step counts for fused opcodes" {
+    try std.testing.expect(SyntheticOpcodeSteps.DEFAULT_MAX > 0);
 }

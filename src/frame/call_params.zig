@@ -89,11 +89,15 @@ pub fn CallParams(config: anytype) type {
                 .call, .callcode, .delegatecall, .staticcall => {},
                 .create => |params| {
                     // Validate init code size (EIP-3860, Shanghai and later)
-                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
+                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) {
+                        return ValidationError.InvalidInitCodeSize;
+                    }
                 },
                 .create2 => |params| {
                     // Validate init code size (EIP-3860, Shanghai and later)
-                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
+                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) {
+                        return ValidationError.InvalidInitCodeSize;
+                    }
                 },
             }
         }

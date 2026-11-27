@@ -14,7 +14,16 @@ pub fn Handlers(FrameType: type) type {
         const N = handler_abi.Native(FrameType);
 
         /// LT opcode (0x10) - Less than comparison.
-        pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn lt(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .LT, cursor, s, gas);
             // EVM: pops a (top), then b (second); pushes (a < b)
@@ -27,7 +36,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// GT opcode (0x11) - Greater than comparison.
-        pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn gt(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .GT, cursor, s, gas);
             // EVM: pops a (top), then b (second); pushes (a > b)
@@ -40,7 +58,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
-        pub fn slt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn slt(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SLT, cursor, s, gas);
             const a = s.pop_unsafe(); // Top of stack (second pushed value)
@@ -54,7 +81,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
-        pub fn sgt(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn sgt(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SGT, cursor, s, gas);
             const a = s.pop_unsafe(); // Top of stack (second pushed value)
@@ -68,7 +104,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// EQ opcode (0x14) - Equality comparison.
-        pub fn eq(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn eq(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .EQ, cursor, s, gas);
 
@@ -83,7 +128,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
-        pub fn iszero(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn iszero(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .ISZERO, cursor, s, gas);
             const value = s.peek_unsafe();

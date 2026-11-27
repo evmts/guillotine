@@ -34,10 +34,24 @@ pub struct FoundryError {
     pub code: i32,
 }
 
+/// Convert a Rust String into a heap-allocated C string without panicking across FFI.
+/// Interior NUL bytes are stripped so `CString::new` cannot fail on malformed diagnostics.
+fn to_c_string_sanitized(value: String) -> *mut c_char {
+    let clean = if value.as_bytes().contains(&0) {
+        value.replace('\0', "")
+    } else {
+        value
+    };
+    match CString::new(clean) {
+        Ok(cstr) => cstr.into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
 impl FoundryError {
     fn new(code: FoundryErrorCode, message: String) -> *mut Self {
         let error = Box::new(FoundryError {
-            message: CString::new(message).unwrap().into_raw(),
+            message: to_c_string_sanitized(message),
             code: code as i32,
         });
         Box::into_raw(error)
@@ -602,10 +616,10 @@ fn process_output(
             .unwrap_or_default();
 
         contracts.push(CompiledContract {
-            name: CString::new(name).unwrap().into_raw(),
-            abi: CString::new(abi_str).unwrap().into_raw(),
-            bytecode: CString::new(bytecode_str).unwrap().into_raw(),
-            deployed_bytecode: CString::new(deployed_bytecode_str).unwrap().into_raw(),
+            name: to_c_string_sanitized(name),
+            abi: to_c_string_sanitized(abi_str),
+            bytecode: to_c_string_sanitized(bytecode_str),
+            deployed_bytecode: to_c_string_sanitized(deployed_bytecode_str),
         });
     }
 
@@ -636,11 +650,11 @@ fn process_output(
         };
 
         let compiler_error = CompilerError {
-            message: CString::new(message).unwrap().into_raw(),
+            message: to_c_string_sanitized(message),
             severity,
             error_code,
             source_location: source_location
-                .map(|s| CString::new(s).unwrap().into_raw())
+                .map(to_c_string_sanitized)
                 .unwrap_or(ptr::null_mut()),
         };
 
@@ -711,6 +725,21 @@ mod tests {
                 .unwrap();
             assert_eq!(message, "Test error");
 
+            foundry_free_error(error);
+        }
+    }
+
+    #[test]
+    fn test_error_with_interior_nul_does_not_panic() {
+        unsafe {
+            let error = FoundryError::new(
+                FoundryErrorCode::InvalidInput,
+                "bad\0diagnostic".to_string(),
+            );
+            let message = CStr::from_ptr(foundry_get_error_message(error))
+                .to_str()
+                .unwrap();
+            assert_eq!(message, "baddiagnostic");
             foundry_free_error(error);
         }
     }

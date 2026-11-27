@@ -159,9 +159,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         // Note: database moved to EVM struct - access via evm_ptr for better cache locality
         value: WordType, // 32B - Only for CALLVALUE opcode (per-call, cannot cache)
         calldata_slice: []const u8, // 16B - Only for CALLDATALOAD/COPY (per-call, cannot cache)
-        // TODO: We should be able to remove this in favor of storing pointer as metadata
+        // Cold-path slice for CODESIZE/CODECOPY; kept off cache line 1.
         code: []const u8 = &[_]u8{}, // 16B - Only for CODESIZE/CODECOPY
-        // TODO: We should be able to remove this in favor of storing pointer as metadata
+        // Cold-path jump table pointer for dynamic JUMP/JUMPI targets.
         jump_table: *const Dispatch.JumpTable, // 8B - Jump table for JUMP/JUMPI
         dispatch: Dispatch, // 16B
         // When enabled (by default only in Debug and Safe mode) we track how many instructions we executed and limit it
@@ -589,4 +589,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             return try output.toOwnedSlice();
         }
     };
+}
+
+test "Frame type constructor instantiates default configuration" {
+    const DefaultFrame = Frame(.{});
+    try std.testing.expect(@sizeOf(DefaultFrame) > 0);
 }

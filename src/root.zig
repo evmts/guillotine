@@ -44,7 +44,9 @@ comptime {
 /// Value of `-Devm-optimize`. EvmConfig has no strategy field yet, so the
 /// value is validated and exported for callers that select code by strategy.
 pub const OptimizeStrategy = enum { fast, small, safe };
-pub const optimize_strategy: OptimizeStrategy = parseOptimizeStrategy(buildOption([]const u8, "optimize_strategy", "safe"));
+pub const optimize_strategy: OptimizeStrategy = parseOptimizeStrategy(
+    buildOption([]const u8, "optimize_strategy", "safe"),
+);
 
 fn buildOption(comptime T: type, comptime name: []const u8, comptime default: T) T {
     return if (@hasDecl(build_options, name)) @field(build_options, name) else default;
@@ -67,7 +69,12 @@ fn parseOptimizeStrategy(comptime name: []const u8) OptimizeStrategy {
 pub fn getBuildConfig() EvmConfig {
     const defaults = EvmConfig{};
     return EvmConfig{
-        .eips = .{ .hardfork = if (@hasDecl(build_options, "hardfork")) parseHardfork(build_options.hardfork) else defaults.eips.hardfork },
+        .eips = .{
+            .hardfork = if (@hasDecl(build_options, "hardfork"))
+                parseHardfork(build_options.hardfork)
+            else
+                defaults.eips.hardfork,
+        },
         .enable_fusion = buildOption(bool, "enable_fusion", defaults.enable_fusion),
         .disable_gas_checks = buildOption(bool, "disable_gas_checks", defaults.disable_gas_checks),
         .disable_balance_checks = buildOption(bool, "disable_balance_checks", defaults.disable_balance_checks),

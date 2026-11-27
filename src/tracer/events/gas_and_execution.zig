@@ -181,3 +181,8 @@ pub const CoinbasePaymentType = enum {
     transaction_fee,
     mev_payment,
 };
+
+test "CoinbasePaymentType covers block and MEV payment variants" {
+    try std.testing.expect(@typeInfo(CoinbasePaymentType).@"enum".fields.len == 4);
+    try std.testing.expect(CoinbasePaymentType.block_reward != CoinbasePaymentType.mev_payment);
+}

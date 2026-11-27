@@ -18,7 +18,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_ADD_INLINE - Fused PUSH+ADD with inline value (≤8 bytes).
         /// Basic-block entry validation guarantees stack.size() >= 1 (proven by BLOCK-SOUND).
-        pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_add_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_ADD_INLINE, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
@@ -28,7 +37,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
         /// Basic-block entry validation guarantees stack.size() >= 1 (proven by BLOCK-SOUND).
-        pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_add_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_ADD_POINTER, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
@@ -38,7 +56,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
-        pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mul_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_MUL_INLINE, cursor, s, gas);
 
@@ -50,7 +77,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
-        pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_mul_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_MUL_POINTER, cursor, s, gas);
 
@@ -65,7 +101,16 @@ pub fn Handlers(FrameType: type) type {
         ///
         /// The pushed dividend fits 64 bits, so a divisor of 2^64 or more gives 0 and
         /// every other divisor needs one hardware divide. Division by zero gives 0.
-        pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_div_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_DIV_INLINE, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
@@ -83,14 +128,29 @@ pub fn Handlers(FrameType: type) type {
         ///
         /// Operands that both fit 64 bits take one hardware divide inline. Everything
         /// else tail-calls `push_div_pointer_wide`, so this handler has no stack frame.
-        pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_div_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_DIV_POINTER, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
             const dividend = op_data.metadata.value_ptr.*;
 
             const divisor = s.peek_unsafe();
-            if (!wide_arith.fitsU64(dividend | divisor)) return @call(handler_abi.tail_mod, N.outlined(&push_div_pointer_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (!wide_arith.fitsU64(dividend | divisor)) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&push_div_pointer_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.set_top_unsafe(wide_arith.div64(@truncate(dividend), @truncate(divisor)));
 
@@ -99,7 +159,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_DIV_POINTER for operands wider than 64 bits. Entered by tail call from
         /// `push_div_pointer`, after it has run the pre-instruction hooks.
-        fn push_div_pointer_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        fn push_div_pointer_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
             const dividend = op_data.metadata.value_ptr.*;
@@ -111,7 +180,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
-        pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_sub_inline(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_SUB_INLINE, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
@@ -123,7 +201,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
-        pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push_sub_pointer(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH_SUB_POINTER, cursor, s, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
@@ -163,7 +250,15 @@ fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {
     const database = MemoryDatabase.init(allocator);
     const value = try allocator.create(u256);
     value.* = 0;
-    var frame = try TestFrame.init(allocator, 1_000_000, database, Address.ZERO_ADDRESS, value, &[_]u8{}, @ptrFromInt(1));
+    var frame = try TestFrame.init(
+        allocator,
+        1_000_000,
+        database,
+        Address.ZERO_ADDRESS,
+        value,
+        &[_]u8{},
+        @ptrFromInt(1),
+    );
     // Initialize empty code
     frame.code = &[_]u8{};
     return frame;

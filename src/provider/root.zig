@@ -124,3 +124,9 @@ pub const transport = struct {
 // Export utilities for testing
 pub const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
 pub const RateLimiter = @import("rate_limiter.zig").RateLimiter;
+
+test "provider root exposes Provider, transport, and rate limiter" {
+    const std = @import("std");
+    try std.testing.expect(@sizeOf(Provider) > 0);
+    try std.testing.expect(@sizeOf(RateLimiter) > 0);
+}

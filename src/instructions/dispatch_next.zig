@@ -17,3 +17,8 @@ pub inline fn nextInstruction(
     self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
     return op_data.next_cursor.cursor;
 }
+
+test "dispatch_next exports nextInstruction helper" {
+    const std = @import("std");
+    try std.testing.expect(@typeInfo(@TypeOf(nextInstruction)) == .@"fn");
+}

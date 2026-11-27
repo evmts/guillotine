@@ -141,3 +141,8 @@ pub const SlashingReason = enum {
     attester_slashing,
     proposer_slashing,
 };
+
+test "SlashingReason covers consensus slashing categories" {
+    try std.testing.expect(@typeInfo(SlashingReason).@"enum".fields.len == 5);
+    try std.testing.expect(SlashingReason.double_vote != SlashingReason.proposer_slashing);
+}

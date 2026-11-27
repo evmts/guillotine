@@ -213,7 +213,11 @@ pub fn stateRoot(allocator: Allocator, db: anytype) Allocator.Error![32]u8 {
     var start: usize = 0;
     while (start < slots.items.len) {
         var end = start + 1;
-        while (end < slots.items.len and std.mem.eql(u8, &slots.items[end].address, &slots.items[start].address)) end += 1;
+        while (end < slots.items.len and
+            std.mem.eql(u8, &slots.items[end].address, &slots.items[start].address))
+        {
+            end += 1;
+        }
         try ranges.put(a, slots.items[start].address, .{ .start = start, .end = end });
         start = end;
     }
@@ -237,4 +241,9 @@ pub fn stateRoot(allocator: Allocator, db: anytype) Allocator.Error![32]u8 {
         try accounts.append(a, .{ .key = keccak(&address), .value = try rlpWrapList(a, payload.items) });
     }
     return trieRoot(a, accounts.items);
+}
+
+test "trieRoot returns canonical Ethereum empty trie root for zero entries" {
+    const root = try trieRoot(std.testing.allocator, &.{});
+    try std.testing.expectEqualSlices(u8, &empty_trie_root, &root);
 }

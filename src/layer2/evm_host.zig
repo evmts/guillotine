@@ -88,7 +88,12 @@ fn listIntrinsicGas(tx: executor.Transaction) u128 {
 
 /// Run `instance.inner_call(params)` on a thread whose stack fits the deepest call
 /// chain. The caller blocks until it finishes, so one thread at a time uses the EVM.
-fn innerCallOnFrameStack(allocator: std.mem.Allocator, comptime Evm: type, instance: *Evm, params: anytype) !@typeInfo(@TypeOf(Evm.inner_call)).@"fn".return_type.? {
+fn innerCallOnFrameStack(
+    allocator: std.mem.Allocator,
+    comptime Evm: type,
+    instance: *Evm,
+    params: anytype,
+) !@typeInfo(@TypeOf(Evm.inner_call)).@"fn".return_type.? {
     if (comptime builtin.single_threaded) return error.FrameStackUnavailable;
     const Job = struct {
         instance: *Evm,
@@ -175,7 +180,10 @@ pub const Host = struct {
             return;
         }
         if (!self.ownsSnapshots()) {
-            evm.log.err("layer2 host: database snapshots changed under checkpoint {d}; not rolled back", .{token.index});
+            evm.log.err(
+                "layer2 host: database snapshots changed under checkpoint {d}; not rolled back",
+                .{token.index},
+            );
             return;
         }
         self.database.revert_to_depth(token.index);
@@ -236,10 +244,20 @@ pub const Host = struct {
     /// Apply an EIP-7702 authorization list (execution-specs Prague `set_delegation`)
     /// and warm every recovered authority. Invalid tuples are skipped. Returns the
     /// refund for authorities that already existed.
-    fn applyAuthorizations(self: *Host, comptime hardfork: Hardfork, access_list: anytype, list: []const executor.Authorization) !u64 {
+    fn applyAuthorizations(
+        self: *Host,
+        comptime hardfork: Hardfork,
+        access_list: anytype,
+        list: []const executor.Authorization,
+    ) !u64 {
         // The intrinsic gas check already paid for the list.
         var unmetered: i64 = std.math.maxInt(i64);
-        var processor = evm.AuthorizationProcessor{ .db = self.database, .chain_id = self.block.chain_id, .gas_remaining = &unmetered, .eips = .{ .hardfork = hardfork } };
+        var processor = evm.AuthorizationProcessor{
+            .db = self.database,
+            .chain_id = self.block.chain_id,
+            .gas_remaining = &unmetered,
+            .eips = .{ .hardfork = hardfork },
+        };
         var applied = try processor.processAuthorizationListWithResults(self.allocator, list);
         defer applied.deinit(self.allocator);
         for (applied.results) |tuple| {
@@ -266,18 +284,22 @@ pub const Host = struct {
         if (tx.base_fee != self.block.base_fee) return error.BaseFeeMismatch;
         if (tx.gas_limit > EVM_GAS_CAPACITY) return error.GasLimitExceedsEvmCapacity;
         if (tx.is_call != (tx.to != null)) return error.CallTargetMismatch;
-        if (tx.authorization_list.len != 0 and (comptime !hardfork.isAtLeast(.PRAGUE))) return error.AuthorizationListUnsupported;
+        if (tx.authorization_list.len != 0 and (comptime !hardfork.isAtLeast(.PRAGUE))) {
+            return error.AuthorizationListUnsupported;
+        }
 
         var origin = (try self.database.get_account(tx.sender.bytes)) orelse Account.zero();
         // Transaction validity. For a user transaction it is a rejection (revm
         // `InvalidTransaction`); for a deposit it is a failed deposit on every spec
         // (op-revm `catch_error_failed_deposit`).
         const tokens = eips.tokens_in_calldata(tx.input);
-        const intrinsic_wide = @as(u128, eips.intrinsic_gas_cost(is_create)) + eips.calldata_gas_cost(tokens, is_create, tx.input.len) +| listIntrinsicGas(tx);
+        const calldata_gas = eips.calldata_gas_cost(tokens, is_create, tx.input.len);
+        const intrinsic_wide = @as(u128, eips.intrinsic_gas_cost(is_create)) + calldata_gas +| listIntrinsicGas(tx);
         const floor = eips.floor_gas_cost(tokens);
         const below_intrinsic = tx.gas_limit < intrinsic_wide or tx.gas_limit < floor;
         // EIP-3860 from Shanghai (Canyon) on; Bedrock and Regolith have no init code limit.
-        const initcode_too_large = (comptime hardfork.isAtLeast(.SHANGHAI)) and is_create and tx.input.len > MAX_INITCODE_SIZE;
+        const has_shanghai = comptime hardfork.isAtLeast(.SHANGHAI);
+        const initcode_too_large = has_shanghai and is_create and tx.input.len > MAX_INITCODE_SIZE;
         if (is_deposit) {
             if (below_intrinsic or initcode_too_large or tx.value > origin.balance) {
                 return .{ .outcome = .halt, .gas_used = tx.gas_limit, .invalid = true };
@@ -287,7 +309,9 @@ pub const Host = struct {
             if (initcode_too_large) return error.CreateInitCodeSizeLimit;
             // EIP-3607 (revm `RejectCallerWithCode`): a sender with code cannot originate.
             // A delegated EOA has no code hash here (`Account.delegated_address`).
-            if (!std.mem.allEqual(u8, &origin.code_hash, 0) and !std.mem.eql(u8, &origin.code_hash, &primitives.EMPTY_CODE_HASH)) return error.SenderHasCode;
+            const has_non_empty_code = !std.mem.allEqual(u8, &origin.code_hash, 0) and
+                !std.mem.eql(u8, &origin.code_hash, &primitives.EMPTY_CODE_HASH);
+            if (has_non_empty_code) return error.SenderHasCode;
         }
         const intrinsic: u64 = @intCast(intrinsic_wide);
         const execution_gas = tx.gas_limit - intrinsic;
@@ -318,7 +342,8 @@ pub const Host = struct {
             .coinbase = self.block.coinbase,
             // Not read during execution: CHAINID reads BlockInfo.chain_id (u64). Set only
             // when the field is wide enough for every chain ID.
-            .chain_id = if (comptime std.math.maxInt(@FieldType(evm.TransactionContext, "chain_id")) >= std.math.maxInt(u64)) self.block.chain_id else 0,
+            .chain_id = if (comptime std.math.maxInt(@FieldType(evm.TransactionContext, "chain_id")) >=
+                std.math.maxInt(u64)) self.block.chain_id else 0,
         };
         var instance = try Evm.init(self.allocator, self.database, block_info, context, price, tx.sender);
         defer instance.deinit();
@@ -333,7 +358,9 @@ pub const Host = struct {
         while (precompile <= last_precompile) : (precompile += 1) {
             try instance.access_list.pre_warm_addresses(&[_]Address{Address.fromU256(precompile)});
         }
-        if (comptime hardfork.isAtLeast(.OSAKA)) try instance.access_list.pre_warm_addresses(&[_]Address{evm.precompiles.P256VERIFY_ADDRESS});
+        if (comptime hardfork.isAtLeast(.OSAKA)) {
+            try instance.access_list.pre_warm_addresses(&[_]Address{evm.precompiles.P256VERIFY_ADDRESS});
+        }
         if (comptime config.enable_precompiles) {
             inline for (config.precompile_overrides) |override| {
                 try instance.access_list.pre_warm_addresses(&[_]Address{override.address});
@@ -386,7 +413,8 @@ pub const Host = struct {
         // counts whatever the outcome; execution refunds only on success.
         const used_before_refund = tx.gas_limit - result.gas_left;
         const refund_counter = authorization_refund +| (if (result.success) instance.gas_refund_counter else 0);
-        const gas_used = @max(used_before_refund - eips.eip_3529_gas_refund_cap(used_before_refund, refund_counter), floor);
+        const refund_cap = eips.eip_3529_gas_refund_cap(used_before_refund, refund_counter);
+        const gas_used = @max(used_before_refund - refund_cap, floor);
 
         const outcome: deposits.Outcome = if (result.success) .success else if (result.gas_left > 0) .revert else .halt;
         return .{ .outcome = outcome, .gas_used = gas_used };

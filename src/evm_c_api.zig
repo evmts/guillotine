@@ -348,7 +348,10 @@ fn createHandle(block_info: ?*const BlockInfoFFI, config: EvmConfiguration) ?*Ev
         inline else => |tag| createBoxOnLargeStack(tag, info),
     } catch |err| {
         switch (err) {
-            error.ChainIdOutOfRange => setError("chain_id {d} exceeds the supported maximum {d}", .{ info.chain_id, std.math.maxInt(ChainId) }),
+            error.ChainIdOutOfRange => setError(
+                "chain_id {d} exceeds the supported maximum {d}",
+                .{ info.chain_id, std.math.maxInt(ChainId) },
+            ),
             else => setError("Failed to create EVM: {s}", .{@errorName(err)}),
         }
         return null;
@@ -512,7 +515,12 @@ export fn guillotine_set_code(handle: ?*EvmHandle, address: ?*const [20]u8, code
     return applyEdit(handle, address, .{ .code = slice });
 }
 
-export fn guillotine_set_code_tracing(handle: ?*EvmHandle, address: ?*const [20]u8, code: ?[*]const u8, code_len: usize) bool {
+export fn guillotine_set_code_tracing(
+    handle: ?*EvmHandle,
+    address: ?*const [20]u8,
+    code: ?[*]const u8,
+    code_len: usize,
+) bool {
     return guillotine_set_code(handle, address, code, code_len);
 }
 
@@ -541,7 +549,11 @@ export fn guillotine_get_balance(handle: ?*EvmHandle, address: ?*const [20]u8, b
 /// or have no code have empty code. The database stores a delegated account as
 /// `delegated_address` without a code hash, so the designator is rebuilt in
 /// `designator`, which the result then points into.
-fn storedCode(instance: anytype, address: [20]u8, designator: *[evm.eips.DELEGATION_DESIGNATOR_LENGTH]u8) Database.Error![]const u8 {
+fn storedCode(
+    instance: anytype,
+    address: [20]u8,
+    designator: *[evm.eips.DELEGATION_DESIGNATOR_LENGTH]u8,
+) Database.Error![]const u8 {
     const account = try instance.database.get_account(address) orelse return &.{};
     if (account.get_effective_code_address()) |delegate| {
         designator.* = evm.eips.DELEGATION_PREFIX ++ delegate.bytes;
@@ -599,7 +611,12 @@ fn putStorage(instance: anytype, address: [20]u8, key: u256, value: u256) !void 
     try instance.touched_addresses.put(Address{ .bytes = address }, {});
 }
 
-export fn guillotine_set_storage(handle: ?*EvmHandle, address: ?*const [20]u8, key: ?*const [32]u8, value: ?*const [32]u8) bool {
+export fn guillotine_set_storage(
+    handle: ?*EvmHandle,
+    address: ?*const [20]u8,
+    key: ?*const [32]u8,
+    value: ?*const [32]u8,
+) bool {
     const box = resolve(handle) orelse return false;
     if (address == null or key == null or value == null) {
         setError("address, key, and value must not be NULL", .{});
@@ -616,7 +633,12 @@ export fn guillotine_set_storage(handle: ?*EvmHandle, address: ?*const [20]u8, k
     return true;
 }
 
-export fn guillotine_get_storage(handle: ?*EvmHandle, address: ?*const [20]u8, key: ?*const [32]u8, value_out: ?*[32]u8) bool {
+export fn guillotine_get_storage(
+    handle: ?*EvmHandle,
+    address: ?*const [20]u8,
+    key: ?*const [32]u8,
+    value_out: ?*[32]u8,
+) bool {
     const box = resolve(handle) orelse return false;
     if (address == null or key == null or value_out == null) {
         setError("address, key, and value_out must not be NULL", .{});
@@ -647,7 +669,13 @@ fn buildCallParams(comptime E: type, p: *const CallParams, input: []const u8) ?E
         2 => .{ .delegatecall = .{ .caller = caller, .to = to, .input = input, .gas = p.gas } },
         3 => .{ .staticcall = .{ .caller = caller, .to = to, .input = input, .gas = p.gas } },
         4 => .{ .create = .{ .caller = caller, .value = value, .init_code = input, .gas = p.gas } },
-        5 => .{ .create2 = .{ .caller = caller, .value = value, .init_code = input, .salt = std.mem.readInt(u256, &p.salt, .big), .gas = p.gas } },
+        5 => .{ .create2 = .{
+            .caller = caller,
+            .value = value,
+            .init_code = input,
+            .salt = std.mem.readInt(u256, &p.salt, .big),
+            .gas = p.gas,
+        } },
         else => {
             setError("Invalid call type: {d}", .{p.call_type});
             return null;
@@ -657,7 +685,13 @@ fn buildCallParams(comptime E: type, p: *const CallParams, input: []const u8) ?E
 
 const ExecMode = enum { call, simulate };
 
-fn execute(instance: anytype, p: *const CallParams, input: []const u8, mode: ExecMode, include_trace: bool) ?*EvmResult {
+fn execute(
+    instance: anytype,
+    p: *const CallParams,
+    input: []const u8,
+    mode: ExecMode,
+    include_trace: bool,
+) ?*EvmResult {
     const E = @TypeOf(instance.*);
     const call_params = buildCallParams(E, p, input) orelse return null;
     // `Evm.call` subtracts the intrinsic cost from the gas limit. An EVM built with gas
@@ -666,7 +700,8 @@ fn execute(instance: anytype, p: *const CallParams, input: []const u8, mode: Exe
     // configuration returns for it: failure with no gas left.
     const is_create = call_params.isCreate();
     const eips = evm.Eips{ .hardfork = instance.get_hardfork() };
-    const initial_gas = eips.intrinsic_gas_cost(is_create) + eips.calldata_gas_cost(eips.tokens_in_calldata(input), is_create, input.len);
+    const calldata_gas = eips.calldata_gas_cost(eips.tokens_in_calldata(input), is_create, input.len);
+    const initial_gas = eips.intrinsic_gas_cost(is_create) + calldata_gas;
     if (p.gas < initial_gas) {
         var rejected = E.CallResult.failed(0);
         return convertCallResult(&rejected, false) catch |err| {
@@ -796,7 +831,9 @@ fn convertCallResult(result: anytype, include_trace: bool) !*EvmResult {
 
     if (result.selfdestructs.len > 0) {
         const records = try ffi_allocator.alloc(SelfDestructRecord, result.selfdestructs.len);
-        for (records, result.selfdestructs) |*dst, sd| dst.* = .{ .contract = sd.contract.bytes, .beneficiary = sd.beneficiary.bytes };
+        for (records, result.selfdestructs) |*dst, sd| {
+            dst.* = .{ .contract = sd.contract.bytes, .beneficiary = sd.beneficiary.bytes };
+        }
         out.selfdestructs = records.ptr;
         out.selfdestructs_len = records.len;
     }
@@ -845,7 +882,10 @@ fn writeTraceJson(allocator: std.mem.Allocator, trace: anytype) ![]u8 {
     try w.writeAll("{\"structLogs\":[");
     for (trace.steps, 0..) |step, i| {
         if (i > 0) try w.writeAll(",");
-        try w.print("{{\"pc\":{d},\"op\":\"{s}\",\"gas\":{d},\"gasCost\":{d},\"depth\":{d},\"stack\":[", .{ step.pc, step.opcode_name, step.gas, step.gas_cost, step.depth });
+        try w.print(
+            "{{\"pc\":{d},\"op\":\"{s}\",\"gas\":{d},\"gasCost\":{d},\"depth\":{d},\"stack\":[",
+            .{ step.pc, step.opcode_name, step.gas, step.gas_cost, step.depth },
+        );
         for (step.stack, 0..) |val, j| {
             if (j > 0) try w.writeAll(",");
             try w.print("\"0x{x}\"", .{val});
@@ -1086,7 +1126,13 @@ export fn evm_bytecode_pretty_print(data: ?[*]const u8, data_len: usize, buffer:
     const bytes = data orelse return 0;
     if (buffer_len > 0 and buffer == null) return 0;
     var empty: [1]u8 = undefined;
-    return bytecode_c.evm_bytecode_pretty_print_with_allocator(ffi_allocator, bytes, data_len, buffer orelse &empty, buffer_len);
+    return bytecode_c.evm_bytecode_pretty_print_with_allocator(
+        ffi_allocator,
+        bytes,
+        data_len,
+        buffer orelse &empty,
+        buffer_len,
+    );
 }
 
 fn dispatchPrettyPrint(bytes: []const u8) ![]u8 {
@@ -1099,7 +1145,13 @@ fn dispatchPrettyPrint(bytes: []const u8) ![]u8 {
     var schedule = try DispatchType.DispatchSchedule.init(ffi_allocator, bytecode, &FrameType.opcode_handlers, null);
     defer schedule.deinit();
 
-    return evm.dispatch_pretty_print.pretty_print(ffi_allocator, schedule.items, &bytecode, FrameType, DispatchType.Item);
+    return evm.dispatch_pretty_print.pretty_print(
+        ffi_allocator,
+        schedule.items,
+        &bytecode,
+        FrameType,
+        DispatchType.Item,
+    );
 }
 
 /// Pretty print the dispatch schedule built from `data`. On failure the buffer receives
@@ -1113,4 +1165,11 @@ export fn evm_dispatch_pretty_print(data: ?[*]const u8, data_len: usize, buffer:
     };
     defer ffi_allocator.free(output);
     return copyText(output, buffer, buffer_len);
+}
+
+test "evm_dispatch_pretty_print rejects empty bytecode gracefully" {
+    var buf: [128]u8 = undefined;
+    const written = evm_dispatch_pretty_print(null, 0, &buf, buf.len);
+    try std.testing.expect(written > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..written], "Error:") != null);
 }

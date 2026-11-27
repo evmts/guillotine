@@ -17,3 +17,9 @@ pub const BaseConfig = layer2.BaseConfig;
 pub const OpSpecId = layer2.OpSpecId;
 pub const executor = layer2.executor;
 pub const evm_host = @import("layer2/evm_host.zig");
+
+test "layer2_package re-exports Layer2Config and evm_host" {
+    const std = @import("std");
+    const cfg: Layer2Config = .none;
+    try std.testing.expect(!cfg.isOpStack());
+}

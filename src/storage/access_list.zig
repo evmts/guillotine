@@ -128,7 +128,11 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         pub fn clone(self: *const Self) !Self {
             var addresses = try self.addresses.clone(self.allocator);
             errdefer addresses.deinit(self.allocator);
-            return Self{ .allocator = self.allocator, .addresses = addresses, .storage_slots = try self.storage_slots.clone(self.allocator) };
+            return Self{
+                .allocator = self.allocator,
+                .addresses = addresses,
+                .storage_slots = try self.storage_slots.clone(self.allocator),
+            };
         }
     };
 }

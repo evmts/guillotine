@@ -151,8 +151,13 @@ pub fn Journal(comptime config: JournalConfig) type {
                 self.prefix_max.appendAssumeCapacity(highest);
                 switch (entry.data) {
                     .storage_change => |sc| {
-                        const slot = self.original_storage.getOrPutAssumeCapacity(.{ .address = sc.address.bytes, .slot = sc.key });
-                        if (!slot.found_existing) slot.value_ptr.* = .{ .value = sc.original_value, .entry_index = @intCast(index) };
+                        const slot = self.original_storage.getOrPutAssumeCapacity(.{
+                            .address = sc.address.bytes,
+                            .slot = sc.key,
+                        });
+                        if (!slot.found_existing) {
+                            slot.value_ptr.* = .{ .value = sc.original_value, .entry_index = @intCast(index) };
+                        }
                     },
                     else => {},
                 }
@@ -168,14 +173,23 @@ pub fn Journal(comptime config: JournalConfig) type {
 
         fn appendAssumeCapacity(self: *Self, entry: Entry) void {
             if (self.prefixMaxIsCurrent()) {
-                const previous: SnapshotIdType = if (self.prefix_max.items.len == 0) 0 else self.prefix_max.items[self.prefix_max.items.len - 1];
+                const previous: SnapshotIdType = if (self.prefix_max.items.len == 0)
+                    0
+                else
+                    self.prefix_max.items[self.prefix_max.items.len - 1];
                 self.prefix_max.appendAssumeCapacity(@max(previous, entry.snapshot_id));
             }
             self.entries.appendAssumeCapacity(entry);
         }
 
         /// Record a storage change
-        pub fn record_storage_change(self: *Self, snapshot_id: SnapshotIdType, address: Address, key: WordType, original_value: WordType) !void {
+        pub fn record_storage_change(
+            self: *Self,
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            key: WordType,
+            original_value: WordType,
+        ) !void {
             try self.entries.ensureUnusedCapacity(self.allocator, 1);
             try self.prefix_max.ensureUnusedCapacity(self.allocator, 1);
             const slot = try self.original_storage.getOrPut(self.allocator, .{ .address = address.bytes, .slot = key });
@@ -187,17 +201,32 @@ pub fn Journal(comptime config: JournalConfig) type {
         }
 
         /// Record a balance change
-        pub fn record_balance_change(self: *Self, snapshot_id: SnapshotIdType, address: Address, original_balance: WordType) !void {
+        pub fn record_balance_change(
+            self: *Self,
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            original_balance: WordType,
+        ) !void {
             try self.append(Entry.balance_change(snapshot_id, address, original_balance));
         }
 
         /// Record a nonce change
-        pub fn record_nonce_change(self: *Self, snapshot_id: SnapshotIdType, address: Address, original_nonce: NonceType) !void {
+        pub fn record_nonce_change(
+            self: *Self,
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            original_nonce: NonceType,
+        ) !void {
             try self.append(Entry.nonce_change(snapshot_id, address, original_nonce));
         }
 
         /// Record a code change
-        pub fn record_code_change(self: *Self, snapshot_id: SnapshotIdType, address: Address, original_code_hash: [32]u8) !void {
+        pub fn record_code_change(
+            self: *Self,
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            original_code_hash: [32]u8,
+        ) !void {
             try self.append(Entry.code_change(snapshot_id, address, original_code_hash));
         }
 
@@ -207,7 +236,13 @@ pub fn Journal(comptime config: JournalConfig) type {
         }
 
         /// Record account destruction
-        pub fn record_account_destroyed(self: *Self, snapshot_id: SnapshotIdType, address: Address, beneficiary: Address, balance: WordType) !void {
+        pub fn record_account_destroyed(
+            self: *Self,
+            snapshot_id: SnapshotIdType,
+            address: Address,
+            beneficiary: Address,
+            balance: WordType,
+        ) !void {
             try self.append(Entry.account_destroyed(snapshot_id, address, beneficiary, balance));
         }
 
@@ -229,7 +264,8 @@ pub fn Journal(comptime config: JournalConfig) type {
         /// oldest recorded change that is still in the journal. O(1).
         pub fn get_original_storage(self: *const Self, address: Address, slot: WordType) ?WordType {
             if (self.prefixMaxIsCurrent()) {
-                const original = self.original_storage.get(.{ .address = address.bytes, .slot = slot }) orelse return null;
+                const lookup_key = SlotKey{ .address = address.bytes, .slot = slot };
+                const original = self.original_storage.get(lookup_key) orelse return null;
                 return original.value;
             }
             // Entries appended directly to `entries` are not indexed: scan them.
@@ -262,7 +298,11 @@ pub fn Journal(comptime config: JournalConfig) type {
         }
 
         /// Get entries for a specific snapshot
-        pub fn get_snapshot_entries(self: *const Self, snapshot_id: SnapshotIdType, allocator: std.mem.Allocator) ![]Entry {
+        pub fn get_snapshot_entries(
+            self: *const Self,
+            snapshot_id: SnapshotIdType,
+            allocator: std.mem.Allocator,
+        ) ![]Entry {
             var result = std.ArrayList(Entry).empty;
             for (self.entries.items) |entry| {
                 if (entry.snapshot_id == snapshot_id) {

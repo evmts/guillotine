@@ -25,3 +25,17 @@ pub fn AllocatedMemory(comptime WordType: type) type {
         }
     };
 }
+
+test "AllocatedMemory tracks and frees allocated words without leaking" {
+    const allocator = std.testing.allocator;
+    var mem = AllocatedMemory(u256).init();
+    defer mem.deinit(allocator);
+
+    const p1 = try allocator.create(u256);
+    errdefer allocator.destroy(p1);
+    p1.* = 0x123456789abcdef0123456789abcdef0;
+    try mem.pointers.append(allocator, p1);
+
+    try std.testing.expectEqual(@as(usize, 1), mem.pointers.items.len);
+    try std.testing.expectEqual(@as(u256, 0x123456789abcdef0123456789abcdef0), mem.pointers.items[0].*);
+}

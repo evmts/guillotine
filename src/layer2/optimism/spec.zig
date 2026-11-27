@@ -34,7 +34,17 @@ pub const OpSpecId = enum(u8) {
     pub const DEFAULT = OpSpecId.JOVIAN;
 
     /// All modeled specs in activation order.
-    pub const ALL = [_]OpSpecId{ .BEDROCK, .REGOLITH, .CANYON, .ECOTONE, .FJORD, .GRANITE, .HOLOCENE, .ISTHMUS, .JOVIAN };
+    pub const ALL = [_]OpSpecId{
+        .BEDROCK,
+        .REGOLITH,
+        .CANYON,
+        .ECOTONE,
+        .FJORD,
+        .GRANITE,
+        .HOLOCENE,
+        .ISTHMUS,
+        .JOVIAN,
+    };
 
     /// Underlying Ethereum hardfork (op-revm `into_eth_spec`).
     pub fn toEthHardfork(self: OpSpecId) Hardfork {

@@ -222,7 +222,17 @@ pub const Tracer = struct {
                 const evm_instance = frame.getEvm();
 
                 const block_info = evm_instance.get_block_info();
-                evm.setBlockchainContext(evm_instance.get_chain_id(), block_info.number, block_info.timestamp, block_info.difficulty, std.mem.readInt(u256, &block_info.prev_randao, .big), block_info.coinbase, block_info.gas_limit, block_info.base_fee, block_info.blob_base_fee);
+                evm.setBlockchainContext(
+                    evm_instance.get_chain_id(),
+                    block_info.number,
+                    block_info.timestamp,
+                    block_info.difficulty,
+                    std.mem.readInt(u256, &block_info.prev_randao, .big),
+                    block_info.coinbase,
+                    block_info.gas_limit,
+                    block_info.base_fee,
+                    block_info.blob_base_fee,
+                );
                 evm.setTransactionContext(evm_instance.get_tx_origin(), evm_instance.gas_price);
                 evm.setBlockHashes(block_info.block_hashes);
                 evm.setHardfork(evm_instance.get_hardfork());
@@ -246,7 +256,8 @@ pub const Tracer = struct {
                 // EIP-6780: SELFDESTRUCT deletes an account only when it was created
                 // in this transaction, so the sidecar must know that about the frame
                 // it mirrors.
-                if (@hasDecl(@TypeOf(evm_instance.*), "was_created_in_tx") and evm_instance.was_created_in_tx(address)) {
+                const has_created_fn = @hasDecl(@TypeOf(evm_instance.*), "was_created_in_tx");
+                if (has_created_fn and evm_instance.was_created_in_tx(address)) {
                     evm.markCreated(address) catch |err| {
                         log.err("Failed to record created account in MinimalEvm: {}", .{err});
                         return;
@@ -298,7 +309,12 @@ pub const Tracer = struct {
 
     /// Called before an instruction executes
     /// This is the main entry point for instruction tracing
-    pub fn before_instruction(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode, cursor: [*]const @TypeOf(frame.*).Dispatch.Item) void {
+    pub fn before_instruction(
+        self: *Tracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode,
+        cursor: [*]const @TypeOf(frame.*).Dispatch.Item,
+    ) void {
         if (!self.config.enabled) return;
         const main_evm = frame.getEvm();
         const opcode_name = comptime @tagName(opcode);
@@ -330,13 +346,20 @@ pub const Tracer = struct {
         if (self.minimal_evm) |evm| {
             const pc = evm.getPC();
             const bytecode = evm.getBytecode();
-            self.debug("beforeInstruction: Frame executing {s}, MinimalEvm PC={d}, bytecode[PC]=0x{x:0>2}", .{ opcode_name, pc, if (pc < bytecode.len) bytecode[pc] else 0 });
+            const byte_at_pc: u8 = if (pc < bytecode.len) bytecode[pc] else 0;
+            self.debug(
+                "beforeInstruction: Frame executing {s}, MinimalEvm PC={d}, bytecode[PC]=0x{x:0>2}",
+                .{ opcode_name, pc, byte_at_pc },
+            );
         }
         if (opcode_value <= 0xff) {
             const expected_handler = @TypeOf(frame.*).opcode_handlers[opcode_value];
             const actual_handler = cursor[0].opcode_handler;
             if (actual_handler != expected_handler) {
-                self.fail("[HANDLER] Handler mismatch for {s}: expected={*}, actual={*}", .{ opcode_name, expected_handler, actual_handler });
+                self.fail(
+                    "[HANDLER] Handler mismatch for {s}: expected={*}, actual={*}",
+                    .{ opcode_name, expected_handler, actual_handler },
+                );
             }
         }
 
@@ -399,7 +422,13 @@ pub const Tracer = struct {
         });
     }
 
-    pub fn after_instruction(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode, next_handler: anytype, next_cursor: [*]const @TypeOf(frame.*).Dispatch.Item) void {
+    pub fn after_instruction(
+        self: *Tracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode,
+        next_handler: anytype,
+        next_cursor: [*]const @TypeOf(frame.*).Dispatch.Item,
+    ) void {
         if (!self.config.enabled) return;
         const opcode_name = comptime @tagName(opcode);
         if (self.config.enable_step_capture) self.finishSteps(frame);
@@ -433,7 +462,10 @@ pub const Tracer = struct {
                 if (opcode_int <= 0xff) {
                     const expected_next_handler = @TypeOf(frame.*).opcode_handlers[opcode_int];
                     if (next_handler != expected_next_handler) {
-                        self.fail("[HANDLER] Next handler mismatch: opcode=0x{x:0>2}, expected={*}, actual={*}", .{ opcode_int, expected_next_handler, next_handler });
+                        self.fail(
+                            "[HANDLER] Next handler mismatch: opcode=0x{x:0>2}, expected={*}, actual={*}",
+                            .{ opcode_int, expected_next_handler, next_handler },
+                        );
                     }
                 }
             }
@@ -495,7 +527,10 @@ pub const Tracer = struct {
             .ISZERO_JUMPI, .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => 3,
             // Block entry and the invalid-jump trap are not bytecode instructions.
             .BLOCK_BEGIN, .INVALID_JUMP_TARGET => 0,
-            else => if (@backingInt(opcode) <= 0xFF) 1 else @compileError("Tracer.instructionsCovered: unmapped synthetic opcode " ++ @tagName(opcode)),
+            else => if (@backingInt(opcode) <= 0xFF)
+                1
+            else
+                @compileError("Tracer.instructionsCovered: unmapped synthetic opcode " ++ @tagName(opcode)),
         };
     }
 
@@ -545,7 +580,12 @@ pub const Tracer = struct {
 
     /// Record one step per bytecode instruction the handler for `opcode` is about to
     /// execute, from the real Frame: its stack, memory size, call depth and gas.
-    fn recordSteps(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode, cursor: [*]const @TypeOf(frame.*).Dispatch.Item) void {
+    fn recordSteps(
+        self: *Tracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode,
+        cursor: [*]const @TypeOf(frame.*).Dispatch.Item,
+    ) void {
         const main_evm = frame.getEvm();
         const depth: usize = main_evm.depth;
         if (depth == 0 or depth > self.frame_cursors.items.len) return;
@@ -562,7 +602,10 @@ pub const Tracer = struct {
         const enters_block = comptime (opcode == .JUMPDEST or opcode == .BLOCK_BEGIN);
         const block_gas: u64 = if (enters_block) cursor[1].jump_dest.gas else 0;
         if (enters_block and fc.prepaid != 0) {
-            self.debug("Tracer: {d} gas still prepaid at block entry (pc={d}); resynchronizing", .{ fc.prepaid, fc.pc });
+            self.debug(
+                "Tracer: {d} gas still prepaid at block entry (pc={d}); resynchronizing",
+                .{ fc.prepaid, fc.pc },
+            );
             fc.prepaid = 0;
         }
 
@@ -599,10 +642,16 @@ pub const Tracer = struct {
             const last = k + 1 == covered;
 
             // Compute the next stack first, so a failure leaves no half-recorded handler.
-            const next_stack: []u256 = if (last) &[_]u256{} else self.stackAfterFusedPrefix(op, immediate, stack) catch |err| {
-                log.warn("Tracer: fused {s} at pc={d} not captured past opcode 0x{x:0>2}: {}", .{ @tagName(opcode), pc, op, err });
-                return;
-            };
+            const next_stack: []u256 = if (last)
+                &[_]u256{}
+            else
+                self.stackAfterFusedPrefix(op, immediate, stack) catch |err| {
+                    log.warn(
+                        "Tracer: fused {s} at pc={d} not captured past opcode 0x{x:0>2}: {}",
+                        .{ @tagName(opcode), pc, op, err },
+                    );
+                    return;
+                };
 
             const named = std.enums.fromInt(Opcode, op) orelse Opcode.INVALID;
             self.steps.append(self.allocator, .{
@@ -662,7 +711,8 @@ pub const Tracer = struct {
         if (end > self.steps.items.len) return;
         const pending = self.steps.items[fc.pending_first..end];
 
-        const gas_after: i64 = @as(i64, frame.gas_remaining) + @as(i64, @intCast(@min(fc.prepaid, std.math.maxInt(u32))));
+        const clamped_prepaid: i64 = @intCast(@min(fc.prepaid, std.math.maxInt(u32)));
+        const gas_after: i64 = @as(i64, frame.gas_remaining) + clamped_prepaid;
         var static_total: u64 = 0;
         for (pending) |step| static_total += step.gas_cost;
         const spent: u64 = if (fc.pending_gas_before > gas_after) @intCast(fc.pending_gas_before - gas_after) else 0;
@@ -673,7 +723,12 @@ pub const Tracer = struct {
     }
 
     /// Capture the current advanced execution state for Frame
-    fn captureAdvancedStep(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode, cursor: [*]const @TypeOf(frame.*).Dispatch.Item) !AdvancedStep {
+    fn captureAdvancedStep(
+        self: *Tracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode,
+        cursor: [*]const @TypeOf(frame.*).Dispatch.Item,
+    ) !AdvancedStep {
         if (!self.config.enable_advanced_trace) return AdvancedStep{
             .step_number = 0,
             .schedule_index = 0,
@@ -769,7 +824,10 @@ pub const Tracer = struct {
                 else => false,
             };
             if (is_call_like) {
-                self.debug("[EVM2] [DIVERGENCE] (call-like) Stack size mismatch after {s}: MinimalEvm={d} Frame={d}", .{ opcode_name, evm_stack_size, frame_stack_size });
+                self.debug(
+                    "[EVM2] [DIVERGENCE] (call-like) Stack size mismatch after {s}: MinimalEvm={d} Frame={d}",
+                    .{ opcode_name, evm_stack_size, frame_stack_size },
+                );
                 return;
             }
             log.err("[EVM2] [DIVERGENCE] Stack size mismatch after {s}:", .{opcode_name});
@@ -874,7 +932,10 @@ pub const Tracer = struct {
             defer self.allocator.free(output);
             log.err("{s}", .{output});
         } else |err| {
-            log.err("Ring buffer has {} recent instructions (could not print them: {})", .{ self.recent_opcodes.count, err });
+            log.err(
+                "Ring buffer has {} recent instructions (could not print them: {})",
+                .{ self.recent_opcodes.count, err },
+            );
         }
     }
 

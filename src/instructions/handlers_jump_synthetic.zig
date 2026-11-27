@@ -21,7 +21,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// Jump directly to a statically known location without a jump table lookup.
         /// The cursor points to: [0] = handler, [1] = jump_static metadata.
-        pub fn jump_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn jump_to_static_location(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             const s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMP_TO_STATIC_LOCATION, cursor, s, gas);
             return N.jump(self, .JUMP_TO_STATIC_LOCATION, staticTarget(cursor[1]), s, gas);
@@ -29,7 +38,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// Conditionally jump to a statically known location without a jump table lookup.
         /// The cursor points to: [0] = handler, [1] = jump_static metadata.
-        pub fn jumpi_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn jumpi_to_static_location(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMPI_TO_STATIC_LOCATION, cursor, s, gas);
             const condition = s.pop_unsafe();
@@ -41,7 +59,16 @@ pub fn Handlers(FrameType: type) type {
         /// targets in unreachable code are legal, so preprocessing points such jumps here
         /// and the error surfaces only when the jump is taken. It maps to no bytecode
         /// instruction: the jump handler already stepped MinimalEvm through the failed JUMP.
-        pub fn invalid_jump_target(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn invalid_jump_target(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             _ = cursor;
             return N.exit(self, .INVALID_JUMP_TARGET, N.StackView.init(sp, t0, t1, t2, t3), gas, .invalid_jump);
         }
@@ -50,8 +77,18 @@ pub fn Handlers(FrameType: type) type {
         /// or a gas-observing instruction. It maps to no bytecode instruction. Like JUMPDEST
         /// it charges the block's static gas and validates the block's stack bounds in one
         /// shot, but it charges no gas of its own.
-        pub fn block_begin(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            return jump_handlers.Handlers(FrameType).enterBlock(self, .BLOCK_BEGIN, cursor, N.StackView.init(sp, t0, t1, t2, t3), gas);
+        pub fn block_begin(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const stack_view = N.StackView.init(sp, t0, t1, t2, t3);
+            return jump_handlers.Handlers(FrameType).enterBlock(self, .BLOCK_BEGIN, cursor, stack_view, gas);
         }
     };
 }

@@ -47,7 +47,11 @@ pub fn evm_bytecode_create(data: [*]const u8, data_len: usize) callconv(.c) ?*CB
     return evm_bytecode_create_with_allocator(allocator, data, data_len);
 }
 
-pub fn evm_bytecode_create_with_allocator(alloc: std.mem.Allocator, data: [*]const u8, data_len: usize) ?*CBytecodeHandle {
+pub fn evm_bytecode_create_with_allocator(
+    alloc: std.mem.Allocator,
+    data: [*]const u8,
+    data_len: usize,
+) ?*CBytecodeHandle {
     // `errdefer` does not run on `return null`, so the fallible work lives in
     // `createHandle`, whose errdefers free the handle and the copied input.
     return createHandle(alloc, data[0..data_len]) catch |err| {
@@ -148,7 +152,11 @@ pub fn evm_bytecode_get_full_length(handle: ?*const CBytecodeHandle) callconv(.c
 
 /// Copy validated runtime code (excludes metadata) to buffer
 /// Returns number of bytes copied
-pub fn evm_bytecode_get_runtime_data(handle: ?*const CBytecodeHandle, buffer: [*]u8, buffer_len: usize) callconv(.c) usize {
+pub fn evm_bytecode_get_runtime_data(
+    handle: ?*const CBytecodeHandle,
+    buffer: [*]u8,
+    buffer_len: usize,
+) callconv(.c) usize {
     const h = handle orelse return 0;
     const runtime = h.bytecode.raw();
     const copy_len = @min(runtime.len, buffer_len);
@@ -166,7 +174,12 @@ pub fn evm_bytecode_get_runtime_data(handle: ?*const CBytecodeHandle, buffer: [*
 /// @param max_dests Maximum number of destinations to find
 /// @param count_out Actual number of destinations found
 /// @return Error code
-pub fn evm_bytecode_find_jump_dests(handle: ?*const CBytecodeHandle, jump_dests: [*]u32, max_dests: u32, count_out: *u32) callconv(.c) c_int {
+pub fn evm_bytecode_find_jump_dests(
+    handle: ?*const CBytecodeHandle,
+    jump_dests: [*]u32,
+    max_dests: u32,
+    count_out: *u32,
+) callconv(.c) c_int {
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
     var count: u32 = 0;
     var pos: usize = 0;
@@ -250,13 +263,84 @@ pub fn evm_bytecode_analyze(handle: ?*const CBytecodeHandle, analysis_out: *CByt
     return evm_bytecode_analyze_with_allocator(allocator, handle, analysis_out);
 }
 
-pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*const CBytecodeHandle, analysis_out: *CBytecodeAnalysis) c_int {
+fn allocPcSlice(alloc: std.mem.Allocator, pcs: anytype) std.mem.Allocator.Error![]u32 {
+    const out = try alloc.alloc(u32, pcs.len);
+    for (pcs, 0..) |pc, i| out[i] = @intCast(pc);
+    return out;
+}
+
+fn marshalBytecodeAnalysis(alloc: std.mem.Allocator, analysis: anytype) std.mem.Allocator.Error!CBytecodeAnalysis {
+    const c_push_pcs = try allocPcSlice(alloc, analysis.push_pcs);
+    errdefer alloc.free(c_push_pcs);
+
+    const c_jumpdests = try allocPcSlice(alloc, analysis.jumpdests);
+    errdefer alloc.free(c_jumpdests);
+
+    const c_blocks = try alloc.alloc(CBasicBlock, analysis.basic_blocks.len);
+    errdefer alloc.free(c_blocks);
+    for (analysis.basic_blocks, 0..) |block, i| {
+        c_blocks[i] = .{ .start = @intCast(block.start), .end = @intCast(block.end) };
+    }
+
+    const c_jump_fusions = try alloc.alloc(CJumpFusion, analysis.jump_fusions.count());
+    errdefer alloc.free(c_jump_fusions);
+    {
+        var iter = analysis.jump_fusions.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| : (i += 1) {
+            c_jump_fusions[i] = .{ .source_pc = @intCast(entry.key_ptr.*), .target_pc = @intCast(entry.value_ptr.*) };
+        }
+    }
+
+    const c_advanced = try alloc.alloc(CAdvancedFusion, analysis.advanced_fusions.count());
+    errdefer alloc.free(c_advanced);
+    {
+        var iter = analysis.advanced_fusions.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| : (i += 1) {
+            const fusion = entry.value_ptr.*;
+            c_advanced[i] = .{
+                .pc = @intCast(entry.key_ptr.*),
+                .info = .{
+                    .fusion_type = switch (fusion.fusion_type) {
+                        .constant_fold => CFusionType.constant_fold,
+                        .iszero_jumpi => CFusionType.iszero_jumpi,
+                    },
+                    .original_length = @intCast(fusion.original_length),
+                    .folded_value_low = @truncate(fusion.folded_value),
+                    .folded_value_high = @truncate(fusion.folded_value >> 64),
+                    .folded_value_extra_high = @truncate(fusion.folded_value >> 128),
+                    .folded_value_top = @truncate(fusion.folded_value >> 192),
+                    .count = fusion.count,
+                },
+            };
+        }
+    }
+
+    return .{
+        .push_pcs = c_push_pcs.ptr,
+        .push_pcs_count = @intCast(c_push_pcs.len),
+        .jumpdests = c_jumpdests.ptr,
+        .jumpdests_count = @intCast(c_jumpdests.len),
+        .basic_blocks = c_blocks.ptr,
+        .basic_blocks_count = @intCast(c_blocks.len),
+        .jump_fusions = c_jump_fusions.ptr,
+        .jump_fusions_count = @intCast(c_jump_fusions.len),
+        .advanced_fusions = c_advanced.ptr,
+        .advanced_fusions_count = @intCast(c_advanced.len),
+    };
+}
+
+pub fn evm_bytecode_analyze_with_allocator(
+    alloc: std.mem.Allocator,
+    handle: ?*const CBytecodeHandle,
+    analysis_out: *CBytecodeAnalysis,
+) c_int {
     // Zero the output first: on every failure path the caller holds an empty analysis
     // that evm_bytecode_free_analysis accepts, never uninitialized pointers and counts.
     analysis_out.* = std.mem.zeroes(CBytecodeAnalysis);
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
 
-    // Call the Zig analyzer with correct types
     const BasicBlock = struct {
         start: BytecodeType.PcType,
         end: BytecodeType.PcType,
@@ -286,102 +370,8 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
         mut_advanced_fusions.deinit();
     }
 
-    // Convert push_pcs
-    const c_push_pcs = alloc.alloc(u32, analysis.push_pcs.len) catch
+    analysis_out.* = marshalBytecodeAnalysis(alloc, analysis) catch
         return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
-    for (analysis.push_pcs, 0..) |pc, i| {
-        c_push_pcs[i] = @intCast(pc);
-    }
-
-    // Convert jumpdests
-    const c_jumpdests = alloc.alloc(u32, analysis.jumpdests.len) catch {
-        alloc.free(c_push_pcs);
-        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
-    };
-    for (analysis.jumpdests, 0..) |pc, i| {
-        c_jumpdests[i] = @intCast(pc);
-    }
-
-    // Convert basic blocks
-    const c_blocks = alloc.alloc(CBasicBlock, analysis.basic_blocks.len) catch {
-        alloc.free(c_push_pcs);
-        alloc.free(c_jumpdests);
-        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
-    };
-    for (analysis.basic_blocks, 0..) |block, i| {
-        c_blocks[i] = .{
-            .start = @intCast(block.start),
-            .end = @intCast(block.end),
-        };
-    }
-
-    // Convert jump fusions
-    const c_jump_fusions = alloc.alloc(CJumpFusion, analysis.jump_fusions.count()) catch {
-        alloc.free(c_push_pcs);
-        alloc.free(c_jumpdests);
-        alloc.free(c_blocks);
-        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
-    };
-    {
-        var iter = analysis.jump_fusions.iterator();
-        var i: usize = 0;
-        while (iter.next()) |entry| : (i += 1) {
-            c_jump_fusions[i] = .{
-                .source_pc = @intCast(entry.key_ptr.*),
-                .target_pc = @intCast(entry.value_ptr.*),
-            };
-        }
-    }
-
-    // Convert advanced fusions
-    const c_advanced = alloc.alloc(CAdvancedFusion, analysis.advanced_fusions.count()) catch {
-        alloc.free(c_push_pcs);
-        alloc.free(c_jumpdests);
-        alloc.free(c_blocks);
-        alloc.free(c_jump_fusions);
-        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
-    };
-    {
-        var iter = analysis.advanced_fusions.iterator();
-        var i: usize = 0;
-        while (iter.next()) |entry| : (i += 1) {
-            const fusion = entry.value_ptr.*;
-            c_advanced[i] = .{
-                .pc = @intCast(entry.key_ptr.*),
-                .info = .{
-                    .fusion_type = switch (fusion.fusion_type) {
-                        .constant_fold => CFusionType.constant_fold,
-                        .iszero_jumpi => CFusionType.iszero_jumpi,
-                    },
-                    .original_length = @intCast(fusion.original_length),
-                    .folded_value_low = @truncate(fusion.folded_value),
-                    .folded_value_high = @truncate(fusion.folded_value >> 64),
-                    .folded_value_extra_high = @truncate(fusion.folded_value >> 128),
-                    .folded_value_top = @truncate(fusion.folded_value >> 192),
-                    .count = fusion.count,
-                },
-            };
-        }
-    }
-
-    // Fill output structure
-    analysis_out.* = .{
-        .push_pcs = c_push_pcs.ptr,
-        .push_pcs_count = @intCast(c_push_pcs.len),
-
-        .jumpdests = c_jumpdests.ptr,
-        .jumpdests_count = @intCast(c_jumpdests.len),
-
-        .basic_blocks = c_blocks.ptr,
-        .basic_blocks_count = @intCast(c_blocks.len),
-
-        .jump_fusions = c_jump_fusions.ptr,
-        .jump_fusions_count = @intCast(c_jump_fusions.len),
-
-        .advanced_fusions = c_advanced.ptr,
-        .advanced_fusions_count = @intCast(c_advanced.len),
-    };
-
     return EVM_BYTECODE_SUCCESS;
 }
 
@@ -419,161 +409,7 @@ pub fn evm_bytecode_free_analysis_with_allocator(alloc: std.mem.Allocator, analy
 /// @return Opcode name, or "INVALID" if not recognized
 pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
     const opcode = std.enums.fromInt(Opcode, opcode_value) orelse return "INVALID";
-
-    return switch (opcode) {
-        .STOP => "STOP",
-        .ADD => "ADD",
-        .MUL => "MUL",
-        .SUB => "SUB",
-        .DIV => "DIV",
-        .SDIV => "SDIV",
-        .MOD => "MOD",
-        .SMOD => "SMOD",
-        .ADDMOD => "ADDMOD",
-        .MULMOD => "MULMOD",
-        .EXP => "EXP",
-        .SIGNEXTEND => "SIGNEXTEND",
-        .LT => "LT",
-        .GT => "GT",
-        .SLT => "SLT",
-        .SGT => "SGT",
-        .EQ => "EQ",
-        .ISZERO => "ISZERO",
-        .AND => "AND",
-        .OR => "OR",
-        .XOR => "XOR",
-        .NOT => "NOT",
-        .BYTE => "BYTE",
-        .SHL => "SHL",
-        .SHR => "SHR",
-        .SAR => "SAR",
-        .CLZ => "CLZ",
-        .KECCAK256 => "KECCAK256",
-        .ADDRESS => "ADDRESS",
-        .BALANCE => "BALANCE",
-        .ORIGIN => "ORIGIN",
-        .CALLER => "CALLER",
-        .CALLVALUE => "CALLVALUE",
-        .CALLDATALOAD => "CALLDATALOAD",
-        .CALLDATASIZE => "CALLDATASIZE",
-        .CALLDATACOPY => "CALLDATACOPY",
-        .CODESIZE => "CODESIZE",
-        .CODECOPY => "CODECOPY",
-        .GASPRICE => "GASPRICE",
-        .EXTCODESIZE => "EXTCODESIZE",
-        .EXTCODECOPY => "EXTCODECOPY",
-        .RETURNDATASIZE => "RETURNDATASIZE",
-        .RETURNDATACOPY => "RETURNDATACOPY",
-        .EXTCODEHASH => "EXTCODEHASH",
-        .BLOCKHASH => "BLOCKHASH",
-        .COINBASE => "COINBASE",
-        .TIMESTAMP => "TIMESTAMP",
-        .NUMBER => "NUMBER",
-        .DIFFICULTY => "DIFFICULTY",
-        .GASLIMIT => "GASLIMIT",
-        .CHAINID => "CHAINID",
-        .SELFBALANCE => "SELFBALANCE",
-        .BASEFEE => "BASEFEE",
-        .POP => "POP",
-        .MLOAD => "MLOAD",
-        .MSTORE => "MSTORE",
-        .MSTORE8 => "MSTORE8",
-        .SLOAD => "SLOAD",
-        .SSTORE => "SSTORE",
-        .JUMP => "JUMP",
-        .JUMPI => "JUMPI",
-        .PC => "PC",
-        .MSIZE => "MSIZE",
-        .GAS => "GAS",
-        .JUMPDEST => "JUMPDEST",
-        .TLOAD => "TLOAD",
-        .TSTORE => "TSTORE",
-        .MCOPY => "MCOPY",
-        .PUSH0 => "PUSH0",
-        .PUSH1 => "PUSH1",
-        .PUSH2 => "PUSH2",
-        .PUSH3 => "PUSH3",
-        .PUSH4 => "PUSH4",
-        .PUSH5 => "PUSH5",
-        .PUSH6 => "PUSH6",
-        .PUSH7 => "PUSH7",
-        .PUSH8 => "PUSH8",
-        .PUSH9 => "PUSH9",
-        .PUSH10 => "PUSH10",
-        .PUSH11 => "PUSH11",
-        .PUSH12 => "PUSH12",
-        .PUSH13 => "PUSH13",
-        .PUSH14 => "PUSH14",
-        .PUSH15 => "PUSH15",
-        .PUSH16 => "PUSH16",
-        .PUSH17 => "PUSH17",
-        .PUSH18 => "PUSH18",
-        .PUSH19 => "PUSH19",
-        .PUSH20 => "PUSH20",
-        .PUSH21 => "PUSH21",
-        .PUSH22 => "PUSH22",
-        .PUSH23 => "PUSH23",
-        .PUSH24 => "PUSH24",
-        .PUSH25 => "PUSH25",
-        .PUSH26 => "PUSH26",
-        .PUSH27 => "PUSH27",
-        .PUSH28 => "PUSH28",
-        .PUSH29 => "PUSH29",
-        .PUSH30 => "PUSH30",
-        .PUSH31 => "PUSH31",
-        .PUSH32 => "PUSH32",
-        .DUP1 => "DUP1",
-        .DUP2 => "DUP2",
-        .DUP3 => "DUP3",
-        .DUP4 => "DUP4",
-        .DUP5 => "DUP5",
-        .DUP6 => "DUP6",
-        .DUP7 => "DUP7",
-        .DUP8 => "DUP8",
-        .DUP9 => "DUP9",
-        .DUP10 => "DUP10",
-        .DUP11 => "DUP11",
-        .DUP12 => "DUP12",
-        .DUP13 => "DUP13",
-        .DUP14 => "DUP14",
-        .DUP15 => "DUP15",
-        .DUP16 => "DUP16",
-        .SWAP1 => "SWAP1",
-        .SWAP2 => "SWAP2",
-        .SWAP3 => "SWAP3",
-        .SWAP4 => "SWAP4",
-        .SWAP5 => "SWAP5",
-        .SWAP6 => "SWAP6",
-        .SWAP7 => "SWAP7",
-        .SWAP8 => "SWAP8",
-        .SWAP9 => "SWAP9",
-        .SWAP10 => "SWAP10",
-        .SWAP11 => "SWAP11",
-        .SWAP12 => "SWAP12",
-        .SWAP13 => "SWAP13",
-        .SWAP14 => "SWAP14",
-        .SWAP15 => "SWAP15",
-        .SWAP16 => "SWAP16",
-        .LOG0 => "LOG0",
-        .LOG1 => "LOG1",
-        .LOG2 => "LOG2",
-        .LOG3 => "LOG3",
-        .LOG4 => "LOG4",
-        .CREATE => "CREATE",
-        .CALL => "CALL",
-        .CALLCODE => "CALLCODE",
-        .RETURN => "RETURN",
-        .DELEGATECALL => "DELEGATECALL",
-        .CREATE2 => "CREATE2",
-        .STATICCALL => "STATICCALL",
-        .REVERT => "REVERT",
-        .INVALID => "INVALID",
-        .SELFDESTRUCT => "SELFDESTRUCT",
-        .BLOBHASH => "BLOBHASH",
-        .BLOBBASEFEE => "BLOBBASEFEE",
-        .AUTH => "AUTH",
-        .AUTHCALL => "AUTHCALL",
-    };
+    return @tagName(opcode).ptr;
 }
 
 /// Check if an opcode value is valid
@@ -635,7 +471,13 @@ pub fn evm_bytecode_pretty_print(data: [*]const u8, data_len: usize, buffer: [*]
     return evm_bytecode_pretty_print_with_allocator(allocator, data, data_len, buffer, buffer_len);
 }
 
-pub fn evm_bytecode_pretty_print_with_allocator(alloc: std.mem.Allocator, data: [*]const u8, data_len: usize, buffer: [*]u8, buffer_len: usize) usize {
+pub fn evm_bytecode_pretty_print_with_allocator(
+    alloc: std.mem.Allocator,
+    data: [*]const u8,
+    data_len: usize,
+    buffer: [*]u8,
+    buffer_len: usize,
+) usize {
     if (data_len == 0) return 0;
 
     const bytecode_slice = data[0..data_len];

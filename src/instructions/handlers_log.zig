@@ -25,7 +25,10 @@ pub fn Handlers(FrameType: type) type {
         pub fn generateLogHandler(comptime topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
             return handler_abi.wrap(FrameType, struct {
-                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+                pub fn logHandler(
+                    self: *FrameType,
+                    cursor: [*]const Dispatch.Item,
+                ) Error![*]const FrameType.Dispatch.Item {
                     const dispatch = Dispatch{ .cursor = cursor };
 
                     // Add debug logging for the specific LOG opcode
@@ -43,7 +46,10 @@ pub fn Handlers(FrameType: type) type {
 
                     // LOG0 requires 2 items, LOG1 requires 3, LOG2 requires 4, LOG3 requires 5, LOG4 requires 6
                     {
-                        (&self.getEvm().tracer).assert(self.stack.size() >= 2 + topic_count, "LOG requires sufficient stack items");
+                        (&self.getEvm().tracer).assert(
+                            self.stack.size() >= 2 + topic_count,
+                            "LOG requires sufficient stack items",
+                        );
                     }
 
                     // Pop offset and length first (they're on top of stack)
@@ -103,20 +109,22 @@ pub fn Handlers(FrameType: type) type {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }
-                        self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch {
+                        const call_alloc = self.getEvm().getCallArenaAllocator();
+                        self.memory.ensure_capacity(call_alloc, @as(u32, @intCast(memory_end))) catch {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         };
                     }
 
                     // Get data from memory
-                    const data = if (length_usize > 0)
-                        self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(length_usize))) catch {
+                    const data = if (length_usize > 0) blk: {
+                        const off_u32: u32 = @intCast(offset_usize);
+                        const len_u32: u32 = @intCast(length_usize);
+                        break :blk self.memory.get_slice(off_u32, len_u32) catch {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
-                        }
-                    else
-                        &[_]u8{};
+                        };
+                    } else &[_]u8{};
 
                     // `emit_log` copies the topics and data into the call arena and
                     // records an allocation failure in `host_failure`: the host ran out
@@ -133,24 +141,29 @@ pub fn Handlers(FrameType: type) type {
                     // Map topic_count to the appropriate LOG opcode
                     switch (topic_count) {
                         0 => {
-                            self.afterInstruction(.LOG0, dispatch.getOpData(.LOG0).next_handler, dispatch.getOpData(.LOG0).next_cursor.cursor);
-                            return dispatch.getOpData(.LOG0).next_cursor.cursor;
+                            const op = dispatch.getOpData(.LOG0);
+                            self.afterInstruction(.LOG0, op.next_handler, op.next_cursor.cursor);
+                            return op.next_cursor.cursor;
                         },
                         1 => {
-                            self.afterInstruction(.LOG1, dispatch.getOpData(.LOG1).next_handler, dispatch.getOpData(.LOG1).next_cursor.cursor);
-                            return dispatch.getOpData(.LOG1).next_cursor.cursor;
+                            const op = dispatch.getOpData(.LOG1);
+                            self.afterInstruction(.LOG1, op.next_handler, op.next_cursor.cursor);
+                            return op.next_cursor.cursor;
                         },
                         2 => {
-                            self.afterInstruction(.LOG2, dispatch.getOpData(.LOG2).next_handler, dispatch.getOpData(.LOG2).next_cursor.cursor);
-                            return dispatch.getOpData(.LOG2).next_cursor.cursor;
+                            const op = dispatch.getOpData(.LOG2);
+                            self.afterInstruction(.LOG2, op.next_handler, op.next_cursor.cursor);
+                            return op.next_cursor.cursor;
                         },
                         3 => {
-                            self.afterInstruction(.LOG3, dispatch.getOpData(.LOG3).next_handler, dispatch.getOpData(.LOG3).next_cursor.cursor);
-                            return dispatch.getOpData(.LOG3).next_cursor.cursor;
+                            const op = dispatch.getOpData(.LOG3);
+                            self.afterInstruction(.LOG3, op.next_handler, op.next_cursor.cursor);
+                            return op.next_cursor.cursor;
                         },
                         4 => {
-                            self.afterInstruction(.LOG4, dispatch.getOpData(.LOG4).next_handler, dispatch.getOpData(.LOG4).next_cursor.cursor);
-                            return dispatch.getOpData(.LOG4).next_cursor.cursor;
+                            const op = dispatch.getOpData(.LOG4);
+                            self.afterInstruction(.LOG4, op.next_handler, op.next_cursor.cursor);
+                            return op.next_cursor.cursor;
                         },
                         else => @compileError("Only LOG0 to LOG4 is supported"),
                     }

@@ -46,7 +46,14 @@ pub const HttpTransport = struct {
         };
     }
 
-    pub fn init_with_config(allocator: Allocator, url: []const u8, timeout_ms: u32, connection_timeout_ms: u32, max_retries: u8, retry_delay_ms: u32) !HttpTransport {
+    pub fn init_with_config(
+        allocator: Allocator,
+        url: []const u8,
+        timeout_ms: u32,
+        connection_timeout_ms: u32,
+        max_retries: u8,
+        retry_delay_ms: u32,
+    ) !HttpTransport {
         var client = http.Client{ .allocator = allocator };
         client.connection_pool.timeout_ns = @as(u64, timeout_ms) * std.time.ns_per_ms;
 
@@ -101,7 +108,11 @@ pub const HttpTransport = struct {
         self.allocator.free(self.url);
     }
 
-    pub fn request(self: *HttpTransport, method: []const u8, params: []const u8) TransportError!json_rpc.JsonRpcResponse {
+    pub fn request(
+        self: *HttpTransport,
+        method: []const u8,
+        params: []const u8,
+    ) TransportError!json_rpc.JsonRpcResponse {
         var retries_remaining = self.max_retries;
         var current_retry: u8 = 0;
 
@@ -138,7 +149,11 @@ pub const HttpTransport = struct {
         }
     }
 
-    fn request_once(self: *HttpTransport, method: []const u8, params: []const u8) TransportError!json_rpc.JsonRpcResponse {
+    fn request_once(
+        self: *HttpTransport,
+        method: []const u8,
+        params: []const u8,
+    ) TransportError!json_rpc.JsonRpcResponse {
         const req = json_rpc.JsonRpcRequest{
             .method = method,
             .params = params,

@@ -19,7 +19,16 @@ pub fn Handlers(FrameType: type) type {
         const N = handler_abi.Native(FrameType);
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
-        pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn add(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .ADD, cursor, s, gas);
 
@@ -33,7 +42,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
-        pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn mul(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .MUL, cursor, s, gas);
 
@@ -47,7 +65,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
-        pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn sub(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SUB, cursor, s, gas);
 
@@ -72,12 +99,27 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
-        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        pub fn div(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .DIV, cursor, s, gas);
             const top = s.tos;
             const second = s.sp[1];
-            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&div_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (anyWide(.{ top, second })) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&div_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.sp += 1;
             s.tos = wide_arith.div64(@truncate(top), @truncate(second));
@@ -86,7 +128,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// DIV for operands wider than 64 bits. Entered by tail call from `div`, after
         /// `div` has run the pre-instruction hooks, with the operands still on the stack.
-        fn div_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        fn div_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
@@ -100,12 +151,27 @@ pub fn Handlers(FrameType: type) type {
         ///
         /// Operands below 2^64 are non-negative, so their signed quotient is the unsigned
         /// one. `sdiv_wide` handles every other input.
-        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        pub fn sdiv(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SDIV, cursor, s, gas);
             const top = s.tos;
             const second = s.sp[1];
-            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&sdiv_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (anyWide(.{ top, second })) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&sdiv_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.sp += 1;
             s.tos = wide_arith.div64(@truncate(top), @truncate(second));
@@ -119,7 +185,16 @@ pub fn Handlers(FrameType: type) type {
         /// one the SMT and Lean proofs cover (`sdiv_branchless_equiv`); with
         /// `wide_arith.div(x, 0) == 0` it yields 0 for a zero divisor and `MIN_SIGNED` for
         /// `MIN_SIGNED / -1` without a special case.
-        fn sdiv_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        fn sdiv_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             const top = s.pop_unsafe();
             const second = s.peek_unsafe();
@@ -131,12 +206,27 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
-        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        pub fn mod(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .MOD, cursor, s, gas);
             const top = s.tos;
             const second = s.sp[1];
-            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&mod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (anyWide(.{ top, second })) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&mod_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.sp += 1;
             s.tos = wide_arith.rem64(@truncate(top), @truncate(second));
@@ -144,7 +234,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MOD for operands wider than 64 bits. Entered by tail call from `mod`.
-        fn mod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        fn mod_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
@@ -158,12 +257,27 @@ pub fn Handlers(FrameType: type) type {
         ///
         /// Operands below 2^64 are non-negative, so their signed remainder is the unsigned
         /// one. `smod_wide` handles every other input.
-        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        pub fn smod(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SMOD, cursor, s, gas);
             const top = s.tos;
             const second = s.sp[1];
-            if (anyWide(.{ top, second })) return @call(handler_abi.tail_mod, N.outlined(&smod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (anyWide(.{ top, second })) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&smod_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.sp += 1;
             s.tos = wide_arith.rem64(@truncate(top), @truncate(second));
@@ -176,7 +290,16 @@ pub fn Handlers(FrameType: type) type {
         /// sign is re-applied by `verified_ops.smodFromUnsignedRem`, the function the SMT
         /// and Lean proofs cover (`smod_branchless_equiv`). With `wide_arith.rem(x, 0) == 0`
         /// it yields 0 for a zero divisor and for `MIN_SIGNED % -1` without a special case.
-        fn smod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        fn smod_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             const top = s.pop_unsafe();
             const second = s.peek_unsafe();
@@ -188,7 +311,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        pub fn addmod(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .ADDMOD, cursor, s, gas);
             const addend1 = s.tos; // Top of stack (a)
@@ -196,7 +328,13 @@ pub fn Handlers(FrameType: type) type {
             const modulus = s.sp[2]; // Third on stack (N)
             // The inline path needs one-limb operands whose sum also fits one limb.
             const sum = @addWithOverflow(@as(u64, @truncate(addend1)), @as(u64, @truncate(addend2)));
-            if (anyWide(.{ addend1, addend2, modulus }) or sum[1] != 0) return @call(handler_abi.tail_mod, N.outlined(&addmod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (anyWide(.{ addend1, addend2, modulus }) or sum[1] != 0) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&addmod_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.sp += 2;
             s.tos = wide_arith.rem64(sum[0], @truncate(modulus));
@@ -205,7 +343,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// ADDMOD for operands or sums wider than 64 bits. Entered by tail call from
         /// `addmod`. The sum is reduced as a 257-bit value, so it never wraps.
-        fn addmod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        fn addmod_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             const addend1 = s.pop_unsafe(); // Top of stack (a)
             const addend2 = s.pop_unsafe(); // Second on stack (b)
@@ -215,13 +362,28 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        pub fn mulmod(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .MULMOD, cursor, s, gas);
             const factor1 = s.tos; // Top of stack (a)
             const factor2 = s.sp[1]; // Second on stack (b)
             const modulus = s.sp[2]; // Third on stack (N)
-            if (anyWide(.{ factor1, factor2, modulus })) return @call(handler_abi.tail_mod, N.outlined(&mulmod_wide), .{ self, cursor, sp, gas, t0, t1, t2, t3 });
+            if (anyWide(.{ factor1, factor2, modulus })) {
+                return @call(
+                    handler_abi.tail_mod,
+                    N.outlined(&mulmod_wide),
+                    .{ self, cursor, sp, gas, t0, t1, t2, t3 },
+                );
+            }
 
             s.sp += 2;
             s.tos = wide_arith.mulmod64(@truncate(factor1), @truncate(factor2), @truncate(modulus));
@@ -230,7 +392,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// MULMOD for operands wider than 64 bits. Entered by tail call from `mulmod`.
         /// The product is reduced as a 512-bit value, so it never wraps.
-        fn mulmod_wide(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) Handler {
+        fn mulmod_wide(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) Handler {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             const factor1 = s.pop_unsafe(); // Top of stack (a)
             const factor2 = s.pop_unsafe(); // Second on stack (b)
@@ -254,7 +425,8 @@ pub fn Handlers(FrameType: type) type {
             // (`exp_gas_bytes_equiv`).
             const exp_bytes: u64 = verified_ops.expGasByteLenFast(exponent);
 
-            const exp_byte_gas: u64 = comptime @intCast((eips.Eips{ .hardfork = FrameType.config.hardfork }).eip_160_exp_byte_gas_cost());
+            const fork_eips = comptime eips.Eips{ .hardfork = FrameType.config.hardfork };
+            const exp_byte_gas: u64 = comptime @intCast(fork_eips.eip_160_exp_byte_gas_cost());
             const gas_cost = exp_byte_gas * exp_bytes;
             if (self.gas_remaining < 0 or gas_cost > @as(u64, @intCast(self.gas_remaining))) {
                 self.afterComplete(.EXP);
@@ -279,7 +451,16 @@ pub fn Handlers(FrameType: type) type {
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
         /// Uses `verified_ops.signextendFast`, the branchless form the SMT and Lean
         /// proofs show equal to the Yellow Paper definition (`signextend_branchless_equiv`).
-        pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn signextend(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .SIGNEXTEND, cursor, s, gas);
             const ext = s.pop_unsafe(); // Extension byte index (top of stack)

@@ -197,7 +197,11 @@ pub const WarmStorage = struct {
     pub fn init(allocator: std.mem.Allocator, backing: ?*ColdStorage) !WarmStorage {
         return .{
             .accounts = try LruCache([20]u8, Account, .{ .capacity = 1024 }).init(allocator),
-            .storage = try LruCache(StorageKey, u256, .{ .capacity = 4096, .HashContext = StorageHashContext }).init(allocator),
+            .storage = try LruCache(
+                StorageKey,
+                u256,
+                .{ .capacity = 4096, .HashContext = StorageHashContext },
+            ).init(allocator),
             .code = try LruCache([32]u8, []const u8, .{ .capacity = 256 }).init(allocator),
             .backing = backing,
             .allocator = allocator,

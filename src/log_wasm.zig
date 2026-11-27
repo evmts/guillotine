@@ -15,7 +15,11 @@ pub const WasmLogger = struct {
         const scope_text = comptime @tagName(scope);
 
         var buf: [4096]u8 = undefined;
-        const message = std.fmt.bufPrint(buf[0..], "[" ++ prefix ++ "] " ++ "(" ++ scope_text ++ ") " ++ format, args) catch |err| switch (err) {
+        const message = std.fmt.bufPrint(
+            buf[0..],
+            "[" ++ prefix ++ "] " ++ "(" ++ scope_text ++ ") " ++ format,
+            args,
+        ) catch |err| switch (err) {
             error.NoSpaceLeft => "Log message too long",
         };
 
@@ -28,3 +32,7 @@ pub const WasmLogger = struct {
 };
 
 pub const log = WasmLogger.log;
+
+test "WasmLogger exports log function" {
+    try std.testing.expect(@typeInfo(@TypeOf(log)) == .@"fn");
+}

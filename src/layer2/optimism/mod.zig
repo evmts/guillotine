@@ -16,3 +16,9 @@ pub const DepositTransactionParts = transaction.DepositTransactionParts;
 pub const OpTransactionData = transaction.OpTransactionData;
 pub const OpTxType = transaction.OpTxType;
 pub const getOptimismPrecompileOverrides = precompiles.overrides;
+
+test "optimism module re-exports OpSpecId and deposit constants" {
+    const std = @import("std");
+    try std.testing.expect(OpSpecId.JOVIAN.isAtLeast(.BEDROCK));
+    try std.testing.expectEqual(@as(u8, 0x7e), @backingInt(OpTxType.Deposit));
+}

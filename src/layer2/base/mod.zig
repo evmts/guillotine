@@ -10,3 +10,9 @@ pub const SystemContracts = config.SystemContracts;
 pub const Schedule = hardforks.Schedule;
 pub const MAINNET_SCHEDULE = hardforks.MAINNET;
 pub const SEPOLIA_SCHEDULE = hardforks.SEPOLIA;
+
+test "base module exposes mainnet and sepolia schedules" {
+    const std = @import("std");
+    try std.testing.expectEqual(BaseChain.mainnet, BaseConfig.MAINNET.chain);
+    try std.testing.expectEqual(BaseChain.sepolia, BaseConfig.SEPOLIA.chain);
+}

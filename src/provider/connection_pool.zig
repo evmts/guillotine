@@ -69,7 +69,10 @@ pub const ConnectionPool = struct {
         var connections = std.ArrayList(PooledConnection).empty;
         // Pre-allocate to prevent reallocation and pointer invalidation
         connections.ensureTotalCapacity(allocator, config.max_connections) catch |err| {
-            log.warn("Failed to pre-allocate connection pool capacity ({d}): {s}. Pool will reallocate as needed.", .{ config.max_connections, @errorName(err) });
+            log.warn(
+                "Failed to pre-allocate connection pool capacity ({d}): {s}. Pool will reallocate as needed.",
+                .{ config.max_connections, @errorName(err) },
+            );
         };
         return .{
             .allocator = allocator,

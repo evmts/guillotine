@@ -83,7 +83,44 @@ pub fn createModules(
     layer2_mod.addImport("evm", evm_mod);
     layer2_mod.addImport("voltaire", primitives_mod);
 
-    // Compilers module
+    const compilers_mod = createCompilersModule(b, target, optimize, primitives_mod, evm_mod, foundry_lib);
+    const root_mods = createLibAndExeModules(
+        b,
+        target,
+        optimize,
+        omit_frame_pointer,
+        build_options_mod,
+        primitives_mod,
+        crypto_mod,
+        precompiles_mod,
+        provider_mod,
+        compilers_mod,
+        trie_mod,
+    );
+
+    return ModuleSet{
+        .lib_mod = root_mods.lib_mod,
+        .primitives_mod = primitives_mod,
+        .crypto_mod = crypto_mod,
+        .precompiles_mod = precompiles_mod,
+        .trie_mod = trie_mod,
+        .provider_mod = provider_mod,
+        .evm_mod = evm_mod,
+        .compilers_mod = compilers_mod,
+        .c_kzg_mod = c_kzg_mod,
+        .exe_mod = root_mods.exe_mod,
+        .layer2_mod = layer2_mod,
+    };
+}
+
+fn createCompilersModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    primitives_mod: *std.Build.Module,
+    evm_mod: *std.Build.Module,
+    foundry_lib: ?*std.Build.Step.Compile,
+) *std.Build.Module {
     const compilers_mod = b.createModule(.{
         .root_source_file = b.path("lib/foundry-compilers/package.zig"),
         .target = target,
@@ -97,14 +134,26 @@ pub fn createModules(
         .optimize = optimize,
     });
     compilers_mod.addImport("foundry_wrapper_c", foundry_wrapper_c.createModule());
-
-    // Link with foundry library if available
     if (foundry_lib) |lib| {
         compilers_mod.linkLibrary(lib);
         compilers_mod.addIncludePath(b.path("lib/foundry-compilers"));
     }
+    return compilers_mod;
+}
 
-    // Main library module
+fn createLibAndExeModules(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    omit_frame_pointer: ?bool,
+    build_options_mod: *std.Build.Module,
+    primitives_mod: *std.Build.Module,
+    crypto_mod: *std.Build.Module,
+    precompiles_mod: *std.Build.Module,
+    provider_mod: *std.Build.Module,
+    compilers_mod: *std.Build.Module,
+    trie_mod: *std.Build.Module,
+) struct { lib_mod: *std.Build.Module, exe_mod: *std.Build.Module } {
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -120,25 +169,15 @@ pub fn createModules(
     lib_mod.addImport("compilers", compilers_mod);
     lib_mod.addImport("trie", trie_mod);
 
-    // Executable module
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     exe_mod.addImport("Guillotine_lib", lib_mod);
+    return .{ .lib_mod = lib_mod, .exe_mod = exe_mod };
+}
 
-    return ModuleSet{
-        .lib_mod = lib_mod,
-        .primitives_mod = primitives_mod,
-        .crypto_mod = crypto_mod,
-        .precompiles_mod = precompiles_mod,
-        .trie_mod = trie_mod,
-        .provider_mod = provider_mod,
-        .evm_mod = evm_mod,
-        .compilers_mod = compilers_mod,
-        .c_kzg_mod = c_kzg_mod,
-        .exe_mod = exe_mod,
-        .layer2_mod = layer2_mod,
-    };
+test "createModules builder function is exported" {
+    try std.testing.expect(@typeInfo(@TypeOf(createModules)) == .@"fn");
 }

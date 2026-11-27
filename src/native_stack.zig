@@ -11,7 +11,11 @@ const builtin = @import("builtin");
 pub const supported = builtin.link_libc and (builtin.os.tag == .linux or builtin.os.tag.isDarwin());
 
 extern "c" fn pthread_getattr_np(thread: std.c.pthread_t, attr: *std.c.pthread_attr_t) c_int;
-extern "c" fn pthread_attr_getstack(attr: *const std.c.pthread_attr_t, stack_address: *?*anyopaque, stack_size: *usize) c_int;
+extern "c" fn pthread_attr_getstack(
+    attr: *const std.c.pthread_attr_t,
+    stack_address: *?*anyopaque,
+    stack_size: *usize,
+) c_int;
 extern "c" fn pthread_get_stackaddr_np(thread: std.c.pthread_t) ?*anyopaque;
 extern "c" fn pthread_get_stacksize_np(thread: std.c.pthread_t) usize;
 extern "c" fn getauxval(kind: c_ulong) c_ulong;
@@ -151,7 +155,8 @@ pub const Worker = struct {
         }
     }
 
-    /// Runs `func(context)` on the worker thread and blocks until it returns. Only one job at a time (the EVM is single-threaded).
+    /// Runs `func(context)` on the worker thread and blocks until it returns.
+    /// Only one job runs at a time because the EVM is single-threaded.
     /// Re-entrant use from inside a job running on the worker must be rejected with an error, not deadlock.
     pub fn run(self: *Worker, context: *anyopaque, func: *const fn (*anyopaque) void) error{WorkerBusy}!void {
         if (self.busy.cmpxchgStrong(false, true, .acquire, .monotonic) != null) return error.WorkerBusy;

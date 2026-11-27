@@ -77,7 +77,10 @@ comptime {
     for (std.meta.tags(OpcodeSynthetic)) |synthetic| {
         // Try to convert the synthetic opcode value to a regular Opcode
         if (std.enums.fromInt(Opcode, @backingInt(synthetic))) |conflicting_opcode| {
-            @compileError(std.fmt.comptimePrint("Synthetic opcode {s} (0x{X}) conflicts with normal opcode {s}", .{ @tagName(synthetic), @backingInt(synthetic), @tagName(conflicting_opcode) }));
+            @compileError(std.fmt.comptimePrint(
+                "Synthetic opcode {s} (0x{X}) conflicts with normal opcode {s}",
+                .{ @tagName(synthetic), @backingInt(synthetic), @tagName(conflicting_opcode) },
+            ));
         }
     }
 }

@@ -130,14 +130,18 @@ pub const tos_limb_count = 4;
 /// Split a stack word into the register limbs, least significant first. A word narrower
 /// than 256 bits is zero-extended, so its upper limbs are zero.
 pub inline fn toLimbs(comptime Word: type, word: Word) [tos_limb_count]u64 {
-    comptime if (@bitSizeOf(Word) > 64 * tos_limb_count) @compileError("the handler ABI carries stack words of at most 256 bits");
+    comptime if (@bitSizeOf(Word) > 64 * tos_limb_count) {
+        @compileError("the handler ABI carries stack words of at most 256 bits");
+    };
     const wide: u256 = word;
     return .{ @truncate(wide), @truncate(wide >> 64), @truncate(wide >> 128), @truncate(wide >> 192) };
 }
 
 /// Join the register limbs into a stack word. Inverse of `toLimbs`.
 pub inline fn fromLimbs(comptime Word: type, t0: u64, t1: u64, t2: u64, t3: u64) Word {
-    comptime if (@bitSizeOf(Word) > 64 * tos_limb_count) @compileError("the handler ABI carries stack words of at most 256 bits");
+    comptime if (@bitSizeOf(Word) > 64 * tos_limb_count) {
+        @compileError("the handler ABI carries stack words of at most 256 bits");
+    };
     const wide = @as(u256, t0) | (@as(u256, t1) << 64) | (@as(u256, t2) << 128) | (@as(u256, t3) << 192);
     return @truncate(wide);
 }
@@ -182,10 +186,16 @@ pub fn wrap(comptime FrameType: type, comptime step: anytype) FrameType.OpcodeHa
             spill(FrameType.WordType, &sp[0], fromLimbs(FrameType.WordType, t0, t1, t2, t3));
             frame.stack.stack_ptr = sp;
             frame.gas_remaining = gas;
-            const next = @call(.always_inline, step, .{ frame, cursor }) catch |err| return exitFromError(FrameType.Error, err);
+            const next = @call(.always_inline, step, .{ frame, cursor }) catch |err| {
+                return exitFromError(FrameType.Error, err);
+            };
             const next_sp = frame.stack.stack_ptr;
             const tos = toLimbs(FrameType.WordType, next_sp[0]);
-            return @call(tail_mod, next[0].opcode_handler, .{ frame, next, next_sp, frame.gas_remaining, tos[0], tos[1], tos[2], tos[3] });
+            return @call(
+                tail_mod,
+                next[0].opcode_handler,
+                .{ frame, next, next_sp, frame.gas_remaining, tos[0], tos[1], tos[2], tos[3] },
+            );
         }
     }.handler;
 }
@@ -272,7 +282,8 @@ pub fn Native(comptime FrameType: type) type {
 
             /// Number of items on the stack.
             pub inline fn size(self: *const StackView, frame: *const FrameType) usize {
-                const base = @intFromPtr(frame.stack.buf_ptr) + @as(usize, FrameType.Stack.stack_capacity) * @sizeOf(Word);
+                const cap_bytes = @as(usize, FrameType.Stack.stack_capacity) * @sizeOf(Word);
+                const base = @intFromPtr(frame.stack.buf_ptr) + cap_bytes;
                 return (base - @intFromPtr(self.sp)) / @sizeOf(Word);
             }
         };
@@ -287,14 +298,26 @@ pub fn Native(comptime FrameType: type) type {
         }
 
         /// Run the pre-instruction hooks. Compiles to nothing in untraced builds.
-        pub inline fn before(frame: *FrameType, comptime opcode: UnifiedOpcode, cursor: [*]const Item, s: StackView, gas: Gas) void {
+        pub inline fn before(
+            frame: *FrameType,
+            comptime opcode: UnifiedOpcode,
+            cursor: [*]const Item,
+            s: StackView,
+            gas: Gas,
+        ) void {
             if (comptime !traced) return;
             flush(frame, s, gas);
             frame.beforeInstruction(opcode, cursor);
         }
 
         /// Continue with the handler that follows `opcode` and its metadata.
-        pub inline fn next(frame: *FrameType, comptime opcode: UnifiedOpcode, cursor: [*]const Item, s: StackView, gas: Gas) ExitCode {
+        pub inline fn next(
+            frame: *FrameType,
+            comptime opcode: UnifiedOpcode,
+            cursor: [*]const Item,
+            s: StackView,
+            gas: Gas,
+        ) ExitCode {
             const op_data = dispatch_opcode_data.getOpData(opcode, FrameType.Dispatch, Item, cursor);
             const target = op_data.next_cursor.cursor;
             if (comptime traced) {
@@ -302,11 +325,21 @@ pub fn Native(comptime FrameType: type) type {
                 frame.afterInstruction(opcode, op_data.next_handler, target);
             }
             const tos = toLimbs(Word, s.tos);
-            return @call(tail_mod, op_data.next_handler, .{ frame, target, s.sp, gas, tos[0], tos[1], tos[2], tos[3] });
+            return @call(
+                tail_mod,
+                op_data.next_handler,
+                .{ frame, target, s.sp, gas, tos[0], tos[1], tos[2], tos[3] },
+            );
         }
 
         /// Continue with the handler at `target`.
-        pub inline fn jump(frame: *FrameType, comptime opcode: UnifiedOpcode, target: [*]const Item, s: StackView, gas: Gas) ExitCode {
+        pub inline fn jump(
+            frame: *FrameType,
+            comptime opcode: UnifiedOpcode,
+            target: [*]const Item,
+            s: StackView,
+            gas: Gas,
+        ) ExitCode {
             const handler = target[0].opcode_handler;
             if (comptime traced) {
                 flush(frame, s, gas);
@@ -338,12 +371,18 @@ pub fn Native(comptime FrameType: type) type {
                     : [_] "={x16}" (-> FrameType.OpcodeHandler),
                     : [_] "{x16}" (handler),
                 ),
-                else => comptime unreachable,
+                else => @compileError("preserve_none outlined() requires x86_64 or aarch64"),
             };
         }
 
         /// Stop executing the frame with `code`.
-        pub inline fn exit(frame: *FrameType, comptime opcode: UnifiedOpcode, s: StackView, gas: Gas, code: ExitCode) ExitCode {
+        pub inline fn exit(
+            frame: *FrameType,
+            comptime opcode: UnifiedOpcode,
+            s: StackView,
+            gas: Gas,
+            code: ExitCode,
+        ) ExitCode {
             flush(frame, s, gas);
             frame.afterComplete(opcode);
             return code;
@@ -357,7 +396,11 @@ pub fn Native(comptime FrameType: type) type {
 pub fn enter(comptime FrameType: type, frame: *FrameType, cursor: [*]const FrameType.Dispatch.Item) ExitCode {
     const sp = frame.stack.stack_ptr;
     const tos = toLimbs(FrameType.WordType, sp[0]);
-    return @call(.never_inline, cursor[0].opcode_handler, .{ frame, cursor, sp, frame.gas_remaining, tos[0], tos[1], tos[2], tos[3] });
+    return @call(
+        .never_inline,
+        cursor[0].opcode_handler,
+        .{ frame, cursor, sp, frame.gas_remaining, tos[0], tos[1], tos[2], tos[3] },
+    );
 }
 
 test {

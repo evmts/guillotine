@@ -17,7 +17,16 @@ pub fn Handlers(FrameType: type) type {
         const N = handler_abi.Native(FrameType);
 
         /// POP opcode (0x50) - Remove item from stack.
-        pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn pop(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .POP, cursor, s, gas);
             _ = s.pop_unsafe();
@@ -25,7 +34,16 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
-        pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn push0(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .PUSH0, cursor, s, gas);
             s.push_unsafe(0);
@@ -35,9 +53,19 @@ pub fn Handlers(FrameType: type) type {
         /// Generate a push handler for PUSH1-PUSH32
         pub fn generatePushHandler(comptime push_n: u8) FrameType.OpcodeHandler {
             if (push_n == 0 or push_n > 32) @compileError("Only PUSH1 to PUSH32 is supported");
-            const opcode: UnifiedOpcode = @fromBackingInt(@intCast(@backingInt(UnifiedOpcode.PUSH1) + @as(u16, push_n) - 1));
+            const push_base = @backingInt(UnifiedOpcode.PUSH1);
+            const opcode: UnifiedOpcode = @fromBackingInt(@intCast(push_base + @as(u16, push_n) - 1));
             return &struct {
-                pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+                pub fn pushHandler(
+                    self: *FrameType,
+                    cursor: [*]const Dispatch.Item,
+                    sp: [*]WordType,
+                    gas: FrameType.GasType,
+                    t0: u64,
+                    t1: u64,
+                    t2: u64,
+                    t3: u64,
+                ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
                     var s = N.StackView.init(sp, t0, t1, t2, t3);
                     N.before(self, opcode, cursor, s, gas);
                     // PUSH1-PUSH8 carry one inline 64-bit limb. PUSH9-PUSH32 carry two,
@@ -57,9 +85,19 @@ pub fn Handlers(FrameType: type) type {
         /// Generate a dup handler for DUP1-DUP16
         pub fn generateDupHandler(comptime dup_n: u8) FrameType.OpcodeHandler {
             if (dup_n == 0 or dup_n > 16) @compileError("Only DUP1 to DUP16 is supported");
-            const opcode: UnifiedOpcode = @fromBackingInt(@intCast(@backingInt(UnifiedOpcode.DUP1) + @as(u16, dup_n) - 1));
+            const dup_base = @backingInt(UnifiedOpcode.DUP1);
+            const opcode: UnifiedOpcode = @fromBackingInt(@intCast(dup_base + @as(u16, dup_n) - 1));
             return &struct {
-                pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+                pub fn dupHandler(
+                    self: *FrameType,
+                    cursor: [*]const Dispatch.Item,
+                    sp: [*]WordType,
+                    gas: FrameType.GasType,
+                    t0: u64,
+                    t1: u64,
+                    t2: u64,
+                    t3: u64,
+                ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
                     var s = N.StackView.init(sp, t0, t1, t2, t3);
                     N.before(self, opcode, cursor, s, gas);
                     s.dup_n_unsafe(dup_n);
@@ -71,9 +109,19 @@ pub fn Handlers(FrameType: type) type {
         /// Generate a swap handler for SWAP1-SWAP16
         pub fn generateSwapHandler(comptime swap_n: u8) FrameType.OpcodeHandler {
             if (swap_n == 0 or swap_n > 16) @compileError("Only SWAP1 to SWAP16 is supported");
-            const opcode: UnifiedOpcode = @fromBackingInt(@intCast(@backingInt(UnifiedOpcode.SWAP1) + @as(u16, swap_n) - 1));
+            const swap_base = @backingInt(UnifiedOpcode.SWAP1);
+            const opcode: UnifiedOpcode = @fromBackingInt(@intCast(swap_base + @as(u16, swap_n) - 1));
             return &struct {
-                pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+                pub fn swapHandler(
+                    self: *FrameType,
+                    cursor: [*]const Dispatch.Item,
+                    sp: [*]WordType,
+                    gas: FrameType.GasType,
+                    t0: u64,
+                    t1: u64,
+                    t2: u64,
+                    t3: u64,
+                ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
                     var s = N.StackView.init(sp, t0, t1, t2, t3);
                     N.before(self, opcode, cursor, s, gas);
                     s.swap_n_unsafe(swap_n);

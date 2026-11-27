@@ -185,7 +185,12 @@ pub const AuthorizationProcessor = struct {
     }
 
     /// Steps 1-9 for one tuple, including signature recovery.
-    fn processTuple(self: *AuthorizationProcessor, auth: Authorization, per_tuple_cost: i64, refund_per_existing: i64) AuthorizationError!AuthorizationResult {
+    fn processTuple(
+        self: *AuthorizationProcessor,
+        auth: Authorization,
+        per_tuple_cost: i64,
+        refund_per_existing: i64,
+    ) AuthorizationError!AuthorizationResult {
         var result = AuthorizationResult{ .success = false, .gas_used = per_tuple_cost };
         checkTupleFields(self.chain_id, auth) catch |err| {
             result.error_type = err;

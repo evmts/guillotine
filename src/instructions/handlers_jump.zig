@@ -26,7 +26,16 @@ pub fn Handlers(FrameType: type) type {
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn jump(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMP, cursor, s, gas);
             if (s.size(self) < 1) return N.exit(self, .JUMP, s, gas, .stack_underflow);
@@ -38,7 +47,16 @@ pub fn Handlers(FrameType: type) type {
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
-        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn jumpi(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .JUMPI, cursor, s, gas);
             if (s.size(self) < 2) return N.exit(self, .JUMPI, s, gas, .stack_underflow);
@@ -53,7 +71,13 @@ pub fn Handlers(FrameType: type) type {
         /// shot. Every instruction in the block then runs without gas or bounds checks.
         /// Shared by JUMPDEST and BLOCK_BEGIN. The cursor points to: [0] = handler,
         /// [1] = jump_dest metadata for the block.
-        pub inline fn enterBlock(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, cursor: [*]const Dispatch.Item, s: N.StackView, gas_before: FrameType.GasType) handler_abi.ExitCode {
+        pub inline fn enterBlock(
+            self: *FrameType,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            cursor: [*]const Dispatch.Item,
+            s: N.StackView,
+            gas_before: FrameType.GasType,
+        ) handler_abi.ExitCode {
             N.before(self, opcode, cursor, s, gas_before);
             const meta = cursor[1].jump_dest;
 
@@ -83,7 +107,16 @@ pub fn Handlers(FrameType: type) type {
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
         /// It is also the gas consumption and stack validation point for its basic block.
-        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+        pub fn jumpdest(
+            self: *FrameType,
+            cursor: [*]const Dispatch.Item,
+            sp: [*]WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             return enterBlock(self, .JUMPDEST, cursor, N.StackView.init(sp, t0, t1, t2, t3), gas);
         }
     };

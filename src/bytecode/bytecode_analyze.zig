@@ -148,7 +148,9 @@ pub fn bytecodeAnalyze(
                         }
                     } else if (jump_pc + 1 < code.len) {
                         const next_next_opcode = code[jump_pc];
-                        if (next_next_opcode >= @backingInt(Opcode.PUSH1) and next_next_opcode <= @backingInt(Opcode.PUSH32)) {
+                        const is_push = next_next_opcode >= @backingInt(Opcode.PUSH1) and
+                            next_next_opcode <= @backingInt(Opcode.PUSH32);
+                        if (is_push) {
                             const push2_size = next_next_opcode - @backingInt(Opcode.PUSH1) + 1;
                             const jumpi_pc = jump_pc + 1 + push2_size;
 

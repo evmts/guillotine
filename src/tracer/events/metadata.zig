@@ -67,3 +67,13 @@ pub const EventFilter = struct {
     addresses: ?[]const primitives.Address.Address = null,
     opcodes: ?[]const @import("../../opcodes/opcode.zig").UnifiedOpcode = null,
 };
+
+test "EventFilter defaults include all core trace streams" {
+    const filter = EventFilter{};
+    try std.testing.expect(filter.include_vm_steps);
+    try std.testing.expect(filter.include_storage);
+    try std.testing.expect(filter.include_memory);
+    try std.testing.expect(filter.include_stack);
+    try std.testing.expect(filter.min_depth == null);
+    try std.testing.expect(filter.max_depth == null);
+}

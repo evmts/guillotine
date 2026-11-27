@@ -88,7 +88,8 @@ pub fn Memory(config: MemoryConfig) type {
         }
 
         pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: u32) !Self {
-            // For backward compatibility on owned memory types, we just ignore ownership and return borrowed-like behavior
+            // For backward compatibility on owned memory types, ignore ownership
+            // and return borrowed-like behavior.
             return Self{
                 .checkpoint = checkpoint,
                 .buffer_ptr = buffer_ptr,
@@ -103,9 +104,17 @@ pub fn Memory(config: MemoryConfig) type {
             // No-op for borrowed memory
         }
 
-        pub fn init_child(self: *Self) !Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false }) {
+        pub fn init_child(self: *Self) !Memory(.{
+            .initial_capacity = config.initial_capacity,
+            .memory_limit = config.memory_limit,
+            .owned = false,
+        }) {
             // Children are always borrowed memory types
-            const BorrowedMemType = Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false });
+            const BorrowedMemType = Memory(.{
+                .initial_capacity = config.initial_capacity,
+                .memory_limit = config.memory_limit,
+                .owned = false,
+            });
             return BorrowedMemType{
                 .checkpoint = std.math.cast(u32, self.buffer_ptr.*.items.len) orelse return MemoryError.MemoryOverflow,
                 .buffer_ptr = self.buffer_ptr,

@@ -95,7 +95,9 @@ pub fn DatabaseProxy(comptime mode: ProxyMode, comptime DatabaseType: type) type
         }
 
         fn require_flushed(comptime operation: []const u8) void {
-            if (mode == .lru) @compileError(operation ++ " sees the inner database without buffered writes; call flush first");
+            if (mode == .lru) {
+                @compileError(operation ++ " sees the inner database without buffered writes; call flush first");
+            }
         }
 
         // Account operations

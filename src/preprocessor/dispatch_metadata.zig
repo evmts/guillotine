@@ -40,8 +40,9 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         /// This avoids the binary search in findJumpTarget
         pub const JumpStaticMetadata = extern struct { dispatch: *const anyopaque };
 
-        /// Our instruction set does not match the actual bytecode 1 to 1 if we do fusions so we don't actually track pc during execution
-        /// Thus we must provide as metadata to avoid the expensive process of mapping back our instruction index to what pc it came from
+        /// Our instruction set does not match bytecode 1-to-1 when fusions are enabled,
+        /// so we do not track PC during execution. Provide PC metadata directly to avoid
+        /// mapping our schedule index back to the original bytecode PC.
         /// Padded to exactly 64 bits so it fits an untagged 8-byte schedule item for every `PcType`.
         pub const PcMetadata = packed struct(u64) {
             value: FrameType.PcType,

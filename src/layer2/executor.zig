@@ -48,7 +48,10 @@ pub const Fee = union(enum) {
     /// Price per gas actually charged: min(max_fee, base_fee + max_priority_fee).
     /// Rejects a cap below the base fee and a tip above the cap
     /// (revm `validate_priority_fee_tx`, geth `ErrTipAboveFeeCap`/`ErrFeeCapTooLow`).
-    pub fn effectiveGasPrice(self: Fee, base_fee: u256) error{ GasPriceBelowBaseFee, PriorityFeeGreaterThanMaxFee }!u256 {
+    pub fn effectiveGasPrice(
+        self: Fee,
+        base_fee: u256,
+    ) error{ GasPriceBelowBaseFee, PriorityFeeGreaterThanMaxFee }!u256 {
         switch (self) {
             .legacy => |price| {
                 if (price < base_fee) return error.GasPriceBelowBaseFee;
@@ -187,7 +190,15 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
     const result = try host.executeFrame(tx);
     // An invalid user transaction must be an error from the host, never a result.
     if (result.invalid) return error.InvalidUserTransactionResult;
-    const settlement = try fees.settle(&attributes, spec, tx.envelope, tx.gas_limit, result.gas_used, tx.base_fee, price);
+    const settlement = try fees.settle(
+        &attributes,
+        spec,
+        tx.envelope,
+        tx.gas_limit,
+        result.gas_used,
+        tx.base_fee,
+        price,
+    );
     try host.credit(tx.sender, settlement.caller_refund);
     try host.credit(coinbase, settlement.sequencer_fee_vault);
     try host.credit(constants.BASE_FEE_VAULT_ADDRESS, settlement.base_fee_vault);
@@ -198,7 +209,14 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
     return result;
 }
 
-pub fn executeBase(host: anytype, info: fees.L1BlockInfo, chain_id: u64, timestamp: u64, tx: Transaction, coinbase: Address) !Result {
+pub fn executeBase(
+    host: anytype,
+    info: fees.L1BlockInfo,
+    chain_id: u64,
+    timestamp: u64,
+    tx: Transaction,
+    coinbase: Address,
+) !Result {
     const chain = @import("base/config.zig").BaseChain.fromChainId(chain_id) orelse return error.UnsupportedChain;
     return execute(host, info, try chain.schedule().specAt(timestamp), tx, coinbase);
 }

@@ -54,7 +54,11 @@ pub fn SafetyCounter(comptime T: type, comptime mode: Mode) type {
             self.count += 1;
             if (self.count >= self.limit) {
                 log.warn("SafetyCounter limit reached: count={d}, limit={d}", .{ self.count, self.limit });
-                log.warn("Either bytecode is executing way more instructions than normal for an EVM contract, or there is a bug in the EVM causing an infinite loop", .{});
+                log.warn(
+                    "Either bytecode is executing way more instructions than normal for an EVM contract, " ++
+                        "or there is a bug in the EVM causing an infinite loop",
+                    .{},
+                );
             }
         }
 

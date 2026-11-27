@@ -218,22 +218,23 @@ pub const Database = struct {
 
     /// Initialize a new database
     pub fn init(allocator: std.mem.Allocator) Database {
+        const load = std.hash_map.default_max_load_percentage;
         return Database{
-            .accounts = std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .accounts = std.HashMap([20]u8, Account, ArrayHashContext, load).init(allocator),
             .storage = SlotStore.init(allocator),
-            .transient_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .transient_storage = std.HashMap(StorageKey, u256, StorageKeyContext, load).init(allocator),
+            .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, load).init(allocator),
             .snapshots = .empty,
             .undo_log = .empty,
-            .storage_slot_counts = std.HashMap([20]u8, usize, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .delegation_targets = std.HashMap([32]u8, [20]u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .storage_slot_counts = std.HashMap([20]u8, usize, ArrayHashContext, load).init(allocator),
+            .delegation_targets = std.HashMap([32]u8, [20]u8, ArrayHashContext, load).init(allocator),
             .next_snapshot_id = 1,
             .allocator = allocator,
             .overlay_active = false,
-            .overlay_accounts = std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .overlay_accounts = std.HashMap([20]u8, ?Account, ArrayHashContext, load).init(allocator),
             .overlay_storage = SlotStore.init(allocator),
-            .overlay_transient = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .overlay_code = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .overlay_transient = std.HashMap(StorageKey, u256, StorageKeyContext, load).init(allocator),
+            .overlay_code = std.HashMap([32]u8, []const u8, ArrayHashContext, load).init(allocator),
         };
     }
 
@@ -242,7 +243,10 @@ pub const Database = struct {
     /// Safety: Zig's HashMap iterator is stable during iteration because we're only
     /// freeing the memory that the value *points to* (the code slice), not modifying
     /// the HashMap entry itself. The HashMap structure remains unchanged.
-    fn freeAllCodeInMap(self: *Database, code_map: *std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage)) void {
+    fn freeAllCodeInMap(
+        self: *Database,
+        code_map: *std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    ) void {
         var it = code_map.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.value_ptr.*);
@@ -911,15 +915,21 @@ pub fn validate_database_implementation(comptime T: type) void {
 
     // Code operations
     if (!@hasDecl(T, "get_code")) @compileError("Database implementation missing get_code method");
-    if (!@hasDecl(T, "get_code_by_address")) @compileError("Database implementation missing get_code_by_address method");
+    if (!@hasDecl(T, "get_code_by_address")) {
+        @compileError("Database implementation missing get_code_by_address method");
+    }
     if (!@hasDecl(T, "set_code")) @compileError("Database implementation missing set_code method");
     if (!@hasDecl(T, "get_code_hash")) @compileError("Database implementation missing get_code_hash method");
 
     // Storage operations
     if (!@hasDecl(T, "get_storage")) @compileError("Database implementation missing get_storage method");
     if (!@hasDecl(T, "set_storage")) @compileError("Database implementation missing set_storage method");
-    if (!@hasDecl(T, "get_transient_storage")) @compileError("Database implementation missing get_transient_storage method");
-    if (!@hasDecl(T, "set_transient_storage")) @compileError("Database implementation missing set_transient_storage method");
+    if (!@hasDecl(T, "get_transient_storage")) {
+        @compileError("Database implementation missing get_transient_storage method");
+    }
+    if (!@hasDecl(T, "set_transient_storage")) {
+        @compileError("Database implementation missing set_transient_storage method");
+    }
 
     // State operations
     if (!@hasDecl(T, "get_state_root")) @compileError("Database implementation missing get_state_root method");
@@ -934,7 +944,9 @@ pub fn validate_database_implementation(comptime T: type) void {
     // Transaction operations
     if (!@hasDecl(T, "begin_transaction")) @compileError("Database implementation missing begin_transaction method");
     if (!@hasDecl(T, "commit_transaction")) @compileError("Database implementation missing commit_transaction method");
-    if (!@hasDecl(T, "rollback_transaction")) @compileError("Database implementation missing rollback_transaction method");
+    if (!@hasDecl(T, "rollback_transaction")) {
+        @compileError("Database implementation missing rollback_transaction method");
+    }
 
     // Cleanup
     if (!@hasDecl(T, "deinit")) @compileError("Database implementation missing deinit method");
