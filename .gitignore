@@ -203,3 +203,6 @@ dist/
 
 # Inputs saved by zig build fuzz-campaign
 .fuzz-crashes/
+
+# Uphill generated reports
+.uphill/

@@ -1,0 +1,103 @@
+# .agents/uphill/uphill.yaml — Continuous metrics and hill climbing for evmts/guillotine.
+# Scripts run from the repository root and append metric lines to $UPHILL_METRICS.
+
+safety:
+  title: Safety & TigerStyle
+  description: Mission-critical EVM safety invariants from CLAUDE.md and TigerStyle across Zig and Rust FFI code.
+  run: bun .agents/uphill/metrics/safety.ts
+  # Every production Zig file must return errors instead of crashing with @panic or unreachable (CLAUDE.md).
+  zig-no-panic:
+    description: Never use @panic or unreachable in production src/**/*.zig; validate inputs and return typed errors instead.
+    weight: 2
+  # Production Zig modules must use tracer.assert() and log.zig, never std.debug.assert or std.debug.print (CLAUDE.md).
+  zig-no-forbidden-debug:
+    description: Never use std.debug.assert or std.debug.print in production src/**/*.zig; use tracer.assert() and log.zig.
+    weight: 2
+  # Production Zig code must never swallow errors (catch {}, catch null, catch &.{}) or leave error.NotImplemented stubs (CLAUDE.md).
+  zig-no-swallowed-errors:
+    description: Never swallow errors with empty catch or return error.NotImplemented stubs in production src/**/*.zig.
+    weight: 2
+  # Runtime invariant assertion density (assert calls per 1,000 production LOC). TigerStyle targets >=2 assertions per function.
+  zig-assertion-density:
+    description: Add tracer.assert() invariant checks to production EVM functions to raise assertion density toward TigerStyle levels.
+    better: higher
+    poor: 0.4
+  # Rust FFI crates (lib/ark, lib/foundry-compilers) must avoid .unwrap()/.expect() which can panic across the C ABI boundary.
+  rust-no-unwrap:
+    description: Replace .unwrap() and .expect() in Rust FFI crates (lib/ark, lib/foundry-compilers) with Result propagation.
+    weight: 1.5
+  # Count of unsafe blocks/functions per Rust FFI file; minimize and isolate the unsafe boundary.
+  rust-unsafe-blocks:
+    description: Minimize and encapsulate unsafe FFI blocks in lib/ark and lib/foundry-compilers behind safe wrappers.
+    poor: 12
+
+style:
+  title: Style & Limits
+  description: TigerStyle structural bounds (70-line functions, 120-char lines) and canonical Zig formatting.
+  run: bun .agents/uphill/metrics/style.ts
+  # Canonical formatting verified by `zig fmt --check src/`.
+  zig-fmt:
+    description: Keep all Zig files in src/ formatted with `zig fmt`.
+    weight: 2
+  # Maximum runtime function length in lines per production Zig file (TigerStyle hard limit: 70 lines).
+  function-length:
+    description: Keep every production Zig runtime function at or below 70 lines (TigerStyle limit); decompose large handlers.
+    poor: 220
+    weight: 2
+  # Line length check per production Zig file (TigerStyle hard limit: 120 columns).
+  line-length:
+    description: Keep production Zig lines at or below 120 characters (TigerStyle limit).
+  # Production Zig files must not accumulate TODO/FIXME/XXX/HACK markers.
+  no-todo-markers:
+    description: Resolve TODO, FIXME, XXX, and HACK markers in production src/**/*.zig instead of deferring work.
+
+footprint:
+  title: Footprint & Modularity
+  description: Source file and subsystem modularity limits to keep the EVM auditable.
+  run: bun .agents/uphill/metrics/footprint.ts
+  # Line count per production Zig file; split monolithic modules (>500 lines) into focused units.
+  file-lines:
+    description: Keep production Zig files focused and under 500 lines; split monolithic modules like src/evm.zig.
+    poor: 1200
+    weight: 2
+  # Source byte footprint per top-level src/ subsystem to surface monolithic growth early.
+  subsystem-size:
+    description: Keep each src/ subsystem compact and modular; split sprawling subsystems into cohesive packages.
+    poor: 300kB
+
+verification:
+  title: Verification & Tests
+  description: Formal verification proofs (Lean 4 & SMT-LIB2) and inline Zig unit test coverage.
+  run: bun .agents/uphill/metrics/verification.ts
+  # Every Lean 4 file in verify/lean/ must be free of `sorry` placeholders and unproved `axiom` declarations.
+  lean-no-sorry:
+    description: Never commit `sorry` or unproved `axiom` declarations in verify/lean/**/*.lean; close every formal proof.
+    weight: 2
+  # Count of proven Lean 4 theorems and lemmas in verify/lean/. Target 100+ proofs covering EVM semantics and fusions.
+  lean-theorems:
+    description: Expand Lean 4 theorem and lemma coverage in verify/lean/ for EVM opcodes, gas rules, and fusion passes.
+    better: higher
+    poor: 40
+  # Count of SMT-LIB2 equivalence and safety proofs in verify/smt/proofs/. Target 80+ proofs.
+  smt-proofs:
+    description: Add SMT-LIB2 equivalence and overflow-safety proofs in verify/smt/proofs/ for arithmetic and fusion optimizations.
+    better: higher
+    poor: 38
+  # Share (%) of production Zig modules in src/ that include inline `test` blocks (CLAUDE.md: "Tests in source files").
+  inline-test-coverage:
+    description: Add inline `test` blocks inside production src/**/*.zig files (CLAUDE.md requires tests in source files).
+    better: higher
+    poor: 72
+    weight: 1.5
+
+documentation:
+  title: Documentation
+  description: Documentation link integrity and subsystem README coverage.
+  run: bun .agents/uphill/metrics/documentation.ts
+  # Every Markdown file in the root and docs/ must have zero broken local file links.
+  broken-links:
+    description: Fix broken relative and root-relative links in root Markdown files and docs/**/*.md.
+    weight: 2
+  # Every production subsystem directory under src/ should carry a README.md explaining invariants and layout.
+  subdir-readme:
+    description: Maintain a concise README.md in every production subsystem directory under src/.

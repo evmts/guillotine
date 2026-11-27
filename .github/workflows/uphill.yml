@@ -1,0 +1,23 @@
+name: Uphill
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  uphill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Run Uphill
+        uses: wevm/uphill@main

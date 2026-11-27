@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Follow the [Uphill rules](.agents/uphill/rules.md), which `uphill rules --write` rewrites from each metric's description: @.agents/uphill/rules.md
+
 ## MISSION CRITICAL SOFTWARE
 
 **⚠️ WARNING: Mission-critical financial infrastructure - bugs cause fund loss.**
