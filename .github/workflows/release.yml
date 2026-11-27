@@ -337,8 +337,7 @@ jobs:
       - name: Setup Node for npm
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 24
       - name: Build, typecheck, test and lint the package
         working-directory: sdks/typescript
         run: |
@@ -351,14 +350,20 @@ jobs:
         working-directory: sdks/typescript
         run: npm pack --dry-run --ignore-scripts
       - name: Publish @tevm/guillotine to npm
-        if: ${{ env.PUBLISH_RELEASE == 'true' && env.HAS_NPM_TOKEN == 'true' }}
+        if: ${{ env.PUBLISH_RELEASE == 'true' }}
         working-directory: sdks/typescript
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public --ignore-scripts
-      - name: NPM_TOKEN is not set
-        if: ${{ env.PUBLISH_RELEASE == 'true' && env.HAS_NPM_TOKEN != 'true' }}
-        run: echo "::notice::NPM_TOKEN secret is not set; skipped npm publish of @tevm/guillotine@${VERSION}. The GitHub Release still publishes."
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            npm_config_//registry.npmjs.org/:_authToken="$NPM_TOKEN" \
+              npm publish --registry=https://registry.npmjs.org --provenance --access public --ignore-scripts
+          else
+            # Pure npm OIDC Trusted Publishing (requires Node 24 / npm >= 11.5.1 and no blank _authToken in .npmrc).
+            NPM_CONFIG_USERCONFIG=/dev/null env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
+              npm publish --registry=https://registry.npmjs.org --provenance --access public --ignore-scripts
+          fi
 
   docs-publish:
     name: Build & Publish Docs, Audit & Wiki
