@@ -31,11 +31,9 @@ Verified against `src/evm_config.zig`.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `eips` | `Eips{ .hardfork = Hardfork.DEFAULT }` (`OSAKA`) | Which hardfork's rules to implement. `Eips.overrides` turns individual EIPs on or off. |
-| `eip_overrides` | `&.{}` | Declared but not read outside `src/evm_config.zig`. Use `eips.overrides`. |
 | `max_call_depth` | `1024` | Call-stack depth limit (spec value). |
 | `max_bytecode_size` | `24576` | EIP-170 contract size cap. |
 | `max_initcode_size` | `49152` | EIP-3860 initcode cap. |
-| `max_input_size` | `131072` | Declared but not read outside tests. `CallParams.validate` applies a fixed 4 MiB input cap. |
 | `block_gas_limit` | `30_000_000` | Ceiling used for validation. |
 | `enable_beacon_roots` | `true` | EIP-4788 beacon-root system call. |
 | `enable_historical_block_hashes` | `true` | EIP-2935 historical hashes. |
@@ -52,8 +50,7 @@ Verified against `src/evm_config.zig`.
 | `stack_size` | `1024` | Stack slots. Smaller stacks shrink the frame. |
 | `memory_initial_capacity` | `4096` | Bytes pre-allocated per frame's memory. |
 | `memory_limit` | `0xFFFFFF` | 16 MiB per-frame memory ceiling. |
-| `arena_capacity_limit` | `64 * 1024 * 1024` | Per-call scratch arena ceiling. |
-| `arena_growth_factor` | `150` | Arena growth, as a percentage. |
+| `arena_capacity_limit` | `64 * 1024 * 1024` | Most scratch-arena capacity kept between calls. One call may use more; the arena is trimmed afterwards. |
 | `loop_quota` | `1_000_000` in Debug/ReleaseSafe, `null` otherwise | Analysis-loop safety bound. |
 | `WordType` | `u256` | EVM word type. |
 
@@ -61,8 +58,8 @@ Verified against `src/evm_config.zig`.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `disable_gas_checks` | `false` | Execute without metering gas. |
-| `disable_balance_checks` | `false` | Skip balance sufficiency checks. |
+| `disable_gas_checks` | `false` | Skip the fee-cap and calldata-floor admission checks. In Debug builds the interpreter also charges no gas, so gas no longer bounds execution; other build modes always charge. |
+| `disable_balance_checks` | `false` | Skip balance sufficiency checks, for `CALL` and `CREATE` alike. An underfunded sender is debited down to zero; nothing wraps or traps. |
 
 :::danger
 `disable_gas_checks` and `disable_balance_checks` produce a machine that is **not
@@ -75,9 +72,7 @@ bug. Never ship them.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `DatabaseType` | `Database` (`src/storage/database.zig`) | State backend type. |
-| `opcode_overrides` | `&.{}` | Declared but not applied: `frame_config()` passes `&.{}` and `Frame` builds its handler table with `getOpcodeHandlers(Self, &.{})` (`src/frame/frame.zig`). |
 | `precompile_overrides` | `&.{}` | Extra or replacement precompiles: `{ address, execute }` pairs, checked before the fork's standard set (`executePrecompileOverride` in `src/evm.zig`). Ignored when `enable_precompiles` is `false`. |
-| `block_info_config` | `.{ .DifficultyType = u64, .BaseFeeType = u64, .use_compact_types = false }` | Compact vs full block-info field widths. |
 | `tracer_config` | `TracerConfig.disabled` | See [Tracing](/guides/tracing). |
 
 ## Recipes
@@ -141,9 +136,9 @@ through the field type, for example
 `EvmConfig - precompile overrides` test in `src/evm_config.zig` shows a complete
 override.
 
-`opcode_overrides` is declared but not applied: `Frame` builds its handler table
-with `getOpcodeHandlers(Self, &.{})` (`src/frame/frame.zig`), so setting it
-compiles and changes nothing.
+`EvmConfig` has no opcode-override field: `Frame` builds its handler table with
+`getOpcodeHandlers(Self, &.{})` (`src/frame/frame.zig`). A config that names a
+field the EVM does not read is a compile error, never a silent no-op.
 
 ## Build flags configure `DefaultEvm` only
 

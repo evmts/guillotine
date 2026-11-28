@@ -45,11 +45,16 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
 
         /// Number of buckets for `jumpdest_count` JUMPDESTs: a power of two that
         /// leaves at least one third of the buckets unused, so every probe sequence
-        /// ends at an unused bucket.
-        pub fn bucketCapacity(jumpdest_count: usize) usize {
+        /// ends at an unused bucket. Returns `error.OutOfMemory` on `usize` overflow.
+        pub fn bucketCapacityChecked(jumpdest_count: usize) std.mem.Allocator.Error!usize {
             if (jumpdest_count == 0) return 0;
-            const needed = @max(jumpdest_count + jumpdest_count / 2 + 1, 4);
-            return std.math.ceilPowerOfTwoAssert(usize, needed);
+            const with_slack = std.math.add(usize, jumpdest_count, jumpdest_count / 2) catch return error.OutOfMemory;
+            const needed = @max(std.math.add(usize, with_slack, 1) catch return error.OutOfMemory, 4);
+            return std.math.ceilPowerOfTwo(usize, needed) catch return error.OutOfMemory;
+        }
+
+        pub fn bucketCapacity(jumpdest_count: usize) usize {
+            return bucketCapacityChecked(jumpdest_count) catch std.math.maxInt(usize);
         }
 
         /// An empty table over `buckets`, whose length is `bucketCapacity` of the
@@ -68,7 +73,8 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
 
         /// Allocate a table for `jumpdest_count` JUMPDESTs.
         pub fn create(allocator: std.mem.Allocator, jumpdest_count: usize, schedule_base: CursorPtr) std.mem.Allocator.Error!Table {
-            const buckets = try allocator.alloc(Bucket, bucketCapacity(jumpdest_count));
+            const cap = try bucketCapacityChecked(jumpdest_count);
+            const buckets = try allocator.alloc(Bucket, cap);
             return init(buckets, schedule_base);
         }
 
@@ -221,6 +227,37 @@ test "JumpTable sparse table: PCs far apart and colliding" {
         try testing.expectEqual(@as(?u32, @intCast(index)), table.findOffset(pc));
         try testing.expect(table.findOffset(pc + 1) == null or std.mem.indexOfScalar(u32, &pcs, pc + 1) != null);
     }
+}
+
+test "W3-12: lookups of PCs near 2^32 need no index arithmetic wider than 32 bits" {
+    // The interpolation search this table replaced computed `(pc - first) * len / range`
+    // in `usize`: with these PCs the product passes 2^32 and wrapped on a 32-bit host.
+    // The hash probe multiplies in `u32` with `*%` and shifts, so its bucket index is
+    // below the bucket count for every key (`verified_ops.jumpTableInterpolationIndex`
+    // states the same bound for the interpolation form).
+    var schedule: [4]u64 = @splat(0);
+    const pcs = [_]u32{ 0x10, 0x8000_0000, 0xFFFF_0010, std.math.maxInt(u32) - 1 };
+    var table = try TestTable.create(testing.allocator, pcs.len, &schedule);
+    defer table.deinit(testing.allocator);
+    for (pcs, 0..) |pc, index| try table.insert(pc, index);
+    for (pcs, 0..) |pc, index| try testing.expectEqual(@as(?u32, @intCast(index)), table.findOffset(pc));
+
+    const misses = [_]u32{
+        0x11,
+        0x7FFF_FFFF,
+        0x8000_0001,
+        0xFFFF_000F,
+        0xFFFF_0011,
+        std.math.maxInt(u32) - 2,
+        std.math.maxInt(u32),
+    };
+    for (misses) |pc| try testing.expect(table.findJumpTarget(pc) == null);
+
+    var prng = std.Random.DefaultPrng.init(0x5733_1200);
+    const random = prng.random();
+    for (0..10_000) |_| try testing.expect(table.slot(random.int(u32)) < table.buckets.len);
+    try testing.expect(table.slot(0) < table.buckets.len);
+    try testing.expect(table.slot(std.math.maxInt(u32)) < table.buckets.len);
 }
 
 test "JumpTable rejects duplicates, overflow and the reserved PC" {

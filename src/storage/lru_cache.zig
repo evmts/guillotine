@@ -47,6 +47,7 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             const nodes = try allocator.alloc(Node, config.capacity);
+            errdefer allocator.free(nodes);
 
             // Initialize all nodes as free
             for (nodes, 0..) |*node, i| {
@@ -60,6 +61,7 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
             }
 
             var map = std.HashMap(K, usize, HashContextType, 80).init(allocator);
+            errdefer map.deinit();
             try map.ensureTotalCapacity(@intCast(config.capacity));
 
             return Self{
@@ -622,4 +624,27 @@ test "LruCache - put reports corruption instead of crashing when no node can be 
     try testing.expectError(Cache.Error.LruCacheCorrupted, cache.put(1, 10));
     try testing.expectEqual(@as(usize, 0), cache.getSize());
     try testing.expect(!cache.contains(1));
+}
+
+test "W3-16: LruCache.init frees the node array when the index map cannot be allocated" {
+    const Cache = LruCache(u32, u32, .{ .capacity = 8 });
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        if (Cache.init(failing.allocator())) |created| {
+            var cache = created;
+            defer cache.deinit();
+            try std.testing.expectEqual(null, try cache.put(1, 2));
+            try std.testing.expectEqual(@as(?u32, 2), cache.get(1));
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            failures += 1;
+            // Every byte allocated before the failure was released again.
+            try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+        }
+    }
+    // Both the node array and the index map were made to fail at least once.
+    try std.testing.expect(failures >= 2);
 }

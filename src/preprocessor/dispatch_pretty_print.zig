@@ -485,7 +485,7 @@ pub fn getDebugInfo(
     // Iterate through bytecode and validate against schedule
     while (true) {
         const bytecode_pc = bytecode_iter.pc;
-        const maybe_op = bytecode_iter.next();
+        const maybe_op = try bytecode_iter.next();
         if (maybe_op == null) break;
         const op_data = maybe_op.?;
 

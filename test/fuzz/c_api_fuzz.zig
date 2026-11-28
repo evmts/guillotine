@@ -17,6 +17,11 @@
 //! 5. `evm_bytecode_pretty_print` returns cleanly for bytecode of any content and length.
 //! 6. Handle lifetime: destroyed handles are rejected, destroy and cleanup race safely
 //!    with calls on other threads, and a result that cannot be built rolls its call back.
+//! 7. The standalone bytecode API (`evm_bytecode_*`) returns an error value for every
+//!    NULL handle, buffer and out-parameter, and writes nothing through them.
+//! 8. `guillotine_simulate` on a tracing handle commits nothing, and a trace capture
+//!    budget (`guillotine_set_trace_limits`) truncates the trace, flags it, and never
+//!    changes the execution result.
 
 const std = @import("std");
 const evm = @import("evm");
@@ -52,6 +57,8 @@ extern "c" fn evm_bytecode_get_length(handle: ?*const anyopaque) usize;
 extern "c" fn evm_bytecode_destroy(handle: ?*anyopaque) void;
 extern "c" fn evm_bytecode_pretty_print(data: ?[*]const u8, data_len: usize, buffer: ?[*]u8, buffer_len: usize) usize;
 extern "c" fn guillotine_cleanup() void;
+extern "c" fn guillotine_evm_create_tracing(block_info_ptr: ?*const BlockInfoFFI) ?*EvmHandle;
+extern "c" fn guillotine_set_trace_limits(handle: ?*EvmHandle, max_steps: u64, max_bytes: u64) bool;
 extern "c" fn guillotine_get_last_error() [*:0]const u8;
 
 pub fn fuzzCApiLifecycleAndExecution(_: void, input: []const u8) !void {
@@ -299,6 +306,230 @@ const seed_corpus: []const []const u8 = &.{
     &.{ 5, 4, 0, 0, 0, 0x60, 0x01, 0x60, 0x00, 0xf3 }, // CREATE2
     &.{ 2, 0, 1, 0, 7, 0x60, 0x99, 0x60, 0x00, 0x55, 0x00 }, // DELEGATECALL
 };
+
+/// Every `evm_bytecode_*` entry point with NULL in each pointer position, on no
+/// handle and on a live one. Nothing may be written through a NULL or past a length.
+pub fn fuzzBytecodeCNullSafety(_: void, input: []const u8) !void {
+    const bc = c_api.bytecode_c;
+    const code = input[0..@min(input.len, 128)];
+    const position: usize = if (input.len > 0) input[input.len - 1] else 0;
+    var scratch: [160]u8 = @splat(0xA5);
+    var dests: [8]u32 = @splat(0xDEAD_BEEF);
+    var count: u32 = 0xDEAD_BEEF;
+
+    // No handle: the error value of every entry point.
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_get_length(null));
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_get_full_length(null));
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_get_data(null, &scratch, scratch.len));
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_get_runtime_data(null, &scratch, scratch.len));
+    try std.testing.expectEqual(@as(u8, 0xFF), bc.evm_bytecode_get_opcode_at(null, position));
+    try std.testing.expectEqual(@as(c_int, 0), bc.evm_bytecode_is_jump_dest(null, position));
+    try std.testing.expectEqual(
+        bc.EVM_BYTECODE_ERROR_NULL_POINTER,
+        bc.evm_bytecode_find_jump_dests(null, &dests, dests.len, &count),
+    );
+    try std.testing.expectEqual(@as(u32, 0), count);
+    try std.testing.expectEqual(
+        bc.EVM_BYTECODE_ERROR_NULL_POINTER,
+        bc.evm_bytecode_find_jump_dests(null, &dests, dests.len, null),
+    );
+    try std.testing.expectEqual(bc.EVM_BYTECODE_ERROR_NULL_POINTER, bc.evm_bytecode_analyze(null, null));
+    bc.evm_bytecode_destroy(null);
+    bc.evm_bytecode_free_analysis(null);
+    try std.testing.expect(bc.evm_bytecode_create(null, code.len + 1) == null);
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_pretty_print(null, code.len + 1, &scratch, scratch.len));
+    if (code.len > 0) {
+        try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_pretty_print(code.ptr, code.len, null, scratch.len));
+    }
+    for (scratch) |byte| try std.testing.expectEqual(@as(u8, 0xA5), byte);
+    for (dests) |dest| try std.testing.expectEqual(@as(u32, 0xDEAD_BEEF), dest);
+
+    // A live handle with NULL buffers and out-parameters.
+    const handle = bc.evm_bytecode_create(code.ptr, code.len) orelse return;
+    defer bc.evm_bytecode_destroy(handle);
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_get_data(handle, null, scratch.len));
+    try std.testing.expectEqual(@as(usize, 0), bc.evm_bytecode_get_runtime_data(handle, null, scratch.len));
+    count = 0xDEAD_BEEF;
+    try std.testing.expectEqual(
+        bc.EVM_BYTECODE_ERROR_NULL_POINTER,
+        bc.evm_bytecode_find_jump_dests(handle, null, dests.len, &count),
+    );
+    try std.testing.expectEqual(@as(u32, 0), count);
+    try std.testing.expectEqual(bc.EVM_BYTECODE_SUCCESS, bc.evm_bytecode_find_jump_dests(handle, null, 0, &count));
+    try std.testing.expectEqual(
+        bc.EVM_BYTECODE_ERROR_NULL_POINTER,
+        bc.evm_bytecode_find_jump_dests(handle, &dests, dests.len, null),
+    );
+    try std.testing.expectEqual(bc.EVM_BYTECODE_ERROR_NULL_POINTER, bc.evm_bytecode_analyze(handle, null));
+    for (dests) |dest| try std.testing.expectEqual(@as(u32, 0xDEAD_BEEF), dest);
+
+    // The same handle with real buffers: lengths bound every copy.
+    try std.testing.expectEqual(code.len, bc.evm_bytecode_get_full_length(handle));
+    const length = bc.evm_bytecode_get_length(handle);
+    try std.testing.expect(length <= code.len);
+    const short = @min(code.len, position % 9);
+    try std.testing.expectEqual(short, bc.evm_bytecode_get_data(handle, &scratch, short));
+    try std.testing.expectEqualSlices(u8, code[0..short], scratch[0..short]);
+    for (scratch[short..]) |byte| try std.testing.expectEqual(@as(u8, 0xA5), byte);
+    try std.testing.expectEqual(@as(u8, 0xFF), bc.evm_bytecode_get_opcode_at(handle, length + position));
+    try std.testing.expectEqual(@as(c_int, 0), bc.evm_bytecode_is_jump_dest(handle, length + position));
+
+    try std.testing.expectEqual(bc.EVM_BYTECODE_SUCCESS, bc.evm_bytecode_find_jump_dests(handle, &dests, dests.len, &count));
+    try std.testing.expect(count <= dests.len);
+    for (dests[0..count]) |dest| {
+        try std.testing.expectEqual(@as(c_int, 1), bc.evm_bytecode_is_jump_dest(handle, dest));
+        try std.testing.expectEqual(@as(u8, 0x5b), bc.evm_bytecode_get_opcode_at(handle, dest));
+    }
+
+    var analysis: bc.CBytecodeAnalysis = undefined;
+    if (bc.evm_bytecode_analyze(handle, &analysis) == bc.EVM_BYTECODE_SUCCESS) {
+        try std.testing.expect(analysis.jumpdests_count <= code.len);
+        bc.evm_bytecode_free_analysis(&analysis);
+    }
+}
+
+/// On a tracing handle: `guillotine_simulate` leaves storage as the last committed
+/// call wrote it, and a capture budget shortens the trace to a flagged prefix of the
+/// full one while the success flag, gas and output stay those of the unbounded run.
+pub fn fuzzSimulateIsolationAndTraceBudget(_: void, input: []const u8) !void {
+    if (input.len < 4) return;
+    guillotine_init();
+    var block = BlockInfoFFI{
+        .number = 1,
+        .timestamp = 1,
+        .gas_limit = 30_000_000,
+        .coinbase = @as([19]u8, @splat(0)) ++ [_]u8{0xcc},
+        .base_fee = 0,
+        .chain_id = 1,
+        .difficulty = 0,
+        .prev_randao = @as([32]u8, @splat(0)),
+    };
+    const handle = guillotine_evm_create_tracing(&block) orelse return error.EvmCreateFailed;
+    defer guillotine_evm_destroy(handle);
+
+    const caller = @as([19]u8, @splat(0)) ++ [_]u8{0x11};
+    const target = @as([19]u8, @splat(0)) ++ [_]u8{0x22};
+    // PUSH1 0 CALLDATALOAD PUSH1 1 SSTORE, then `pairs` x (PUSH1 1 POP), then
+    // PUSH1 0x20 PUSH1 0 RETURN.
+    var code_buffer: [64]u8 = undefined;
+    var code_len: usize = 0;
+    for ([_]u8{ 0x60, 0x00, 0x35, 0x60, 0x01, 0x55 }) |byte| {
+        code_buffer[code_len] = byte;
+        code_len += 1;
+    }
+    const pairs: usize = input[0] % 12;
+    for (0..pairs) |_| {
+        for ([_]u8{ 0x60, 0x01, 0x50 }) |byte| {
+            code_buffer[code_len] = byte;
+            code_len += 1;
+        }
+    }
+    for ([_]u8{ 0x60, 0x20, 0x60, 0x00, 0xf3 }) |byte| {
+        code_buffer[code_len] = byte;
+        code_len += 1;
+    }
+    try std.testing.expect(guillotine_set_code(handle, &target, &code_buffer, code_len));
+
+    var committed_word = @as([32]u8, @splat(0));
+    committed_word[31] = 0x07;
+    var simulated_word = @as([32]u8, @splat(0));
+    simulated_word[30] = 0x01;
+    simulated_word[31] = input[1];
+    var params = CallParamsFFI{
+        .caller = caller,
+        .to = target,
+        .value = @as([32]u8, @splat(0)),
+        .input = &committed_word,
+        .input_len = committed_word.len,
+        .gas = 500_000,
+        .call_type = 0,
+        .salt = @as([32]u8, @splat(0)),
+    };
+    var slot = @as([32]u8, @splat(0));
+    slot[31] = 1;
+
+    // The first committed call pays for the fresh slot; later ones repeat its value
+    // and so cost the same as each other.
+    const warm_up = guillotine_call(handle, &params) orelse return error.CallReturnedNull;
+    guillotine_free_result(warm_up);
+    const full = guillotine_call(handle, &params) orelse return error.CallReturnedNull;
+    defer guillotine_free_result(full);
+    try std.testing.expect(full.success);
+    const full_trace = full.trace_json[0..full.trace_json_len];
+    const total_steps = std.mem.count(u8, full_trace, "\"pc\":");
+    try std.testing.expectEqual(@as(usize, 7) + 2 * pairs, total_steps);
+    try std.testing.expect(std.mem.indexOf(u8, full_trace, "\"truncated\":false") != null);
+
+    // A simulation that would store a different word stores nothing.
+    var simulate_params = params;
+    simulate_params.input = &simulated_word;
+    const simulated = guillotine_simulate(handle, &simulate_params) orelse return error.SimulateReturnedNull;
+    try std.testing.expect(simulated.success);
+    guillotine_free_result(simulated);
+    var stored = @as([32]u8, @splat(0xff));
+    try std.testing.expect(guillotine_get_storage(handle, &target, &slot, &stored));
+    try std.testing.expectEqualSlices(u8, &committed_word, &stored);
+
+    // A capture budget chosen by the input.
+    const max_steps: u64 = if (input[2] & 0x80 != 0) c_api.trace_unlimited else input[2] % 40;
+    const max_bytes: u64 = if (input[3] & 0x80 != 0) c_api.trace_unlimited else @as(u64, input[3]) * 64;
+    try std.testing.expect(guillotine_set_trace_limits(handle, max_steps, max_bytes));
+    const cut = guillotine_call(handle, &params) orelse return error.CallReturnedNull;
+    defer guillotine_free_result(cut);
+    try std.testing.expectEqual(full.success, cut.success);
+    try std.testing.expectEqual(full.gas_left, cut.gas_left);
+    try std.testing.expectEqualSlices(u8, full.output[0..full.output_len], cut.output[0..cut.output_len]);
+
+    const cut_trace = cut.trace_json[0..cut.trace_json_len];
+    const kept_steps = std.mem.count(u8, cut_trace, "\"pc\":");
+    const truncated = std.mem.indexOf(u8, cut_trace, "\"truncated\":true") != null;
+    try std.testing.expectEqual(!truncated, std.mem.indexOf(u8, cut_trace, "\"truncated\":false") != null);
+    try std.testing.expect(kept_steps <= total_steps);
+    try std.testing.expect(kept_steps <= max_steps);
+    try std.testing.expectEqual(kept_steps < total_steps, truncated);
+    if (max_bytes == c_api.trace_unlimited) {
+        try std.testing.expectEqual(@min(total_steps, max_steps), kept_steps);
+    }
+    if (!truncated) try std.testing.expectEqualSlices(u8, full_trace, cut_trace);
+    // The kept steps are a prefix of the full capture.
+    const logs_end = std.mem.lastIndexOf(u8, cut_trace, "],\"truncated\"") orelse return error.TraceMalformed;
+    try std.testing.expect(std.mem.startsWith(u8, full_trace, cut_trace[0..logs_end]));
+
+    // The budget is a setting of the handle, not state: storage is as committed.
+    try std.testing.expect(guillotine_get_storage(handle, &target, &slot, &stored));
+    try std.testing.expectEqualSlices(u8, &committed_word, &stored);
+}
+
+const bytecode_null_corpus: []const []const u8 = &.{
+    &.{},
+    &.{0x00},
+    &.{ 0x5b, 0x5b, 0x00, 0x01 },
+    &.{ 0x60, 0x5b, 0x5b, 0x00, 0x07 },
+    &.{ 0x7f, 0x5b, 0x00 }, // truncated PUSH32
+    &.{ 0x5b, 0x60, 0x01, 0x60, 0x08, 0x57, 0x00, 0x00, 0x5b, 0x00, 0xff },
+    &.{ 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x5b, 0x02 }, // more JUMPDESTs than the buffer holds
+};
+
+const trace_budget_corpus: []const []const u8 = &.{
+    &.{ 0, 0, 0x80, 0x80 }, // unlimited
+    &.{ 0, 1, 0, 0x80 }, // max_steps 0
+    &.{ 3, 2, 1, 0x80 }, // max_steps 1
+    &.{ 3, 3, 12, 0x80 }, // one step short of the whole run
+    &.{ 3, 4, 13, 0x80 }, // exactly the whole run
+    &.{ 3, 5, 39, 0x80 }, // above the whole run
+    &.{ 5, 6, 0x80, 0 }, // max_bytes 0
+    &.{ 5, 7, 0x80, 1 }, // max_bytes 64
+    &.{ 11, 8, 0x80, 0x7f }, // max_bytes 8128
+    &.{ 11, 9, 7, 3 }, // both bounds
+};
+
+test "fuzz evm_bytecode_* C API with NULL handles, buffers and out-parameters" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBytecodeCNullSafety), .{ .corpus = bytecode_null_corpus });
+}
+
+test "fuzz guillotine_simulate isolation and bounded trace capture on a tracing handle" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSimulateIsolationAndTraceBudget), .{ .corpus = trace_budget_corpus });
+}
 
 test "fuzz C FFI boundary lifecycle, invalid call types, simulate isolation, and execution" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCApiLifecycleAndExecution), .{ .corpus = seed_corpus });

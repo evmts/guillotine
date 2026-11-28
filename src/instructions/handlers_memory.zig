@@ -102,7 +102,10 @@ pub fn Handlers(FrameType: type) type {
                 if (!verified_ops.checkMemoryBoundsFast(offset, word_size, MEMORY_LIMIT)) break :grown;
                 const end: usize = @as(usize, @truncate(offset)) + word_size;
                 const cost = self.memory.get_expansion_cost(end);
-                const gas_after = verified_ops.chargeGasChecked(FrameType.GasType, gas, cost) orelse break :grown;
+                const gas_after = if (comptime FrameType.gas_checks_disabled)
+                    gas
+                else
+                    verified_ops.chargeGasChecked(FrameType.GasType, gas, cost) orelse break :grown;
                 // A failed growth leaves memory as it was; the general handler then
                 // fails the same way and reports it.
                 self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), end) catch break :grown;

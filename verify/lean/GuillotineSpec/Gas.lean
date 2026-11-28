@@ -209,8 +209,9 @@ def initcodeWordCost (f : Fork) (initLen : Nat) : Nat :=
 /-- Gas of the CREATE opcode before memory expansion and the forwarded gas. -/
 def createGas (f : Fork) (initLen : Nat) : Nat := createGasBase + initcodeWordCost f initLen
 
-/-- EIP-3860 initcode size limit, EIP-170 code size limit before Shanghai. -/
-def initcodeSizeLimit (f : Fork) : Nat := if f.atLeast .shanghai then 0xC000 else 0x6000
+/-- EIP-3860 initcode size limit. `none` before Shanghai: there is no limit on init code
+    then (the EIP-170 limit applies to deployed runtime code, not to init code). -/
+def initcodeSizeLimit (f : Fork) : Option Nat := if f.atLeast .shanghai then some 0xC000 else none
 
 /-- Total gas of SELFDESTRUCT. -/
 def selfdestructGas (f : Fork) (isCold hasBalance targetExists targetDead : Bool) : Nat :=

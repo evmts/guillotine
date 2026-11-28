@@ -117,7 +117,8 @@ pub const BeaconRootsContract = struct {
     ///   empty code changes nothing.
     /// - code == BEACON_ROOTS_CODE: writes `timestamp` and the root.
     /// - any other code: `error.NonCanonicalSystemContractCode`, nothing written.
-    /// Database errors propagate unchanged.
+    /// Database errors propagate unchanged, and the update is all or nothing: an
+    /// error leaves both slots as they were.
     pub fn processBeaconRootUpdate(
         database: anytype,
         block_info: *const BlockInfo,
@@ -132,12 +133,18 @@ pub const BeaconRootsContract = struct {
 
         const timestamp = block_info.timestamp;
         const slots = computeSlots(timestamp);
+        // The timestamp and the root are one update: a failed second write takes
+        // the first one back. Reverting never allocates and cannot fail.
+        const depth = database.snapshot_depth();
+        _ = try database.create_snapshot();
+        errdefer database.revert_to_depth(depth);
         try database.set_storage(BEACON_ROOTS_ADDRESS.bytes, slots.timestamp_slot, timestamp);
         try database.set_storage(
             BEACON_ROOTS_ADDRESS.bytes,
             slots.root_slot,
             std.mem.readInt(u256, &beacon_root, .big),
         );
+        database.commit_to_depth(depth);
 
         log.debug("BeaconRoots: stored root for timestamp {} at slot {}", .{ timestamp, slots.timestamp_slot });
     }

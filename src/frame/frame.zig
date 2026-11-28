@@ -9,7 +9,6 @@ pub const FrameConfig = @import("frame_config.zig").FrameConfig;
 const Database = @import("../storage/database.zig").Database;
 const Account = @import("../storage/database.zig").Account;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-const bytecode_mod = @import("../bytecode/bytecode.zig");
 const BytecodeConfig = @import("../bytecode/bytecode_config.zig").BytecodeConfig;
 const primitives = @import("voltaire");
 const GasConstants = primitives.GasConstants;
@@ -88,6 +87,13 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         };
         /// The type used to measure gas. Unsigned integer for perf reasons
         pub const GasType = config.GasType();
+        /// True when this frame charges no gas: `config.disable_gas_checks` in a
+        /// Debug build. Every charge of the interpreter (first block, block entry,
+        /// dynamic gas, memory expansion) tests this one constant, so they all
+        /// agree. In every other build mode the flag is ignored and gas is always
+        /// charged: without charges gas no longer bounds execution, which no
+        /// release artifact may allow.
+        pub const gas_checks_disabled = config.disable_gas_checks and builtin.mode == .debug;
         /// The type used to index into bytecode or instructions. It is the bytecode
         /// analyzer's program counter type, sized for the larger of max_bytecode_size and
         /// max_initcode_size, so frame and analyzer always agree and initcode PCs never truncate.
@@ -117,17 +123,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             .stack_size = config.stack_size,
             .WordType = config.WordType,
         });
-        /// The type used to validate and analyze bytecode
-        /// Bytecode in a single pass validates the bytecode and produces an iterator
-        /// Dispatch can use to produce the Dispatch stream
-        /// Note: Now used internally in interpret_with_tracer, not stored on frame
-        const Bytecode = bytecode_mod.Bytecode(.{
-            .max_bytecode_size = config.max_bytecode_size,
-            .max_initcode_size = config.max_initcode_size,
-            .fusions_enabled = true,
-            .hardfork = config.hardfork,
-        });
-
         /// A fixed size array of opcode handlers indexed by opcode number
         /// Note: Tracer is now part of EVM struct, not config - always use non-traced handlers
         pub const opcode_handlers: [256]OpcodeHandler = frame_handlers.getOpcodeHandlers(Self, &.{});
@@ -344,7 +339,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             // The handler chain keeps the stack pointer and gas in registers and writes
             // them back to the frame before it exits. Every exit, including STOP and
             // RETURN, is reported to the EVM as an error value.
-            return handler_abi.errorFromExit(Error, handler_abi.enter(Self, self, self.dispatch.cursor));
+            const status = handler_abi.errorFromExit(Error, handler_abi.enter(Self, self, self.dispatch.cursor));
+            if (comptime handler_abi.hooksEnabled(Self)) (&evm.tracer).onInterpretExit(self, status);
+            return status;
         }
 
         /// Create a deep copy of the frame.
@@ -393,8 +390,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         /// Returns GasOverflow if amount doesn't fit in GasType (extremely rare)
         /// Returns OutOfGas if insufficient gas remaining
         pub fn consumeGasChecked(self: *Self, amount: u32) Error!void {
-            // Skip gas checks if disabled in config
-            if (comptime config.disable_gas_checks) return;
+            if (comptime gas_checks_disabled) return;
 
             if (!self.chargeDynamicGas(amount)) {
                 (&self.getEvm().tracer).debug("Frame.consumeGasChecked: Out of gas, required={}, remaining={}", .{ amount, self.gas_remaining });
@@ -407,7 +403,10 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         /// here: `verified_ops.chargeGasChecked` compares in `u64` before it narrows
         /// `cost`, so a cost wider than `GasType` (a saturated memory expansion, or
         /// 2^31 against an `i32` frame) is an out-of-gas halt and never a trap or a wrap.
+        /// With `gas_checks_disabled` nothing is charged and the charge never fails,
+        /// the same as `consumeGasChecked` and block entry.
         pub inline fn chargeDynamicGas(self: *Self, cost: u64) bool {
+            if (comptime gas_checks_disabled) return true;
             self.gas_remaining = verified_ops.chargeGasChecked(GasType, self.gas_remaining, cost) orelse return false;
             return true;
         }
@@ -481,125 +480,118 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             (&self.getEvm().tracer).after_complete(self, opcode);
         }
 
-        /// Pretty print the frame state for debugging and visualization.
-        /// Shows stack, memory, gas, and other key state information with ANSI colors.
-        pub fn pretty_print(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
-            const Colors = struct {
-                const reset = "\x1b[0m";
-                const bold = "\x1b[1m";
-                const dim = "\x1b[2m";
-                const red = "\x1b[31m";
-                const green = "\x1b[32m";
-                const yellow = "\x1b[33m";
-                const blue = "\x1b[34m";
-                const magenta = "\x1b[35m";
-                const cyan = "\x1b[36m";
-                const white = "\x1b[37m";
-            };
+        const PrintColors = struct {
+            const reset = "\x1b[0m";
+            const bold = "\x1b[1m";
+            const dim = "\x1b[2m";
+            const red = "\x1b[31m";
+            const green = "\x1b[32m";
+            const yellow = "\x1b[33m";
+            const blue = "\x1b[34m";
+            const magenta = "\x1b[35m";
+            const cyan = "\x1b[36m";
+            const white = "\x1b[37m";
+        };
 
-            var output = std.Io.Writer.Allocating.initCapacity(allocator, 4096) catch return Error.AllocationError;
+        /// Bytes of memory and of calldata `pretty_print` shows before eliding the rest.
+        const print_memory_limit: usize = 64;
+        const print_calldata_limit: usize = 32;
+
+        /// Pretty print the frame state for debugging and visualization.
+        /// Shows gas, addresses, value, memory and calldata with ANSI colors.
+        /// Every failure is returned: an allocation failure as `error.OutOfMemory` or
+        /// `error.WriteFailed`, an unreadable memory range as `error.OutOfBounds`.
+        pub fn pretty_print(self: *Self, allocator: std.mem.Allocator) ![]u8 {
+            const C = PrintColors;
+            var output = try std.Io.Writer.Allocating.initCapacity(allocator, 4096);
             defer output.deinit();
             const writer = &output.writer;
 
-            // Header
-            try writer.print("{s}{s}╔══════════════════════════════════════════════════════════════╗{s}\n", .{ Colors.bold, Colors.cyan, Colors.reset });
-            try writer.print("{s}{s}║                       FRAME STATE                               ║{s}\n", .{ Colors.bold, Colors.cyan, Colors.reset });
-            try writer.print("{s}{s}╚══════════════════════════════════════════════════════════════╝{s}\n", .{ Colors.bold, Colors.cyan, Colors.reset });
+            const rule = "══════════════════════════════════════════════════════════════";
+            try writer.print("{s}{s}╔{s}╗{s}\n", .{ C.bold, C.cyan, rule, C.reset });
+            try writer.print("{s}{s}║                       FRAME STATE                               ║{s}\n", .{
+                C.bold, C.cyan, C.reset,
+            });
+            try writer.print("{s}{s}╚{s}╝{s}\n", .{ C.bold, C.cyan, rule, C.reset });
 
-            // Gas information
-            try writer.print("\n{s}⛽ Gas:{s} ", .{ Colors.yellow, Colors.reset });
-            if (self.gas_remaining > 1_000_000) {
-                try writer.print("{s}{d:.2}M{s}", .{ Colors.green, @as(f64, @floatFromInt(self.gas_remaining)) / 1_000_000.0, Colors.reset });
-            } else if (self.gas_remaining > 1_000) {
-                try writer.print("{s}{d:.2}K{s}", .{ Colors.green, @as(f64, @floatFromInt(self.gas_remaining)) / 1_000.0, Colors.reset });
-            } else if (self.gas_remaining > 100) {
-                try writer.print("{s}{d}{s}", .{ Colors.green, self.gas_remaining, Colors.reset });
-            } else {
-                try writer.print("{s}{d}{s}", .{ Colors.red, self.gas_remaining, Colors.reset });
-            }
-            try writer.print("\n", .{});
+            try self.printGas(writer);
 
-            // Contract and caller addresses
-            try writer.print("\n{s}📍 Contract:{s} {s}0x{s}{s}\n", .{ Colors.blue, Colors.reset, Colors.dim, std.fmt.bytesToHex(&self.contract_address.bytes, .lower), Colors.reset });
-            try writer.print("{s}📞 Caller:{s}   {s}0x{s}{s}\n", .{ Colors.blue, Colors.reset, Colors.dim, std.fmt.bytesToHex(&self.caller.bytes, .lower), Colors.reset });
-
-            // Value (if non-zero)
+            const contract_hex = std.fmt.bytesToHex(&self.contract_address.bytes, .lower);
+            const caller_hex = std.fmt.bytesToHex(&self.caller.bytes, .lower);
+            try writer.print("\n{s}📍 Contract:{s} {s}0x{s}{s}\n", .{ C.blue, C.reset, C.dim, contract_hex, C.reset });
+            try writer.print("{s}📞 Caller:{s}   {s}0x{s}{s}\n", .{ C.blue, C.reset, C.dim, caller_hex, C.reset });
             if (self.value != 0) {
-                try writer.print("{s}💰 Value:{s}    {s}{d}{s}\n", .{ Colors.magenta, Colors.reset, Colors.bold, self.value, Colors.reset });
+                try writer.print("{s}💰 Value:{s}    {s}{d}{s}\n", .{ C.magenta, C.reset, C.bold, self.value, C.reset });
             }
 
-            // Stack visualization (simplified for now)
-            try writer.print("\n{s}📚 Stack: (details available in debug mode){s}\n", .{ Colors.cyan, Colors.reset });
+            try self.printMemory(writer);
+            try self.printCalldata(writer);
 
-            // Memory visualization
-            const mem_size = self.memory.size();
-            try writer.print("\n{s}💾 Memory [{d} bytes]:{s}\n", .{ Colors.magenta, mem_size, Colors.reset });
-
-            if (mem_size > 0) {
-                const bytes_to_show = @min(mem_size, 64);
-                const mem_slice = self.memory.get_slice(0, @intCast(bytes_to_show)) catch &[_]u8{};
-
-                // Show memory in hex with ASCII representation
-                var offset: usize = 0;
-                while (offset < bytes_to_show) : (offset += 16) {
-                    const end = @min(offset + 16, bytes_to_show);
-                    const line = mem_slice[offset..end];
-
-                    try writer.print("  {s}0x{x:0>4}:{s} ", .{ Colors.dim, offset, Colors.reset });
-
-                    // Hex bytes
-                    for (line) |byte| {
-                        if (byte == 0) {
-                            try writer.print("{s}00{s} ", .{ Colors.dim, Colors.reset });
-                        } else {
-                            try writer.print("{s}{x:0>2}{s} ", .{ Colors.white, byte, Colors.reset });
-                        }
-                    }
-
-                    // Padding if line is short
-                    var padding_needed = 16 - line.len;
-                    while (padding_needed > 0) : (padding_needed -= 1) {
-                        try writer.print("   ");
-                    }
-
-                    // ASCII representation
-                    try writer.print(" {s}│{s}", .{ Colors.dim, Colors.reset });
-                    for (line) |byte| {
-                        if (byte >= 32 and byte < 127) {
-                            try writer.print("{s}{c}{s}", .{ Colors.green, byte, Colors.reset });
-                        } else if (byte == 0) {
-                            try writer.print("{s}.{s}", .{ Colors.dim, Colors.reset });
-                        } else {
-                            try writer.print("{s}·{s}", .{ Colors.yellow, Colors.reset });
-                        }
-                    }
-                    try writer.print("\n", .{});
-                }
-
-                if (mem_size > bytes_to_show) {
-                    try writer.print("  {s}... {d} more bytes{s}\n", .{ Colors.dim, mem_size - bytes_to_show, Colors.reset });
-                }
-            } else {
-                try writer.print("  {s}(empty){s}\n", .{ Colors.dim, Colors.reset });
-            }
-
-            const calldata_slice = self.calldata_slice;
-            if (calldata_slice.len > 0) {
-                try writer.print("\n{s}📥 Calldata [{d} bytes]:{s} ", .{ Colors.yellow, calldata_slice.len, Colors.reset });
-
-                const calldata_preview_len = @min(calldata_slice.len, 32);
-                for (calldata_slice[0..calldata_preview_len]) |byte| {
-                    try writer.print("{x:0>2}", .{byte});
-                }
-                if (calldata_slice.len > 32) {
-                    try writer.print("...");
-                }
-                try writer.print("\n", .{});
-            }
-
-            try writer.print("\n{s}{s}════════════════════════════════════════════════════════════════{s}\n", .{ Colors.dim, Colors.cyan, Colors.reset });
-
+            try writer.print("\n{s}{s}══{s}{s}\n", .{ C.dim, C.cyan, rule, C.reset });
             return try output.toOwnedSlice();
+        }
+
+        fn printGas(self: *const Self, writer: *std.Io.Writer) !void {
+            const C = PrintColors;
+            const gas = self.gas_remaining;
+            try writer.print("\n{s}⛽ Gas:{s} ", .{ C.yellow, C.reset });
+            if (gas > 1_000_000) {
+                try writer.print("{s}{d:.2}M{s}", .{ C.green, @as(f64, @floatFromInt(gas)) / 1_000_000.0, C.reset });
+            } else if (gas > 1_000) {
+                try writer.print("{s}{d:.2}K{s}", .{ C.green, @as(f64, @floatFromInt(gas)) / 1_000.0, C.reset });
+            } else {
+                try writer.print("{s}{d}{s}", .{ if (gas > 100) C.green else C.red, gas, C.reset });
+            }
+            try writer.writeAll("\n");
+        }
+
+        /// Hex and ASCII dump of the first `print_memory_limit` bytes of memory.
+        fn printMemory(self: *Self, writer: *std.Io.Writer) !void {
+            const C = PrintColors;
+            const mem_size = self.memory.size();
+            try writer.print("\n{s}💾 Memory [{d} bytes]:{s}\n", .{ C.magenta, mem_size, C.reset });
+            if (mem_size == 0) {
+                try writer.print("  {s}(empty){s}\n", .{ C.dim, C.reset });
+                return;
+            }
+
+            const shown = @min(mem_size, print_memory_limit);
+            const mem_slice = try self.memory.get_slice(0, shown);
+            var offset: usize = 0;
+            while (offset < shown) : (offset += 16) {
+                const line = mem_slice[offset..@min(offset + 16, shown)];
+                try writer.print("  {s}0x{x:0>4}:{s} ", .{ C.dim, offset, C.reset });
+                for (line) |byte| {
+                    try writer.print("{s}{x:0>2}{s} ", .{ if (byte == 0) C.dim else C.white, byte, C.reset });
+                }
+                try writer.splatByteAll(' ', (16 - line.len) * 3);
+                try writer.print(" {s}│{s}", .{ C.dim, C.reset });
+                for (line) |byte| {
+                    if (byte >= 32 and byte < 127) {
+                        try writer.print("{s}{c}{s}", .{ C.green, byte, C.reset });
+                    } else if (byte == 0) {
+                        try writer.print("{s}.{s}", .{ C.dim, C.reset });
+                    } else {
+                        try writer.print("{s}·{s}", .{ C.yellow, C.reset });
+                    }
+                }
+                try writer.writeAll("\n");
+            }
+            if (mem_size > shown) {
+                try writer.print("  {s}... {d} more bytes{s}\n", .{ C.dim, mem_size - shown, C.reset });
+            }
+        }
+
+        fn printCalldata(self: *const Self, writer: *std.Io.Writer) !void {
+            const C = PrintColors;
+            const calldata = self.calldata_slice;
+            if (calldata.len == 0) return;
+            try writer.print("\n{s}📥 Calldata [{d} bytes]:{s} ", .{ C.yellow, calldata.len, C.reset });
+            for (calldata[0..@min(calldata.len, print_calldata_limit)]) |byte| {
+                try writer.print("{x:0>2}", .{byte});
+            }
+            if (calldata.len > print_calldata_limit) try writer.writeAll("...");
+            try writer.writeAll("\n");
         }
     };
 }

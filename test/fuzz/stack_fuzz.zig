@@ -207,6 +207,77 @@ pub fn fuzzBorrowedStack(_: void, input: []const u8) !void {
     }
 }
 
+/// Checked `dup_n` / `swap_n` over the whole `u8` operand domain. The opcodes use
+/// 1..16, but the checked entry points take any byte: `n == 0`, `n` above the
+/// height and `n == 255` (where `n + 1` wraps in `u8`) must be typed errors, and
+/// every accepted operand must act on exactly the item the model names.
+pub fn fuzzCheckedDupSwapDomain(_: void, input: []const u8) !void {
+    const allocator = fuzz_alloc.get();
+    var stack = try DefaultStack.init(allocator, null);
+    defer stack.deinit(allocator);
+
+    var model = std.ArrayList(u256).empty;
+    defer model.deinit(allocator);
+
+    var i: usize = 0;
+    while (i + 1 < input.len) : (i += 2) {
+        const n = input[i + 1];
+        const height = model.items.len;
+        switch (input[i] % 5) {
+            0 => { // push burst, so heights pass 255 and reach the capacity
+                const count: usize = @as(usize, n % 96) + 1;
+                for (0..count) |k| {
+                    if (model.items.len >= DefaultStack.stack_capacity) break;
+                    const word = makeWord(n +% @as(u8, @truncate(k)), i + k);
+                    try stack.push(word);
+                    try model.append(allocator, word);
+                }
+            },
+            1, 2 => { // dup_n with any operand byte
+                const in_domain = n != 0 and @as(usize, n) <= height;
+                try std.testing.expectEqual(in_domain, evm.verified_ops.checkedDupIndex(n, height) != null);
+                if (!in_domain) {
+                    try std.testing.expectError(DefaultStack.Error.StackUnderflow, stack.dup_n(n));
+                } else if (height >= DefaultStack.stack_capacity) {
+                    try std.testing.expectError(DefaultStack.Error.StackOverflow, stack.dup_n(n));
+                } else {
+                    try std.testing.expectEqual(@as(?usize, @as(usize, n) - 1), evm.verified_ops.checkedDupIndex(n, height));
+                    try stack.dup_n(n);
+                    try model.append(allocator, model.items[height - n]);
+                }
+            },
+            3 => { // swap_n with any operand byte
+                const in_domain = n != 0 and @as(usize, n) + 1 <= height;
+                try std.testing.expectEqual(in_domain, evm.verified_ops.checkedSwapIndex(n, height) != null);
+                if (!in_domain) {
+                    try std.testing.expectError(DefaultStack.Error.StackUnderflow, stack.swap_n(n));
+                } else {
+                    try stack.swap_n(n);
+                    std.mem.swap(u256, &model.items[height - 1], &model.items[height - 1 - n]);
+                }
+            },
+            else => { // pop, so the height also shrinks under the operand
+                if (height == 0) {
+                    try std.testing.expectError(DefaultStack.Error.StackUnderflow, stack.pop());
+                } else {
+                    try std.testing.expectEqual(model.pop().?, try stack.pop());
+                }
+            },
+        }
+        try checkStackMatchesModel(DefaultStack, &stack, model.items);
+    }
+}
+
+const dup_swap_domain_corpus: []const []const u8 = &.{
+    &.{},
+    &.{ 1, 0, 3, 0 }, // DUP0 and SWAP0 on an empty stack
+    &.{ 0, 0, 1, 0, 3, 0, 1, 1, 3, 1 }, // one item: DUP0, SWAP0, DUP1, SWAP1
+    &.{ 0, 95, 0, 95, 0, 95, 1, 255, 3, 255, 1, 254, 3, 254 }, // 288 items: n = 255 and 254 in range
+    &.{ 0, 95, 0, 95, 0, 63, 3, 255, 1, 255, 0, 0, 3, 255 }, // 256 items: SWAP255 exact, then 257
+    &.{ 0, 15, 1, 16, 3, 15, 3, 16, 1, 17, 4, 0, 3, 15 }, // 16 items: boundaries at 15, 16, 17
+    &.{ 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 0, 95, 1, 1, 1, 200 }, // capacity
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{},
     &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8 },
@@ -221,6 +292,10 @@ test "fuzz default 1024-slot stack model checker" {
 
 test "fuzz 32-slot stack overflow and boundary model checker" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSmallStackOverflow), .{ .corpus = seed_corpus });
+}
+
+test "fuzz checked dup_n and swap_n over every operand byte" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCheckedDupSwapDomain), .{ .corpus = dup_swap_domain_corpus });
 }
 
 test "fuzz borrowed stack buffer alignment and reset" {

@@ -55,7 +55,7 @@ build-configured EVM (`DefaultEvm` in `src/root.zig`) and accepts enum names
 
 ```
 2, 7, 8, 100, 140, 145, 150, 152, 155, 160, 161, 170, 196, 197, 198, 211,
-214, 649, 658, 1014, 1052, 1108, 1153, 1283, 1344, 1559, 1884, 2028, 2200,
+214, 649, 658, 1014, 1052, 1108, 1153, 1344, 1559, 1884, 2028, 2200,
 2565, 2718, 2929, 2930, 3198, 3529, 3541, 3651, 3675, 3855, 3860, 4345,
 4399, 4788, 4844, 4895, 5133, 5656, 6780, 7516
 ```
@@ -97,8 +97,9 @@ const Custom = @import("evm").Evm(.{
 });
 ```
 
-`EvmConfig.eip_overrides` also exists, but nothing outside
-`src/evm_config.zig` reads it.
+`eips.overrides` is the only override list. The EIP checks of `src/evm.zig` and
+the `Eips` helpers read it through `Eips.is_eip_active`. Opcode availability and
+the gas tables of `src/frame/fork_gas.zig` follow `eips.hardfork`.
 
 ## Precompiles
 

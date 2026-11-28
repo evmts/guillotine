@@ -18,6 +18,10 @@ pub const StackConfig = @import("stack/stack_config.zig").StackConfig;
 pub const Stack = @import("stack/stack.zig").Stack;
 pub const MemoryConfig = @import("memory/memory_config.zig").MemoryConfig;
 pub const Memory = @import("memory/memory.zig").Memory;
+/// Memory module: `loadWordBigEndian` / `storeWordBigEndian` and the `Memory` factory.
+pub const memory = @import("memory/memory.zig");
+/// Call arena with a checked hard limit and a retain limit across resets.
+pub const GrowingArenaAllocator = @import("evm_arena_allocator.zig").GrowingArenaAllocator;
 pub const MemoryError = @import("memory/memory.zig").MemoryError;
 
 // EVM main module and configuration
@@ -124,8 +128,8 @@ pub const TestEvm = Evm(EvmConfig{
     .tracer_config = @import("tracer/tracer.zig").TracerConfig{
         .enabled = true,
         // TestEvm disables gas checks, so the MinimalEvm sidecar (which always
-        // charges gas) diverges by design. Validation would turn that expected
-        // divergence into a tracer panic.
+        // charges gas) diverges by design. Validation would count that expected
+        // divergence as failed tracer checks.
         .enable_validation = false,
         .enable_pc_tracking = true,
         .enable_gas_tracking = true,
@@ -155,6 +159,8 @@ pub const BytecodeConfig = @import("bytecode/bytecode_config.zig").BytecodeConfi
 pub const Bytecode = @import("bytecode/bytecode.zig").Bytecode;
 pub const BytecodeStats = @import("bytecode/bytecode_stats.zig").BytecodeStats;
 pub const bytecode = @import("bytecode/bytecode.zig");
+/// Standalone single-pass analyzer behind the C API's `evm_bytecode_analyze`.
+pub const bytecode_analyze = @import("bytecode/bytecode_analyze.zig");
 
 // Dispatch module
 pub const dispatch = @import("preprocessor/dispatch.zig");
@@ -190,8 +196,11 @@ pub const Log = @import("voltaire").logs.Log;
 pub const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 pub const AccessListEntry = @import("block/transaction_context.zig").AccessListEntry;
 pub const Authorization = @import("block/transaction_context.zig").Authorization;
+pub const beacon_roots = @import("eips_and_hardforks/beacon_roots.zig");
+pub const historical_block_hashes = @import("eips_and_hardforks/historical_block_hashes.zig");
 pub const AuthorizationProcessor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessor;
 pub const AuthorizationError = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationError;
+pub const AuthorizationProcessorFor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessorFor;
 pub const trie = @import("trie/root.zig");
 /// Ethereum state root over a Database (used by Database.get_state_root).
 pub const state_root = @import("storage/state_root.zig");
@@ -211,13 +220,12 @@ pub const verified_ops = @import("core/verified_ops.zig");
 // Not imported, measured one file at a time on top of this list (2026-11-25):
 // - Fail to compile because their tests use pre-0.17 or pre-refactor APIs, or
 //   instantiate `Evm` and so compile the handlers' stale inline tests:
-//   evm.zig, evm_tests.zig, evm_config.zig, evm_arena_allocator.zig,
-//   bytecode/{bytecode,bytecode_analyze,bytecode_stats,bytecode_bench,
+//   evm.zig, evm_tests.zig, evm_config.zig,
+//   bytecode/{bytecode,bytecode_stats,bytecode_bench,
 //   bytecode_tests,bytecode_jump_validation_test,bytecode_jump_validation_tests}.zig,
 //   eips_and_hardforks/{authorization_processor,eips,hardfork}.zig,
 //   frame/{call_params,fork_gas,frame_config}.zig, stack/stack.zig,
-//   storage/{access_list,cache_storage,forked_storage,journal_bench,memory_database,
-//   storage,rpc_client}.zig, tracer/{tracer,minimal_frame,minimal_evm_precompile_test}.zig,
+//   storage/{access_list,journal_bench}.zig, tracer/{tracer,minimal_frame,minimal_evm_precompile_test}.zig,
 //   preprocessor/{dispatch_test,dispatch_layout_test}.zig, every instructions/handlers_*.zig
 //   except handlers_advanced_synthetic.zig, trie/{memory_tests,serialization_test,
 //   stress_tests}.zig, root_c.zig.
@@ -239,11 +247,14 @@ test {
     _ = @import("stack/stack_bench.zig");
     _ = @import("internal/safety_counter.zig");
     _ = @import("core/verified_ops.zig");
+    _ = @import("evm_arena_allocator.zig");
+    _ = @import("stack/stack.zig");
     _ = @import("core/wide_arith.zig");
     _ = @import("block/block_info.zig");
     _ = @import("block/transaction_context.zig");
     _ = @import("frame/call_result.zig");
     _ = @import("bytecode/bytecode_config.zig");
+    _ = @import("bytecode/bytecode_analyze.zig");
     _ = @import("frame/block_info_config.zig");
     _ = @import("opcodes/opcode.zig");
     _ = @import("opcodes/opcode_data.zig");
@@ -261,7 +272,15 @@ test {
     _ = @import("storage/created_contracts.zig");
     _ = @import("storage/database_interface_account.zig");
     _ = @import("storage/lru_cache.zig");
+    _ = @import("storage/memory_database.zig");
     _ = @import("tracer/ring_buffer.zig");
+    _ = @import("tracer/minimal_evm.zig");
+    _ = @import("tracer/minimal_frame.zig");
+    _ = @import("tracer/minimal_host.zig");
+    _ = @import("tracer/database_state_reader.zig");
+    _ = @import("tracer/minimal_evm_sync.zig");
+    _ = @import("tracer/tracer_config.zig");
+    _ = @import("tracer/minimal_evm_precompile_test.zig");
     _ = @import("trie/hash_builder_complete.zig");
     _ = @import("trie/known_roots_test.zig");
     _ = @import("trie/test_simple_update.zig");

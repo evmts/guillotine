@@ -1879,7 +1879,7 @@ test "Bytecode iterator - basic PUSH opcodes" {
     var iterator = bytecode.createIterator();
 
     // First opcode should be PUSH1 with value 0x42
-    if (iterator.next()) |opcode_data| {
+    if (try iterator.next()) |opcode_data| {
         switch (opcode_data) {
             .push => |push_data| {
                 try std.testing.expectEqual(@as(u256, 0x42), push_data.value);
@@ -1892,7 +1892,7 @@ test "Bytecode iterator - basic PUSH opcodes" {
     }
 
     // Second opcode should be PUSH2 with value 0x1234
-    if (iterator.next()) |opcode_data| {
+    if (try iterator.next()) |opcode_data| {
         switch (opcode_data) {
             .push => |push_data| {
                 try std.testing.expectEqual(@as(u256, 0x1234), push_data.value);
@@ -1905,7 +1905,7 @@ test "Bytecode iterator - basic PUSH opcodes" {
     }
 
     // Third opcode should be STOP
-    if (iterator.next()) |opcode_data| {
+    if (try iterator.next()) |opcode_data| {
         switch (opcode_data) {
             .stop => {},
             else => try std.testing.expect(false), // Should be stop
@@ -1915,7 +1915,7 @@ test "Bytecode iterator - basic PUSH opcodes" {
     }
 
     // Should be at end
-    try std.testing.expect(iterator.next() == null);
+    try std.testing.expect((try iterator.next()) == null);
 }
 
 test "Bytecode iterator - JUMPDEST detection" {
@@ -1930,11 +1930,11 @@ test "Bytecode iterator - JUMPDEST detection" {
     var iterator = bytecode.createIterator();
 
     // Skip PUSH and JUMP opcodes
-    _ = iterator.next(); // PUSH1
-    _ = iterator.next(); // JUMP (regular opcode)
+    _ = try iterator.next(); // PUSH1
+    _ = try iterator.next(); // JUMP (regular opcode)
 
     // Should find JUMPDEST
-    if (iterator.next()) |opcode_data| {
+    if (try iterator.next()) |opcode_data| {
         switch (opcode_data) {
             .jumpdest => |jump_data| {
                 try std.testing.expectEqual(@as(u16, 1), jump_data.gas_cost);
@@ -1958,7 +1958,7 @@ test "Bytecode iterator - fusion detection PUSH+ADD" {
     var iterator = bytecode.createIterator();
 
     // First opcode should be detected as PUSH+ADD fusion
-    if (iterator.next()) |opcode_data| {
+    if (try iterator.next()) |opcode_data| {
         switch (opcode_data) {
             .push_add_fusion => |fusion_data| {
                 try std.testing.expectEqual(@as(u256, 0x42), fusion_data.value);
@@ -2067,7 +2067,7 @@ test "Iterator using PackedBits for fusion detection" {
     var iterator = bytecode.createIterator();
 
     // Test that iterator can detect the fusion candidate
-    if (iterator.next()) |opcode_data| {
+    if (try iterator.next()) |opcode_data| {
         switch (opcode_data) {
             .push => |push_data| {
                 try std.testing.expectEqual(@as(u256, 0x05), push_data.value);

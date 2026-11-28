@@ -363,7 +363,6 @@ test "EVM delegatecall handler preserves caller context" {
 test "Evm creation with custom config" {
     const CustomEvm = Evm(.{
         .max_call_depth = 512,
-        .max_input_size = 65536, // 64KB
         .stack_size = 512,
         .max_bytecode_size = 16384,
     });
@@ -785,7 +784,6 @@ test "EvmConfig - depth type selection" {
 test "EvmConfig - custom configurations" {
     const custom_config = EvmConfig{
         .max_call_depth = 512,
-        .max_input_size = 65536,
         .stack_size = 256,
         .max_bytecode_size = 12288,
     };

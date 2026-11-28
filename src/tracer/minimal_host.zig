@@ -60,6 +60,46 @@ pub const HostInterface = struct {
     }
 };
 
+/// Read-only view of pre-existing chain state for MinimalEvm.
+///
+/// MinimalEvm keeps every write in its own maps. A read that finds no local
+/// entry falls back to the attached reader, so the reference interpreter sees
+/// accounts, code, nonces and storage that existed before it started without
+/// ever changing the state behind the reader.
+pub const StateReader = struct {
+    ptr: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        get_balance: *const fn (ptr: *anyopaque, address: Address) u256,
+        get_nonce: *const fn (ptr: *anyopaque, address: Address) u64,
+        /// The returned slice is borrowed and must stay valid while MinimalEvm runs.
+        get_code: *const fn (ptr: *anyopaque, address: Address) []const u8,
+        get_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) u256,
+        account_exists: *const fn (ptr: *anyopaque, address: Address) bool,
+    };
+
+    pub fn getBalance(self: StateReader, address: Address) u256 {
+        return self.vtable.get_balance(self.ptr, address);
+    }
+
+    pub fn getNonce(self: StateReader, address: Address) u64 {
+        return self.vtable.get_nonce(self.ptr, address);
+    }
+
+    pub fn getCode(self: StateReader, address: Address) []const u8 {
+        return self.vtable.get_code(self.ptr, address);
+    }
+
+    pub fn getStorage(self: StateReader, address: Address, slot: u256) u256 {
+        return self.vtable.get_storage(self.ptr, address, slot);
+    }
+
+    pub fn accountExists(self: StateReader, address: Address) bool {
+        return self.vtable.account_exists(self.ptr, address);
+    }
+};
+
 /// Call result type
 pub const CallResult = struct {
     success: bool,
@@ -141,7 +181,9 @@ pub const Host = struct {
         const code_copy = try self.allocator.alloc(u8, code.len);
         errdefer self.allocator.free(code_copy);
         @memcpy(code_copy, code);
-        try self.code.put(address, code_copy);
+        const entry = try self.code.getOrPut(address);
+        if (entry.found_existing) self.allocator.free(entry.value_ptr.*);
+        entry.value_ptr.* = code_copy;
     }
 
     pub fn hostInterface(self: *Self) HostInterface {

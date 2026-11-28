@@ -202,7 +202,8 @@ pub const RequestType = enum(u8) {
 pub const RequestsError = error{
     /// A request has no request_type byte.
     MissingRequestType,
-    /// Requests are not ordered by request_type ascending.
+    /// Request types are not unique and strictly ascending: a type repeats or
+    /// precedes an earlier one.
     RequestTypesNotAscending,
 };
 
@@ -222,6 +223,8 @@ pub fn encodeRequest(allocator: std.mem.Allocator, request_type: RequestType, re
 
 /// EIP-7685 `compute_requests_hash`: sha256 over sha256(request) of every request
 /// longer than its type byte. Each request is `request_type ++ request_data`.
+/// `requests` holds at most one entry per request type, ordered by type strictly
+/// ascending; a duplicate or out-of-order type is `RequestTypesNotAscending`.
 pub fn computeRequestsHash(requests: []const []const u8) RequestsError![32]u8 {
     const Sha256 = std.crypto.hash.sha2.Sha256;
     var outer = Sha256.init(.{});
@@ -229,7 +232,7 @@ pub fn computeRequestsHash(requests: []const []const u8) RequestsError![32]u8 {
     for (requests) |request| {
         if (request.len == 0) return RequestsError.MissingRequestType;
         if (previous_type) |previous| {
-            if (request[0] < previous) return RequestsError.RequestTypesNotAscending;
+            if (!verified_ops.requestTypeFollows(previous, request[0])) return RequestsError.RequestTypesNotAscending;
         }
         previous_type = request[0];
         if (request.len == 1) continue;
@@ -338,7 +341,7 @@ pub const Eips = struct {
     /// EIP-3651: Warm COINBASE address at the start of transaction
     /// Shanghai hardfork introduced this optimization
     pub fn eip_3651_warm_coinbase_address(self: Self, access_list: *AccessList, coinbase: primitives.Address.Address) !void {
-        if (!self.hardfork.isAtLeast(.SHANGHAI)) return;
+        if (!self.is_eip_active(3651)) return;
         try access_list.pre_warm_addresses(&[_]primitives.Address{coinbase});
     }
 
@@ -348,32 +351,32 @@ pub const Eips = struct {
     /// - No longer fully refunds SELFDESTRUCT
     /// Returns the refund amount to be applied
     pub fn eip_3529_gas_refund_cap(self: Self, gas_used: u64, refund_counter: u64) u64 {
-        if (!self.hardfork.isAtLeast(.LONDON)) return @min(refund_counter, gas_used / 2);
+        if (!self.is_eip_active(3529)) return @min(refund_counter, gas_used / 2);
         return @min(refund_counter, gas_used / 5);
     }
 
     /// EIP-2929: Gas cost increases for state access opcodes
     /// Berlin hardfork introduced access lists and changed gas costs
     pub fn eip_2929_cold_sload_cost(self: Self) u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return 200;
+        if (!self.is_eip_active(2929)) return 200;
         return 2100;
     }
 
     /// EIP-2929: Warm storage access cost
     pub fn eip_2929_warm_storage_read_cost(self: Self) u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return 200;
+        if (!self.is_eip_active(2929)) return 200;
         return 100;
     }
 
     /// EIP-2929: Cold account access cost
     pub fn eip_2929_cold_account_access_cost(self: Self) u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return 700;
+        if (!self.is_eip_active(2929)) return 700;
         return 2600;
     }
 
     /// EIP-2929: Warm account access cost
     pub fn eip_2929_warm_account_access_cost(self: Self) u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return 700;
+        if (!self.is_eip_active(2929)) return 700;
         return 100;
     }
 
@@ -413,13 +416,13 @@ pub const Eips = struct {
         return self.is_eip_active(3855);
     }
 
-    /// EIP-3860: Limit and meter initcode
-    /// Shanghai hardfork added initcode size limit and gas metering
-    // Pre-Shanghai: 24KB limit (EIP-170)
-    // Post-Shanghai: 48KB limit
-    pub fn size_limit(self: Self) u64 {
+    /// EIP-3860 init code size limit in bytes: 49152 (twice the EIP-170 code size
+    /// limit) from Shanghai on, null before. Null means there is no limit: before
+    /// EIP-3860 init code of any length is valid and only gas bounds it. The limit
+    /// on deployed runtime code is a different rule, `eip_170_max_code_size`.
+    pub fn size_limit(self: Self) ?u64 {
         if (self.is_eip_active(3860)) return 0xC000;
-        return 0x6000;
+        return null;
     }
 
     /// EIP-3860: Initcode gas cost per word
@@ -433,18 +436,21 @@ pub const Eips = struct {
     /// EIP-7702: Base gas cost per authorization
     /// Prague hardfork introduced authorization lists
     pub fn eip_7702_per_auth_base_cost(self: Self) i64 {
-        if (!self.hardfork.isAtLeast(.PRAGUE)) return 0;
+        if (!self.is_eip_active(7702)) return 0;
         return 12500;
     }
 
     /// EIP-7702: Additional gas cost for empty account
     /// Prague hardfork introduced authorization lists
     pub fn eip_7702_per_empty_account_cost(self: Self) i64 {
-        if (!self.hardfork.isAtLeast(.PRAGUE)) return 0;
+        if (!self.is_eip_active(7702)) return 0;
         return 25000;
     }
 
-    /// Get all active EIPs for the current hardfork
+    /// Get all active EIPs for the current hardfork.
+    /// EIP-1283 (net gas metering for SSTORE) is listed for Constantinople only:
+    /// Petersburg (EIP-1716) removed it before mainnet activation, and Istanbul
+    /// brought net metering back as EIP-2200.
     pub fn get_active_eips(self: Self) []const u16 {
         return switch (self.hardfork) {
             .FRONTIER => &[_]u16{},
@@ -454,20 +460,20 @@ pub const Eips = struct {
             .SPURIOUS_DRAGON => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170 },
             .BYZANTIUM => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658 },
             .CONSTANTINOPLE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283 },
-            .PETERSBURG => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283 },
-            .ISTANBUL => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200 },
-            .MUIR_GLACIER => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200 },
-            .BERLIN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930 },
-            .LONDON => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541 },
-            .ARROW_GLACIER => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345 },
-            .GRAY_GLACIER => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133 },
-            .MERGE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399 },
-            .SHANGHAI => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895 },
-            .CANCUN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516 },
-            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702 },
-            .OSAKA => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702, 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 },
+            .PETERSBURG => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052 },
+            .ISTANBUL => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200 },
+            .MUIR_GLACIER => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200 },
+            .BERLIN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930 },
+            .LONDON => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541 },
+            .ARROW_GLACIER => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345 },
+            .GRAY_GLACIER => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133 },
+            .MERGE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399 },
+            .SHANGHAI => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895 },
+            .CANCUN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516 },
+            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702 },
+            .OSAKA => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702, 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 },
             // Glamsterdam has no scheduled EIPs yet; it keeps Osaka's set.
-            .AMSTERDAM => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702, 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 },
+            .AMSTERDAM => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702, 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 },
         };
     }
 
@@ -579,21 +585,32 @@ pub const Eips = struct {
 
     /// EIP-4788: Check if address is the beacon roots contract
     pub fn eip_4788_is_beacon_roots_address(self: Self, address: primitives.Address) bool {
-        if (!self.hardfork.isAtLeast(.CANCUN)) return false;
+        if (!self.is_eip_active(4788)) return false;
         const beacon_roots = @import("beacon_roots.zig");
         return std.mem.eql(u8, &address.bytes, &beacon_roots.BEACON_ROOTS_ADDRESS.bytes);
     }
 
     /// EIP-2935: Check if address is the historical block hashes contract
     pub fn eip_2935_is_historical_block_hashes_address(self: Self, address: primitives.Address) bool {
-        if (!self.hardfork.isAtLeast(.PRAGUE)) return false;
+        if (!self.is_eip_active(2935)) return false;
         const historical_block_hashes = @import("historical_block_hashes.zig");
         return std.mem.eql(u8, &address.bytes, &historical_block_hashes.HISTORY_CONTRACT_ADDRESS.bytes);
     }
 
     /// EIP-7702: Get effective code address handling delegation
     pub fn eip_7702_get_effective_code_address(self: Self, account: ?@import("../storage/database_interface_account.zig").Account, address: primitives.Address) primitives.Address {
-        if (!self.hardfork.isAtLeast(.PRAGUE)) return address;
+        if (!self.is_eip_active(7702)) return address;
+        return delegated_code_address(account, address);
+    }
+
+    /// The address whose code runs for `address` when EIP-7702 is active: the
+    /// delegate of a delegated account, else `address` itself. It does not test
+    /// whether EIP-7702 is active; a caller on a hot path decides that once at
+    /// compile time (`comptime eips.is_eip_active(7702)`) and calls this.
+    pub fn delegated_code_address(
+        account: ?@import("../storage/database_interface_account.zig").Account,
+        address: primitives.Address,
+    ) primitives.Address {
         if (account) |acc| {
             if (acc.get_effective_code_address()) |delegated| {
                 return delegated;
@@ -636,8 +653,8 @@ pub const Eips = struct {
         journal: anytype,
         snapshot_id: anytype,
     ) !void {
-        if (!self.hardfork.isAtLeast(.CANCUN)) {
-            // Pre-Cancun: always mark for full destruction
+        if (!self.is_eip_active(6780)) {
+            // Without EIP-6780 (before Cancun): always mark for full destruction
             try self_destruct.mark_for_destruction(contract_address, recipient);
             return;
         }
@@ -932,7 +949,7 @@ test "eip_3651_warm_coinbase_address" {
     var access_list = AccessList.init(allocator);
     defer access_list.deinit();
 
-    const coinbase = primitives.Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const coinbase = try primitives.Address.fromHex("0x1234567890123456789012345678901234567890");
 
     // Pre-Shanghai: should not warm coinbase (no-op)
     try pre_shanghai.eip_3651_warm_coinbase_address(&access_list, coinbase);
@@ -1014,11 +1031,11 @@ test "eip_3860_initcode_limits" {
     const post_shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
 
     // Size limits
-    try std.testing.expectEqual(@as(u64, 0x6000), pre_shanghai.size_limit()); // 24KB
-    try std.testing.expectEqual(@as(u64, 0xC000), post_shanghai.size_limit()); // 48KB
+    try std.testing.expectEqual(@as(?u64, null), pre_shanghai.size_limit()); // no limit before EIP-3860
+    try std.testing.expectEqual(@as(?u64, 0xC000), post_shanghai.size_limit()); // 48KB
 
     // Gas costs
-    try std.testing.expectEqual(@as(u64, 2), pre_shanghai.word_cost());
+    try std.testing.expectEqual(@as(u64, 0), pre_shanghai.word_cost());
     try std.testing.expectEqual(@as(u64, 2), post_shanghai.word_cost());
 }
 
@@ -1174,10 +1191,15 @@ test "edge_case_hardforks" {
     const constantinople = Eips{ .hardfork = Hardfork.CONSTANTINOPLE };
     const petersburg = Eips{ .hardfork = Hardfork.PETERSBURG };
 
-    // Both should have the same active EIPs (Petersburg == Constantinople without CREATE2)
+    // Petersburg is Constantinople with EIP-1283 (net gas metering for SSTORE) removed.
     const const_eips = constantinople.get_active_eips();
     const petersburg_eips = petersburg.get_active_eips();
-    try std.testing.expectEqualSlices(u16, const_eips, petersburg_eips);
+    try std.testing.expectEqual(const_eips.len - 1, petersburg_eips.len);
+    try std.testing.expect(std.mem.indexOfScalar(u16, const_eips, 1283) != null);
+    try std.testing.expect(std.mem.indexOfScalar(u16, petersburg_eips, 1283) == null);
+    for (petersburg_eips) |eip| try std.testing.expect(std.mem.indexOfScalar(u16, const_eips, eip) != null);
+    try std.testing.expect(constantinople.is_eip_active(1283));
+    try std.testing.expect(!petersburg.is_eip_active(1283));
 
     // Test glacier hardforks (only difficulty bomb delays)
     const arrow_glacier = Eips{ .hardfork = Hardfork.ARROW_GLACIER };
@@ -1223,11 +1245,11 @@ test "initcode_size_boundaries" {
     const post_shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
 
     // Test exact boundary values
-    try std.testing.expectEqual(@as(u64, 24576), pre_shanghai.size_limit()); // 0x6000
-    try std.testing.expectEqual(@as(u64, 49152), post_shanghai.size_limit()); // 0xC000
+    try std.testing.expectEqual(@as(?u64, null), pre_shanghai.size_limit());
+    try std.testing.expectEqual(@as(?u64, 49152), post_shanghai.size_limit()); // 0xC000
 
-    // Test that the limit doubled
-    try std.testing.expectEqual(pre_shanghai.size_limit() * 2, post_shanghai.size_limit());
+    // The init code limit is twice the EIP-170 runtime code limit.
+    try std.testing.expectEqual(@as(u64, post_shanghai.eip_170_max_code_size()) * 2, post_shanghai.size_limit().?);
 }
 
 test "specific eip helper functions" {
@@ -2026,8 +2048,10 @@ test "EIP-7918 excess blob gas uses the reserve-price branch when execution cost
     const max = osaka.max_blob_gas();
     // Parent blob fee is 1 wei (excess 0 + target); execution base fee 1 gwei.
     // 8192 * 1e9 > 131072 * 1, so excess grows by used * (9 - 6) / 9.
+    // One blob below the maximum: at the maximum the two rules give the same number
+    // (max * (max - target) / max == max - target).
     const parent_excess: u64 = 0;
-    const used = max;
+    const used = max - GAS_PER_BLOB;
     const expected = parent_excess + used * (9 - 6) / 9;
     try std.testing.expectEqual(expected, osaka.excess_blob_gas(parent_excess, used, 1_000_000_000));
     // The normal rule would have given used - target; the reserve price differs.

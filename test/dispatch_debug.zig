@@ -61,7 +61,7 @@ test "debug dispatch building for CALL bytecode" {
     var iter = bytecode.createIterator();
     var op_index: usize = 0;
 
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         std.debug.print("Op {d}: PC={d}, ", .{op_index, iter.pc});
 
         switch (op_data) {
@@ -115,7 +115,7 @@ test "debug simple PUSH0 dispatch" {
     defer bytecode.deinit();
 
     var iter = bytecode.createIterator();
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         std.debug.print("PC={d}: {s}\n", .{iter.pc, @tagName(op_data)});
     }
 }
@@ -143,7 +143,7 @@ test "debug PUSH1 MSTORE fusion" {
     defer bytecode.deinit();
 
     var iter = bytecode.createIterator();
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         std.debug.print("PC={d}: ", .{iter.pc});
         switch (op_data) {
             .push_mstore_fusion => |data| {

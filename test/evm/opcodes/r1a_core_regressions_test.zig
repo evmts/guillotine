@@ -1246,7 +1246,7 @@ test "R2A R2-14: Database.delete_account clears storage in base and overlay" {
     while (key < 1000) : (key += 1) try db.set_storage(neighbour, key, key + 1);
 
     // In an ephemeral view the deletion hides base storage and writes none of it.
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     try db.set_storage(doomed, 3, 33);
     try db.delete_account(doomed);
     try std.testing.expect(!db.account_exists(doomed));

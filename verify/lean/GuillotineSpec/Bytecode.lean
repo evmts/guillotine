@@ -60,7 +60,7 @@ def isDefined (f : Fork) (op : Nat) : Bool :=
 /-- Static `(gas, stack inputs, stack outputs)` of the Berlin+ schedule, exactly the
     table Guillotine batches per basic block (`OPCODE_INFO`). Dynamic parts (memory,
     copy, cold access, SSTORE, CREATE, forwarded gas) are charged by the handlers.
-    `0xf6`/`0xf7` carry Guillotine's EIP-3074 table entries. -/
+    The withdrawn EIP-3074 `0xf6`/`0xf7` carry the all-zero entry of an undefined opcode. -/
 def staticInfo (op : Nat) : Nat × Nat × Nat :=
   if op = 0x00 then (0, 0, 0)
   else if op = 0x01 ∨ op = 0x03 then (3, 2, 1)
@@ -101,26 +101,26 @@ def staticInfo (op : Nat) : Nat × Nat × Nat :=
   else if op = 0xf3 ∨ op = 0xfd then (0, 2, 0)
   else if op = 0xf4 ∨ op = 0xfa then (100, 6, 1)
   else if op = 0xf5 then (0, 4, 1)
-  else if op = 0xf6 then (3100, 5, 1)
-  else if op = 0xf7 then (100, 8, 1)
   else if op = 0xff then (5000, 1, 0)
   else (0, 0, 0)
 
 /-- Static gas of `op` on fork `f`: before Berlin the state-access opcodes had one flat
     price that changed in Tangerine Whistle (EIP-150) and Istanbul (EIP-1884). -/
 def staticGas (f : Fork) (op : Nat) : Nat :=
-  let berlinCost := (staticInfo op).1
-  if f.atLeast .berlin then berlinCost
+  if !isDefined f op then 0
   else
-    let tw := f.atLeast .tangerineWhistle
-    let ist := f.atLeast .istanbul
-    if op = 0x54 then (if ist then 800 else if tw then 200 else 50)
-    else if op = 0x31 then (if ist then 700 else if tw then 400 else 20)
-    else if op = 0x3b ∨ op = 0x3c then (if tw then 700 else 20)
-    else if op = 0x3f then (if ist then 700 else 400)
-    else if op = 0xf1 ∨ op = 0xf2 ∨ op = 0xf4 ∨ op = 0xfa then (if tw then 700 else 40)
-    else if op = 0xff then (if tw then 5000 else 0)
-    else berlinCost
+    let berlinCost := (staticInfo op).1
+    if f.atLeast .berlin then berlinCost
+    else
+      let tw := f.atLeast .tangerineWhistle
+      let ist := f.atLeast .istanbul
+      if op = 0x54 then (if ist then 800 else if tw then 200 else 50)
+      else if op = 0x31 then (if ist then 700 else if tw then 400 else 20)
+      else if op = 0x3b ∨ op = 0x3c then (if tw then 700 else 20)
+      else if op = 0x3f then (if ist then 700 else 400)
+      else if op = 0xf1 ∨ op = 0xf2 ∨ op = 0xf4 ∨ op = 0xfa then (if tw then 700 else 40)
+      else if op = 0xff then (if tw then 5000 else 0)
+      else berlinCost
 
 /-! ### JUMPDEST analysis -/
 
@@ -171,9 +171,11 @@ structure BlockInfo where
 def endsBlockWithFallthrough (op : Nat) : Bool :=
   op = 0x57 ∨ op = 0x5a ∨ op = 0x55 ∨ op = 0xf0 ∨ op = 0xf1 ∨ op = 0xf2 ∨ op = 0xf4 ∨ op = 0xf5 ∨ op = 0xfa
 
-/-- Instructions that end a block without falling through. -/
+/-- Instructions that end a block without falling through. An undefined, fork-disabled or
+    withdrawn opcode (`!isDefined`, which covers `0xfe` INVALID) ends the block before it is
+    charged: it halts the frame and consumes all gas, so nothing after it is reachable. -/
 def terminatesBlock (op : Nat) : Bool :=
-  op = 0x00 ∨ op = 0x56 ∨ op = 0xf3 ∨ op = 0xfd ∨ op = 0xfe ∨ op = 0xff
+  op = 0x00 ∨ op = 0x56 ∨ op = 0xf3 ∨ op = 0xfd ∨ op = 0xff
 
 private structure Acc where
   gas : Nat
@@ -193,6 +195,7 @@ private def blockLoop (f : Fork) (code : Bytes) : Nat → Nat → Acc → Acc
     else
       let op := Bytes.getZ code pc
       if op = 0x5b then acc
+      else if !isDefined f op then acc
       else
         let cost := staticGas f op
         if 0x60 ≤ op ∧ op ≤ 0x7f then
@@ -296,6 +299,14 @@ example : pushValue ⟨#[0x61, 0xab]⟩ 0 = 0xab00 := by decide
 
 /-- `PUSH1 1 PUSH1 2 ADD JUMP`: 3 + 3 + 3 + 8 gas, needs no input, grows the stack by 2. -/
 example : blockInfo .cancun ⟨#[0x60, 0x01, 0x60, 0x02, 0x01, 0x56]⟩ 0 0 = ⟨17, 0, 2⟩ := by decide
+
+/-- Undefined (`0x0c`), withdrawn (`0xf6`/`0xf7`) and fork-disabled (PUSH0 before Shanghai,
+    TLOAD before Cancun) opcodes end the block: trailing bytes add no gas or stack. -/
+example : blockInfo .cancun ⟨#[0x60, 0x01, 0x0c, 0x60, 0x02, 0x01]⟩ 0 0 = ⟨3, 0, 1⟩ := by decide
+example : blockInfo .cancun ⟨#[0xf6, 0x01]⟩ 0 0 = ⟨0, 0, 0⟩ := by decide
+example : blockInfo .cancun ⟨#[0xf7, 0x01]⟩ 0 0 = ⟨0, 0, 0⟩ := by decide
+example : blockInfo .merge ⟨#[0x5f, 0x01]⟩ 0 0 = ⟨0, 0, 0⟩ := by decide
+example : blockInfo .shanghai ⟨#[0x5f, 0x5c]⟩ 0 0 = ⟨2, 0, 1⟩ := by decide
 
 example : evalStraightLine .cancun ⟨#[0x60, 0x02, 0x60, 0x03, 0x01]⟩ = some [5] := by decide
 

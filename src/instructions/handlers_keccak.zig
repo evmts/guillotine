@@ -28,7 +28,8 @@ pub fn Handlers(FrameType: type) type {
             return switch (@bitSizeOf(WordType)) {
                 256 => @as(WordType, @truncate(empty_hash)),
                 64 => @as(WordType, @as(u64, 0x0eab42de4c3ceb92)),
-                32 => @as(WordType, @as(u32, 0xf71837502)),
+                // First four bytes of Keccak-224(""), big-endian, as `hashKeccakWord` reads them.
+                32 => @as(WordType, @as(u32, 0xf7183750)),
                 else => @as(WordType, @truncate(empty_hash)),
             };
         }
@@ -648,7 +649,7 @@ test "KECCAK with u32 WordType - empty data" {
     _ = try TestFrameU32.KeccakHandlers.keccak(frame, dispatch);
 
     // Expected first 32 bits of Keccak-224("")
-    const expected_hash: u32 = 0xf71837502;
+    const expected_hash: u32 = 0xf7183750;
     try testing.expectEqual(expected_hash, try frame.stack.pop());
 }
 

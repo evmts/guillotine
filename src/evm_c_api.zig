@@ -46,7 +46,7 @@ pub const std_options: std.Options = .{
 /// runs beside the EVM.
 pub const guillotine_embedded = true;
 const primitives = @import("voltaire");
-const bytecode_c = @import("bytecode/bytecode_c.zig");
+pub const bytecode_c = @import("bytecode/bytecode_c.zig");
 const log = std.log.scoped(.c_api);
 
 const MainnetEvm = evm.MainnetEvm;
@@ -172,6 +172,52 @@ pub const TxParamsFFI = extern struct {
     disable_balance_check: bool,
 };
 
+/// One EIP-2930 access list entry for `guillotine_set_access_list`.
+pub const AccessListEntryFFI = extern struct {
+    address: [20]u8,
+    /// `storage_keys_len` big-endian 32-byte keys; may be NULL when the length is 0.
+    storage_keys: ?[*]const [32]u8,
+    storage_keys_len: usize,
+};
+
+/// One EIP-7702 authorization tuple for `guillotine_set_authorization_list`.
+pub const AuthorizationFFI = extern struct {
+    chain_id: u64,
+    address: [20]u8,
+    nonce: u64,
+    /// Signature parity: 0 or 1. Any other value makes the tuple invalid (skipped).
+    y_parity: u8,
+    r: [32]u8,
+    s: [32]u8,
+};
+
+/// `guillotine_set_trace_limits` value that removes a bound.
+pub const trace_unlimited: u64 = std.math.maxInt(u64);
+
+/// Most ancestor hashes BLOCKHASH can reach.
+pub const max_block_hashes: usize = 256;
+
+// The structs above the extension types are frozen: a host compiled against an older
+// header passes them by pointer, so no field may move. New data travels through the
+// additive setters below instead. These are the LP64 layouts of every released header.
+comptime {
+    if (@sizeOf(usize) == 8) {
+        const pins = .{
+            .{ BlockInfoFFI, 104, "prev_randao", 72 },
+            .{ CallParams, 136, "salt", 97 },
+            .{ TxParamsFFI, 232, "disable_balance_check", 224 },
+            .{ EvmResult, 144, "trace_json_len", 136 },
+            .{ AccessListEntryFFI, 40, "storage_keys_len", 32 },
+            .{ AuthorizationFFI, 112, "s", 73 },
+        };
+        for (pins) |pin| {
+            if (@sizeOf(pin[0]) != pin[1] or @offsetOf(pin[0], pin[2]) != pin[3]) {
+                @compileError("C ABI layout changed: " ++ @typeName(pin[0]));
+            }
+        }
+    }
+}
+
 /// State dump structures for FFI. Free with `guillotine_free_state_dump`.
 pub const AccountStateFFI = extern struct {
     address: [20]u8,
@@ -255,6 +301,7 @@ fn inputSlice(ptr: ?[*]const u8, len: usize, comptime what: []const u8) ?[]const
 const HandleBox = struct {
     variant: Variant,
     call_tracer: ?*evm.CallTracer = null,
+    ext: Extensions = .{},
     borrows: usize = 0,
     retired: bool = false,
     retired_next: ?*HandleBox = null,
@@ -271,6 +318,37 @@ const HandleBox = struct {
         prague: *PragueEvm,
     };
     const VariantTag = std.meta.Tag(Variant);
+};
+
+/// Owned copies of the block and transaction fields that the frozen structs
+/// (`BlockInfoFFI`, `CallParams`, `TxParamsFFI`) have no room for. The EVM borrows
+/// these slices, so they live in the handle and are freed with it or when replaced.
+const Extensions = struct {
+    /// Ancestor hashes, newest first: entry `i` is block `number - 1 - i`.
+    block_hashes: [][32]u8 = &.{},
+    blob_hashes: [][32]u8 = &.{},
+    max_fee_per_blob_gas: ?u256 = null,
+    /// The same list in the two shapes its consumers take (`Evm.call` reads the
+    /// transaction context, `tx_runner` a `Transaction`). Both share the key slices.
+    access_list: []evm.AccessListEntry = &.{},
+    tx_access_list: []evm.tx_runner.AccessListEntry = &.{},
+    authorizations: []evm.Authorization = &.{},
+
+    fn freeAccessList(self: *Extensions) void {
+        for (self.access_list) |entry| ffi_allocator.free(entry.storage_keys);
+        ffi_allocator.free(self.access_list);
+        ffi_allocator.free(self.tx_access_list);
+        self.access_list = &.{};
+        self.tx_access_list = &.{};
+    }
+
+    fn deinit(self: *Extensions) void {
+        self.freeAccessList();
+        ffi_allocator.free(self.block_hashes);
+        ffi_allocator.free(self.blob_hashes);
+        ffi_allocator.free(self.authorizations);
+        self.* = .{};
+    }
 };
 
 var registry_mutex: std.Io.Mutex = .init;
@@ -506,6 +584,7 @@ fn destroyBox(box: *HandleBox) void {
             ffi_allocator.destroy(instance);
         },
     }
+    box.ext.deinit();
     ffi_allocator.destroy(box);
     if (builtin.is_test) _ = test_hooks.live_boxes.fetchSub(1, .monotonic);
 }
@@ -684,7 +763,266 @@ export fn guillotine_set_block_info(handle: ?*EvmHandle, block_info: ?*const Blo
     switch (box.variant) {
         inline else => |instance| instance.setBlockInfo(blk),
     }
+    // The new block starts without the extension fields: ancestor hashes are relative
+    // to the block number, and the blob base fee belongs to the block it was set for.
+    ffi_allocator.free(box.ext.block_hashes);
+    box.ext.block_hashes = &.{};
     return true;
+}
+
+// ============================================================================
+// BLOCK AND TRANSACTION EXTENSIONS
+// ============================================================================
+
+/// Set the block's blob base fee (EIP-4844, the BLOBBASEFEE opcode, EIP-7516) as a
+/// big-endian u256. Lasts until the next `guillotine_set_block_info`, which resets it to 0.
+export fn guillotine_set_blob_base_fee(handle: ?*EvmHandle, blob_base_fee: ?*const [32]u8) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    const bytes = blob_base_fee orelse {
+        setError("blob_base_fee is NULL", .{});
+        return false;
+    };
+    const fee = std.mem.readInt(u256, bytes, .big);
+    switch (box.variant) {
+        inline else => |instance| {
+            var info = instance.block_info;
+            info.blob_base_fee = std.math.cast(@TypeOf(info.blob_base_fee), fee) orelse {
+                setError("blob_base_fee does not fit this EVM's base fee type", .{});
+                return false;
+            };
+            instance.setBlockInfo(info);
+        },
+    }
+    return true;
+}
+
+/// Point every variant's BLOCKHASH source at the handle's current hash list.
+fn publishBlockHashes(box: *HandleBox) void {
+    switch (box.variant) {
+        inline else => |instance| instance.block_info.block_hashes = box.ext.block_hashes,
+    }
+}
+
+fn currentBlockNumber(box: *HandleBox) u64 {
+    return switch (box.variant) {
+        inline else => |instance| instance.block_info.number,
+    };
+}
+
+/// Replace the ancestor hashes BLOCKHASH reads. `hashes[i]` is the hash of block
+/// `number - 1 - i` (newest first); `count` is at most 256. Blocks without an entry
+/// read as zero. `count` 0 clears the list. On failure the previous list is kept.
+export fn guillotine_set_block_hashes(handle: ?*EvmHandle, hashes: ?[*]const [32]u8, count: usize) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    if (count > max_block_hashes) {
+        setError("block hash count {d} exceeds the BLOCKHASH window of {d}", .{ count, max_block_hashes });
+        return false;
+    }
+    const source: []const [32]u8 = if (count == 0) &.{} else (hashes orelse {
+        setError("hashes is NULL but count is {d}", .{count});
+        return false;
+    })[0..count];
+    const copy = ffi_allocator.dupe([32]u8, source) catch |err| {
+        setError("Failed to copy block hashes: {s}", .{@errorName(err)});
+        return false;
+    };
+    const previous = box.ext.block_hashes;
+    box.ext.block_hashes = copy;
+    publishBlockHashes(box);
+    ffi_allocator.free(previous);
+    return true;
+}
+
+/// Set the hash BLOCKHASH returns for one ancestor. `block_number` must be one of the
+/// 256 blocks before the handle's current block number; anything else is rejected,
+/// because BLOCKHASH could never return it. Other ancestors keep their hashes.
+export fn guillotine_set_block_hash(handle: ?*EvmHandle, block_number: u64, hash: ?*const [32]u8) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    const value = hash orelse {
+        setError("hash is NULL", .{});
+        return false;
+    };
+    const current = currentBlockNumber(box);
+    if (block_number >= current or current - block_number > max_block_hashes) {
+        setError("block {d} is outside the BLOCKHASH window of block {d}", .{ block_number, current });
+        return false;
+    }
+    const index: usize = @intCast(current - 1 - block_number);
+    if (index >= box.ext.block_hashes.len) {
+        const previous = box.ext.block_hashes;
+        const grown = ffi_allocator.alloc([32]u8, index + 1) catch |err| {
+            setError("Failed to grow block hashes: {s}", .{@errorName(err)});
+            return false;
+        };
+        @memcpy(grown[0..previous.len], previous);
+        @memset(grown[previous.len..], @as([32]u8, @splat(0)));
+        box.ext.block_hashes = grown;
+        publishBlockHashes(box);
+        ffi_allocator.free(previous);
+    }
+    box.ext.block_hashes[index] = value.*;
+    return true;
+}
+
+/// Set the blob versioned hashes BLOBHASH reads (EIP-4844). They apply to every later
+/// `guillotine_call` and `guillotine_simulate`, and to `guillotine_execute_tx` when
+/// `tx_type` is 3. `count` 0 clears them. On failure the previous hashes are kept.
+export fn guillotine_set_blob_hashes(handle: ?*EvmHandle, hashes: ?[*]const [32]u8, count: usize) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    const source: []const [32]u8 = if (count == 0) &.{} else (hashes orelse {
+        setError("hashes is NULL but count is {d}", .{count});
+        return false;
+    })[0..count];
+    const copy = ffi_allocator.dupe([32]u8, source) catch |err| {
+        setError("Failed to copy blob hashes: {s}", .{@errorName(err)});
+        return false;
+    };
+    const previous = box.ext.blob_hashes;
+    box.ext.blob_hashes = copy;
+    switch (box.variant) {
+        inline else => |instance| instance.context.blob_versioned_hashes = copy,
+    }
+    ffi_allocator.free(previous);
+    return true;
+}
+
+/// Set the EIP-4844 fee cap per unit of blob gas (big-endian u256) for later
+/// `guillotine_execute_tx` calls with `tx_type` 3: a cap below the block's blob base
+/// fee rejects the transaction, and the sender must afford every blob at the cap.
+/// NULL removes the cap and with it both checks.
+export fn guillotine_set_max_fee_per_blob_gas(handle: ?*EvmHandle, max_fee: ?*const [32]u8) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    box.ext.max_fee_per_blob_gas = if (max_fee) |bytes| std.mem.readInt(u256, bytes, .big) else null;
+    return true;
+}
+
+const AccessLists = struct {
+    call: []evm.AccessListEntry,
+    tx: []evm.tx_runner.AccessListEntry,
+};
+
+/// Copy an FFI access list into C-allocator memory. On error nothing is kept.
+fn copyAccessList(entries: []const AccessListEntryFFI) error{ OutOfMemory, NullStorageKeys }!AccessLists {
+    const call = try ffi_allocator.alloc(evm.AccessListEntry, entries.len);
+    errdefer ffi_allocator.free(call);
+    const tx = try ffi_allocator.alloc(evm.tx_runner.AccessListEntry, entries.len);
+    errdefer ffi_allocator.free(tx);
+    var copied: usize = 0;
+    errdefer for (call[0..copied]) |entry| ffi_allocator.free(entry.storage_keys);
+    for (entries, call, tx) |entry, *call_entry, *tx_entry| {
+        const raw: []const [32]u8 = if (entry.storage_keys_len == 0)
+            &.{}
+        else
+            (entry.storage_keys orelse return error.NullStorageKeys)[0..entry.storage_keys_len];
+        const keys = try ffi_allocator.alloc(u256, raw.len);
+        for (keys, raw) |*key, *bytes| key.* = std.mem.readInt(u256, bytes, .big);
+        const address = Address{ .bytes = entry.address };
+        call_entry.* = .{ .address = address, .storage_keys = keys };
+        tx_entry.* = .{ .address = address, .storage_keys = keys };
+        copied += 1;
+    }
+    return .{ .call = call, .tx = tx };
+}
+
+/// Set the EIP-2930 access list of later transactions. Every address and storage key
+/// starts those transactions warm and is charged intrinsic gas (2,400 per address,
+/// 1,900 per key). It applies to `guillotine_call` and `guillotine_simulate`, and to
+/// `guillotine_execute_tx` when `tx_type` is 1 or higher. `count` 0 clears the list.
+/// On failure the previous list is kept.
+export fn guillotine_set_access_list(handle: ?*EvmHandle, entries: ?[*]const AccessListEntryFFI, count: usize) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    const source: []const AccessListEntryFFI = if (count == 0) &.{} else (entries orelse {
+        setError("entries is NULL but count is {d}", .{count});
+        return false;
+    })[0..count];
+    const lists = copyAccessList(source) catch |err| {
+        setError("Failed to copy the access list: {s}", .{@errorName(err)});
+        return false;
+    };
+    box.ext.freeAccessList();
+    box.ext.access_list = lists.call;
+    box.ext.tx_access_list = lists.tx;
+    return true;
+}
+
+/// Set the EIP-7702 authorization list of later transactions. The tuples are applied
+/// before execution as the EIP specifies: an invalid tuple is skipped, not an error.
+/// It applies to `guillotine_call` and `guillotine_simulate` (which then run as
+/// set-code transactions: Prague or later, and never a CREATE), and to
+/// `guillotine_execute_tx` when `tx_type` is 4. `count` 0 clears the list.
+/// On failure the previous list is kept.
+export fn guillotine_set_authorization_list(
+    handle: ?*EvmHandle,
+    authorizations: ?[*]const AuthorizationFFI,
+    count: usize,
+) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    const source: []const AuthorizationFFI = if (count == 0) &.{} else (authorizations orelse {
+        setError("authorizations is NULL but count is {d}", .{count});
+        return false;
+    })[0..count];
+    const copy = ffi_allocator.alloc(evm.Authorization, source.len) catch |err| {
+        setError("Failed to copy the authorization list: {s}", .{@errorName(err)});
+        return false;
+    };
+    for (copy, source) |*dst, src| dst.* = .{
+        .chain_id = src.chain_id,
+        .address = Address{ .bytes = src.address },
+        .nonce = src.nonce,
+        .v = src.y_parity,
+        .r = src.r,
+        .s = src.s,
+    };
+    ffi_allocator.free(box.ext.authorizations);
+    box.ext.authorizations = copy;
+    return true;
+}
+
+/// Forget the addresses and storage slots that calls on this handle touched so far,
+/// so the next result's `accessed_*` lists and `guillotine_dump_state` start from the
+/// state the host set up. Accounts configured through `guillotine_set_*` stay in the
+/// dump. No account, storage slot or code is changed.
+export fn guillotine_reset_touched(handle: ?*EvmHandle) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    switch (box.variant) {
+        inline else => |instance| instance.resetTouched(),
+    }
+    return true;
+}
+
+/// Bound the structLogs capture of a tracing handle. Capture stops at `max_steps`
+/// records or `max_bytes` bytes of retained trace data (each record and the stack copy
+/// it holds), whichever comes first, and
+/// the trace reports `"truncated":true`; execution and its result are unaffected.
+/// `trace_unlimited` (UINT64_MAX) removes a bound. Fails on a handle without the
+/// structLogs tracer.
+export fn guillotine_set_trace_limits(handle: ?*EvmHandle, max_steps: u64, max_bytes: u64) bool {
+    const box = acquireHandle(handle) orelse return false;
+    defer releaseHandle(box);
+    switch (box.variant) {
+        .mainnet_with_tracer => |instance| {
+            instance.tracer.config.max_steps = traceLimit(max_steps);
+            instance.tracer.config.max_bytes = traceLimit(max_bytes);
+            return true;
+        },
+        else => {
+            setError("guillotine_set_trace_limits needs a tracing handle", .{});
+            return false;
+        },
+    }
+}
+
+fn traceLimit(limit: u64) ?usize {
+    if (limit == trace_unlimited) return null;
+    return std.math.cast(usize, limit) orelse std.math.maxInt(usize);
 }
 
 /// Free a handle and all of its state. NULL is a no-op; an unknown or already destroyed
@@ -974,6 +1312,23 @@ fn buildCallParams(comptime E: type, p: *const CallParams, input: []const u8) ?E
 
 const ExecMode = enum { call, simulate };
 
+/// What a result reports about its structLogs trace.
+const TraceStatus = struct {
+    include: bool,
+    truncated: bool = false,
+    reason: []const u8 = "none",
+};
+
+/// Read the completeness of the trace the call that just returned captured.
+fn traceStatus(instance: anytype, include_trace: bool) TraceStatus {
+    if (!include_trace) return .{ .include = false };
+    return .{
+        .include = true,
+        .truncated = instance.tracer.isTruncated(),
+        .reason = @tagName(instance.tracer.truncationReason()),
+    };
+}
+
 fn attachCallTraceJson(out: *EvmResult, call_tracer: ?*evm.CallTracer) !void {
     const ct = call_tracer orelse return;
     if (ct.oom) return error.OutOfMemory;
@@ -994,6 +1349,7 @@ fn execute(
     mode: ExecMode,
     include_trace: bool,
     call_tracer: ?*evm.CallTracer,
+    ext: *const Extensions,
 ) ?*EvmResult {
     const E = @TypeOf(instance.*);
     const call_params = buildCallParams(E, p, input) orelse return null;
@@ -1008,6 +1364,19 @@ fn execute(
     instance.origin = Address{ .bytes = p.caller };
     defer instance.origin = saved_origin;
 
+    // The handle's EIP-2930 and EIP-7702 lists travel with this call only.
+    const saved_access_list = instance.context.access_list;
+    const saved_authorizations = instance.context.authorization_list;
+    const saved_set_code = instance.context.is_set_code_transaction;
+    instance.context.access_list = ext.access_list;
+    instance.context.authorization_list = ext.authorizations;
+    instance.context.is_set_code_transaction = ext.authorizations.len != 0;
+    defer {
+        instance.context.access_list = saved_access_list;
+        instance.context.authorization_list = saved_authorizations;
+        instance.context.is_set_code_transaction = saved_set_code;
+    }
+
     const database = instance.database;
     switch (mode) {
         .simulate => {
@@ -1015,7 +1384,7 @@ fn execute(
             // nothing is committed, whatever happens to the result afterwards.
             var result = instance.simulate(call_params);
             defer result.deinit(instance.allocator);
-            const out = convertCallResult(result_allocator, &result, include_trace) catch |err| {
+            const out = convertCallResult(result_allocator, &result, traceStatus(instance, include_trace)) catch |err| {
                 setError("Failed to copy call result: {s}", .{@errorName(err)});
                 return null;
             };
@@ -1038,7 +1407,7 @@ fn execute(
             };
             var result = instance.call(call_params);
             defer result.deinit(instance.allocator);
-            const converted = convertCallResult(result_allocator, &result, include_trace) catch |err| {
+            const converted = convertCallResult(result_allocator, &result, traceStatus(instance, include_trace)) catch |err| {
                 database.revert_to_depth(depth);
                 setError("Failed to copy call result, call rolled back: {s}", .{@errorName(err)});
                 return null;
@@ -1073,9 +1442,9 @@ fn run(handle: ?*EvmHandle, params: ?*const CallParams, mode: ExecMode) ?*EvmRes
         return null;
     }
     return switch (box.variant) {
-        .mainnet_with_tracer => |instance| execute(instance, p, input, mode, true, null),
-        .call_tracer => |instance| execute(instance, p, input, mode, false, box.call_tracer),
-        inline else => |instance| execute(instance, p, input, mode, false, null),
+        .mainnet_with_tracer => |instance| execute(instance, p, input, mode, true, null, &box.ext),
+        .call_tracer => |instance| execute(instance, p, input, mode, false, box.call_tracer, &box.ext),
+        inline else => |instance| execute(instance, p, input, mode, false, null, &box.ext),
     };
 }
 
@@ -1140,9 +1509,21 @@ fn executeTxOnInstance(
     p: *const TxParamsFFI,
     input: []const u8,
     call_tracer: ?*evm.CallTracer,
+    ext: *const Extensions,
 ) ?*EvmResult {
     const E = @TypeOf(instance.*);
     if (call_tracer) |ct| ct.clear();
+    // The runner installs this transaction's origin, gas price and context on the
+    // EVM. They describe this transaction only: put the handle's own back afterwards,
+    // so a later `guillotine_call` is not priced or validated as this transaction.
+    const saved_origin = instance.origin;
+    const saved_gas_price = instance.gas_price;
+    const saved_context = instance.context;
+    defer {
+        instance.origin = saved_origin;
+        instance.gas_price = saved_gas_price;
+        instance.context = saved_context;
+    }
     const tx = evm.tx_runner.Transaction{
         .tx_type = p.tx_type,
         .from = Address{ .bytes = p.from },
@@ -1154,6 +1535,11 @@ fn executeTxOnInstance(
         .max_fee_per_gas = if (p.has_max_fee) std.mem.readInt(u256, &p.max_fee_per_gas, .big) else null,
         .max_priority_fee_per_gas = std.mem.readInt(u256, &p.max_priority_fee_per_gas, .big),
         .input = input,
+        // Each list rides only on the transaction types that carry it.
+        .access_list = if (p.tx_type >= 1) ext.tx_access_list else &.{},
+        .blob_hashes = if (p.tx_type == 3) ext.blob_hashes else &.{},
+        .max_fee_per_blob_gas = if (p.tx_type == 3) ext.max_fee_per_blob_gas else null,
+        .authorizations = if (p.tx_type == 4) ext.authorizations else &.{},
         .disable_balance_check = p.disable_balance_check,
     };
     const database = instance.database;
@@ -1194,8 +1580,8 @@ export fn guillotine_execute_tx(handle: ?*EvmHandle, params: ?*const TxParamsFFI
     };
     const input = inputSlice(p.input, p.input_len, "params.input") orelse return null;
     return switch (box.variant) {
-        .call_tracer => |instance| executeTxOnInstance(instance, p, input, box.call_tracer),
-        inline else => |instance| executeTxOnInstance(instance, p, input, null),
+        .call_tracer => |instance| executeTxOnInstance(instance, p, input, box.call_tracer, &box.ext),
+        inline else => |instance| executeTxOnInstance(instance, p, input, null, &box.ext),
     };
 }
 
@@ -1239,6 +1625,42 @@ pub const test_hooks = if (builtin.is_test) struct {
     /// Handle boxes that exist right now: created and not yet torn down. A stress
     /// test reads it to prove that no box leaks and none is destroyed twice.
     pub var live_boxes: std.atomic.Value(usize) = .init(0);
+
+    /// EVM state of a handle that the ABI has no getter for. A test compares two
+    /// of these to prove that an entry point left the instance alone.
+    pub const Observed = struct {
+        origin: [20]u8,
+        /// Length and hash of the EVM's return data, or null when it has none.
+        return_data: ?struct { len: usize, hash: u64 },
+        touched_addresses: usize,
+        transaction_touched: usize,
+        touched_storage_addresses: usize,
+        touched_storage_slots: usize,
+    };
+
+    /// Read `Observed` from a live handle; null for a NULL or destroyed one.
+    pub fn observe(handle: ?*EvmHandle) ?Observed {
+        const box = acquireHandle(handle) orelse return null;
+        defer releaseHandle(box);
+        return switch (box.variant) {
+            inline else => |instance| blk: {
+                var slots: usize = 0;
+                var it = instance.touched_storage.valueIterator();
+                while (it.next()) |set| slots += set.count();
+                break :blk Observed{
+                    .origin = instance.origin.bytes,
+                    .return_data = if (instance.return_data) |data|
+                        .{ .len = data.len, .hash = std.hash.Wyhash.hash(0, data) }
+                    else
+                        null,
+                    .touched_addresses = instance.touched_addresses.count(),
+                    .transaction_touched = instance.transaction_touched.items.len,
+                    .touched_storage_addresses = instance.touched_storage.count(),
+                    .touched_storage_slots = slots,
+                };
+            },
+        };
+    }
 
     const vtable = std.mem.Allocator.VTable{
         .alloc = alloc,
@@ -1288,7 +1710,7 @@ fn dupeCString(allocator: std.mem.Allocator, text: []const u8) ![*:0]const u8 {
 /// Copy a CallResult into a C-allocated EvmResult. Every pointer is set before any
 /// allocation that can fail, so `freeResult` releases a partial copy correctly.
 /// `allocator` must hand out C-allocator memory (see `result_allocator`).
-fn convertCallResult(allocator: std.mem.Allocator, result: anytype, include_trace: bool) !*EvmResult {
+fn convertCallResult(allocator: std.mem.Allocator, result: anytype, trace_status: TraceStatus) !*EvmResult {
     const out = try allocator.create(EvmResult);
     out.* = emptyResult();
     errdefer freeResult(out);
@@ -1354,9 +1776,9 @@ fn convertCallResult(allocator: std.mem.Allocator, result: anytype, include_trac
         out.has_created_address = true;
     }
 
-    if (include_trace) {
+    if (trace_status.include) {
         if (result.trace) |*trace| {
-            const json = try writeTraceJson(allocator, trace);
+            const json = try writeTraceJson(allocator, trace, trace_status);
             if (json.len == 0) {
                 ffi_allocator.free(json);
             } else {
@@ -1368,8 +1790,12 @@ fn convertCallResult(allocator: std.mem.Allocator, result: anytype, include_trac
     return out;
 }
 
-/// Serialize an execution trace as `{"structLogs":[...]}`. Caller owns the returned slice.
-fn writeTraceJson(allocator: std.mem.Allocator, trace: anytype) ![]u8 {
+/// Serialize an execution trace as
+/// `{"structLogs":[...],"truncated":<bool>,"truncationReason":"<reason>"}`.
+/// `truncated` is true when a capture bound or an allocation failure dropped steps:
+/// the listed steps are then a valid prefix of the execution, not all of it.
+/// Caller owns the returned slice.
+fn writeTraceJson(allocator: std.mem.Allocator, trace: anytype, status: TraceStatus) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
     const w = &out.writer;
@@ -1386,7 +1812,7 @@ fn writeTraceJson(allocator: std.mem.Allocator, trace: anytype) ![]u8 {
         }
         try w.print("],\"memSize\":{d}}}", .{step.mem_size});
     }
-    try w.writeAll("]}");
+    try w.print("],\"truncated\":{},\"truncationReason\":\"{s}\"}}", .{ status.truncated, status.reason });
     return out.toOwnedSlice();
 }
 

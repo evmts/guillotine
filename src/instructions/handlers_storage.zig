@@ -107,7 +107,7 @@ pub fn Handlers(FrameType: type) type {
             // slot or computing dynamic cost, matching execution-specs (storage.py: sstore).
             // Earlier forks have no sentry. SSTORE ends its basic block and has no static
             // gas, so `gas_remaining` here is exactly the gas left before this SSTORE.
-            if (comptime fork_gas.sstoreHasSentry(hardfork)) {
+            if (comptime fork_gas.sstoreHasSentry(hardfork) and !FrameType.gas_checks_disabled) {
                 if (self.gas_remaining <= @as(FrameType.GasType, @intCast(fork_gas.sstore_sentry_gas))) {
                     self.afterComplete(.SSTORE);
                     return Error.OutOfGas;

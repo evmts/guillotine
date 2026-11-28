@@ -255,6 +255,182 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
     }
 }
 
+/// EIP-7685 `computeRequestsHash` against an independent model: a list is accepted
+/// only when every request has a type byte and the types are unique and strictly
+/// ascending; an accepted list hashes to sha256 over sha256(request) of every
+/// request that carries data.
+pub fn fuzzRequestsHashOrdering(_: void, input: []const u8) !void {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    var storage: [8][]const u8 = undefined;
+    var count: usize = 0;
+    var cursor: usize = 0;
+    while (count < storage.len and cursor < input.len) {
+        // Low three bits: the request length (0 = no type byte), then the request.
+        const len = @min(@as(usize, input[cursor] % 8), input.len - cursor - 1);
+        storage[count] = input[cursor + 1 .. cursor + 1 + len];
+        count += 1;
+        cursor += 1 + len;
+    }
+    const requests = storage[0..count];
+
+    var expected_error: ?evm.eips.RequestsError = null;
+    var outer = Sha256.init(.{});
+    var seen: [256]bool = @splat(false);
+    var highest: ?u8 = null;
+    for (requests) |request| {
+        if (request.len == 0) {
+            expected_error = error.MissingRequestType;
+            break;
+        }
+        // Unique and ascending: the type is new and above every earlier type.
+        const above_all = if (highest) |top| request[0] > top else true;
+        if (seen[request[0]] or !above_all) {
+            expected_error = error.RequestTypesNotAscending;
+            break;
+        }
+        seen[request[0]] = true;
+        highest = request[0];
+        if (request.len == 1) continue;
+        var digest: [32]u8 = undefined;
+        Sha256.hash(request, &digest, .{});
+        outer.update(&digest);
+    }
+
+    const actual = evm.eips.computeRequestsHash(requests);
+    if (expected_error) |err| {
+        try std.testing.expectError(err, actual);
+    } else {
+        var expected: [32]u8 = undefined;
+        outer.final(&expected);
+        try std.testing.expectEqualSlices(u8, &expected, &(try actual));
+    }
+
+    // Any list with one request repeated is refused, wherever the copy lands.
+    if (count >= 1 and count < storage.len and expected_error == null) {
+        const at = if (input.len > 0) input[input.len - 1] % count else 0;
+        var doubled: [9][]const u8 = undefined;
+        @memcpy(doubled[0 .. at + 1], requests[0 .. at + 1]);
+        doubled[at + 1] = requests[at];
+        @memcpy(doubled[at + 2 .. count + 1], requests[at + 1 .. count]);
+        try std.testing.expectError(
+            error.RequestTypesNotAscending,
+            evm.eips.computeRequestsHash(doubled[0 .. count + 1]),
+        );
+    }
+}
+
+/// EIP-1283 exists on Constantinople alone: Petersburg removed it and no later fork
+/// brought it back (EIP-2200 replaced it). An override still decides it on any fork,
+/// and decides every other EIP the same way.
+pub fn fuzzEip1283AndOverrides(_: void, input: []const u8) !void {
+    if (input.len < 4) return;
+    for (ALL_HARDFORKS) |hardfork| {
+        const eips = Eips{ .hardfork = hardfork };
+        try std.testing.expectEqual(hardfork == .CONSTANTINOPLE, eips.is_eip_active(1283));
+    }
+    try std.testing.expect(!(Eips{ .hardfork = .OSAKA }).is_eip_active(1283));
+
+    const hardfork = ALL_HARDFORKS[input[0] % ALL_HARDFORKS.len];
+    const known = [_]u16{ 150, 170, 1283, 2200, 2929, 3529, 3651, 3855, 3860, 4788, 2935, 6780, 7702, 1153, 4844 };
+    const eip = known[input[1] % known.len];
+    const enabled = (input[2] & 1) == 1;
+    const base = Eips{ .hardfork = hardfork };
+    const override_list = [_]evm.eips.EipOverride{.{ .eip = eip, .enabled = enabled }};
+    const overridden = Eips{ .hardfork = hardfork, .overrides = &override_list };
+    try std.testing.expectEqual(enabled, overridden.is_eip_active(eip));
+    // An override of one EIP changes no other EIP.
+    const other = known[input[3] % known.len];
+    if (other != eip) try std.testing.expectEqual(base.is_eip_active(other), overridden.is_eip_active(other));
+
+    // The helpers read the same answer as `is_eip_active`: none bypasses an override.
+    try std.testing.expectEqual(overridden.is_eip_active(3855), overridden.eip_3855_push0_enabled());
+    try std.testing.expectEqual(overridden.is_eip_active(6780), overridden.eip_6780_selfdestruct_same_transaction_only());
+    try std.testing.expectEqual(overridden.is_eip_active(3860), overridden.size_limit() != null);
+}
+
+/// An EIP-7702 authorization list is all or nothing under allocation failure: when
+/// the database runs out of memory at any tuple, no authority keeps a delegation
+/// or a nonce bump, the gas is untouched and no snapshot stays open.
+pub fn fuzzAuthorizationListAtomicUnderOom(_: void, input: []const u8) !void {
+    if (input.len < 3) return;
+    const crypto = @import("crypto").Crypto;
+    const allocator = fuzz_alloc.get();
+    const count: usize = @as(usize, input[0] % 4) + 1;
+    const delegate = Address{ .bytes = [_]u8{0xDE} ++ @as([19]u8, @splat(0)) };
+
+    var list: [4]evm.Authorization = undefined;
+    var authorities: [4]Address = undefined;
+    for (list[0..count], authorities[0..count], 0..) |*tuple, *authority, index| {
+        const key: crypto.PrivateKey = @as([32]u8, @splat(@intCast(0x31 + index + @as(usize, input[1] % 16) * 4)));
+        authority.* = (try crypto.unaudited_getPublicKey(key)).toAddress();
+        tuple.* = try primitives.Authorization.createAuthorization(allocator, 1, delegate, 0, key);
+        tuple.v -= 27; // the tuple carries y_parity
+    }
+
+    var failing = std.testing.FailingAllocator.init(allocator, .{});
+    var db = Database.init(failing.allocator());
+    defer db.deinit();
+    const start_gas: i64 = 1_000_000;
+    var gas_remaining = start_gas;
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = Eips{ .hardfork = .PRAGUE },
+    };
+
+    failing.fail_index = failing.alloc_index + @as(usize, input[2] % 24);
+    const outcome = processor.processAuthorizationList(list[0..count]);
+    failing.fail_index = std.math.maxInt(usize);
+
+    try std.testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+    if (outcome) |_| {
+        try std.testing.expectEqual(start_gas - @as(i64, @intCast(count)) * 25_000, gas_remaining);
+        for (authorities[0..count]) |authority| {
+            const account = (try db.get_account(authority.bytes)) orelse return error.AuthorityMissing;
+            try std.testing.expectEqual(@as(u64, 1), account.nonce);
+            try std.testing.expectEqual(@as(?Address, delegate), account.delegated_address);
+        }
+    } else |err| {
+        try std.testing.expectEqual(error.OutOfMemory, err);
+        try std.testing.expectEqual(start_gas, gas_remaining);
+        for (authorities[0..count]) |authority| try std.testing.expect(!db.account_exists(authority.bytes));
+    }
+}
+
+const requests_corpus: []const []const u8 = &.{
+    &.{},
+    &.{ 2, 0x00, 0xAA, 2, 0x00, 0xBB }, // duplicate type 0
+    &.{ 2, 0x01, 0xAA, 2, 0x00, 0xBB }, // inversion
+    &.{ 2, 0x00, 0xAA, 2, 0x01, 0xBB, 2, 0x02, 0xCC }, // strictly ascending
+    &.{ 1, 0x00, 1, 0x00 }, // duplicate with no data
+    &.{ 2, 0x00, 0xAA, 0, 2, 0x01, 0xBB }, // a request with no type byte
+    &.{ 3, 0x00, 1, 2, 3, 0x02, 9, 9, 3, 0x02, 8, 8 }, // gap, then a duplicate of the highest type
+    &.{ 2, 0xFF, 0x01, 2, 0xFF, 0x02 }, // duplicate of type 255
+    &.{ 2, 0x00, 0x01, 2, 0x02, 0x02, 2, 0x01, 0x03 }, // non-adjacent inversion
+};
+
+const eip_override_corpus: []const []const u8 = &.{
+    &.{ 6, 2, 1, 3 }, // Petersburg: enable EIP-1283
+    &.{ 5, 2, 0, 3 }, // Constantinople: disable EIP-1283
+    &.{ 12, 11, 0, 0 }, // Cancun: disable EIP-6780
+    &.{ 9, 7, 1, 8 }, // London: enable PUSH0
+    &.{ 10, 8, 1, 2 }, // Merge: enable the init code limit
+    &.{ 13, 12, 0, 14 }, // Prague: disable EIP-7702
+};
+
+const authorization_oom_corpus: []const []const u8 = &.{
+    &.{ 0, 0, 0 },
+    &.{ 3, 0, 0 },
+    &.{ 3, 1, 1 },
+    &.{ 3, 2, 2 },
+    &.{ 3, 3, 3 },
+    &.{ 3, 4, 5 },
+    &.{ 2, 5, 8 },
+    &.{ 3, 6, 13 },
+    &.{ 3, 7, 23 },
+};
+
 const admission_sender = Address{ .bytes = [_]u8{0x51} ++ @as([19]u8, @splat(0)) };
 const admission_coinbase = Address{ .bytes = [_]u8{0xC0} ++ @as([19]u8, @splat(0)) };
 /// Exists and is empty before every transaction: the target of every call.
@@ -513,6 +689,18 @@ test "fuzz checked EIP-4844 blob fee against 512-bit arithmetic" {
 
 test "fuzz EIP-2028/3860/7623 calldata and initcode gas formulas" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzCalldataAndInitcodeGas), .{ .corpus = seed_corpus });
+}
+
+test "fuzz EIP-7685 requests hash rejects duplicate and out-of-order request types" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzRequestsHashOrdering), .{ .corpus = requests_corpus });
+}
+
+test "fuzz EIP-1283 is Constantinople-only and overrides reach every helper" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzEip1283AndOverrides), .{ .corpus = eip_override_corpus });
+}
+
+test "fuzz EIP-7702 authorization list atomicity under allocation failure" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzAuthorizationListAtomicUnderOom), .{ .corpus = authorization_oom_corpus });
 }
 
 test "fuzz EIP-7702 authorization processor validation and delegation state transitions" {

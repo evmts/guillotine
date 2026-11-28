@@ -574,9 +574,96 @@ pub inline fn stackEffectStep(height: i32, inputs: u8, outputs: u8) struct { low
     const low = height -| @as(i32, inputs);
     return .{ .low = low, .high = low +| @as(i32, outputs) };
 }
+/// Stack slot (0 = top) that checked `DUPn` copies, or null when the operand is
+/// outside its domain: `n == 0` names no item and `n > height` names an item that
+/// is not there. The subtraction runs only for `n >= 1`, so it cannot wrap.
+pub inline fn checkedDupIndex(n: u8, height: usize) ?usize {
+    if (n == 0) return null;
+    const depth: usize = n;
+    if (depth > height) return null;
+    return depth - 1;
+}
+
+/// Stack slot (0 = top) that checked `SWAPn` exchanges with the top, or null when
+/// the operand is outside its domain. `SWAPn` needs `n + 1` items; comparing
+/// `n >= height` in `usize` states that without computing `n + 1`, which wraps
+/// in `u8` for `n == 255`.
+pub inline fn checkedSwapIndex(n: u8, height: usize) ?usize {
+    if (n == 0) return null;
+    const depth: usize = n;
+    if (depth >= height) return null;
+    return depth;
+}
+
+/// `used + len` when the sum is representable and at most `limit`, else null.
+/// An arena calls this before it serves `len` more bytes, so a request near
+/// `maxInt(usize)` is refused instead of wrapping.
+pub inline fn checkedCapacityAdd(used: usize, len: usize, limit: usize) ?usize {
+    const sum = @addWithOverflow(used, len);
+    if (sum[1] != 0) return null;
+    if (sum[0] > limit) return null;
+    return sum[0];
+}
+
+/// EIP-7685: `requests` is ordered by `request_type` strictly ascending, so a
+/// request may follow `previous` only when its type is greater. An equal type is
+/// a duplicate and a smaller one an inversion; both are refused.
+pub inline fn requestTypeFollows(previous: u8, current: u8) bool {
+    return previous < current;
+}
+
+/// Probe index of an interpolation search over a sorted table of `len` program counters
+/// that span `pc_range`: `floor(target_offset * len / pc_range)`.
+/// The product is computed in `u64`, so no pair of `u32` operands can wrap it (a `usize`
+/// product wraps on 32-bit hosts as soon as it reaches 2^32). For `target_offset < pc_range`
+/// the result is below `len`. A target at or past the range, or an empty range, clamps to
+/// the last entry; an empty table yields 0.
+pub inline fn jumpTableInterpolationIndex(target_offset: u32, len: u32, pc_range: u32) u64 {
+    if (len == 0) return 0;
+    const last: u64 = @as(u64, len) - 1;
+    if (pc_range == 0 or target_offset >= pc_range) return last;
+    return (@as(u64, target_offset) * @as(u64, len)) / @as(u64, pc_range);
+}
 // ====== UNIT TESTS ======
 
 const testing = std.testing;
+
+test "verified_ops: checkedDupIndex and checkedSwapIndex refuse out-of-domain operands" {
+    try testing.expectEqual(@as(?usize, null), checkedDupIndex(0, 0));
+    try testing.expectEqual(@as(?usize, null), checkedDupIndex(0, 1024));
+    try testing.expectEqual(@as(?usize, 0), checkedDupIndex(1, 1));
+    try testing.expectEqual(@as(?usize, null), checkedDupIndex(2, 1));
+    try testing.expectEqual(@as(?usize, 15), checkedDupIndex(16, 16));
+    try testing.expectEqual(@as(?usize, 254), checkedDupIndex(255, 1024));
+    try testing.expectEqual(@as(?usize, null), checkedDupIndex(255, 254));
+
+    try testing.expectEqual(@as(?usize, null), checkedSwapIndex(0, 0));
+    try testing.expectEqual(@as(?usize, null), checkedSwapIndex(0, 1024));
+    try testing.expectEqual(@as(?usize, null), checkedSwapIndex(1, 1));
+    try testing.expectEqual(@as(?usize, 1), checkedSwapIndex(1, 2));
+    try testing.expectEqual(@as(?usize, 16), checkedSwapIndex(16, 17));
+    try testing.expectEqual(@as(?usize, null), checkedSwapIndex(255, 255));
+    try testing.expectEqual(@as(?usize, 255), checkedSwapIndex(255, 256));
+}
+
+test "verified_ops: checkedCapacityAdd never wraps and honors the limit" {
+    const max = std.math.maxInt(usize);
+    try testing.expectEqual(@as(?usize, 0), checkedCapacityAdd(0, 0, 0));
+    try testing.expectEqual(@as(?usize, 10), checkedCapacityAdd(4, 6, 10));
+    try testing.expectEqual(@as(?usize, null), checkedCapacityAdd(4, 7, 10));
+    try testing.expectEqual(@as(?usize, null), checkedCapacityAdd(1, max, max));
+    try testing.expectEqual(@as(?usize, null), checkedCapacityAdd(max - 1, 2, max));
+    try testing.expectEqual(@as(?usize, max), checkedCapacityAdd(max - 1, 1, max));
+    try testing.expectEqual(@as(?usize, null), checkedCapacityAdd(512, max - 1, 1 << 30));
+}
+
+test "verified_ops: requestTypeFollows is strict" {
+    try testing.expect(requestTypeFollows(0, 1));
+    try testing.expect(requestTypeFollows(0, 255));
+    try testing.expect(!requestTypeFollows(0, 0));
+    try testing.expect(!requestTypeFollows(1, 0));
+    try testing.expect(!requestTypeFollows(255, 255));
+}
 
 test "verified_ops: chargeGasChecked pays exactly or refuses, for i32 and i64" {
     inline for (.{ i32, i64 }) |GasType| {
@@ -864,4 +951,39 @@ test "verified_ops: slot bitmap takes the lowest free slot and releases it again
     try std.testing.expectEqual(@as(?u6, null), slotBitmapLowest(0));
     // A slot index selects its bit modulo 64, whatever word it lives in.
     try std.testing.expectEqual(slotBitmapMask(5), slotBitmapMask(64 + 5));
+}
+
+test "W3-12: jumpTableInterpolationIndex stays in bounds where a 32-bit product wraps" {
+    const max = std.math.maxInt(u32);
+    // 0xFFFF_FFFE * 0xFFFF_FFFF wraps a 32-bit product to 2; the 64-bit one does not,
+    // and dividing it by a range equal to the length gives the offset back.
+    try testing.expectEqual(@as(u64, max - 1), jumpTableInterpolationIndex(max - 1, max, max));
+    // A range one below the length: floor(0xFFFF_FFFD * 0xFFFF_FFFF / 0xFFFF_FFFE).
+    try testing.expectEqual(@as(u64, max - 2), jumpTableInterpolationIndex(max - 2, max, max - 1));
+    try testing.expectEqual(@as(u64, 0x8000_0000), jumpTableInterpolationIndex(0x8000_0000, max, max));
+    // 65_536 * 65_536 is exactly 2^32: a 32-bit product is 0 and would pick entry 0.
+    try testing.expectEqual(@as(u64, 32_768), jumpTableInterpolationIndex(65_536, 65_536, 131_072));
+    try testing.expectEqual(@as(u64, 0), jumpTableInterpolationIndex(0, max, max));
+}
+
+test "W3-12: jumpTableInterpolationIndex clamps out-of-range targets and degenerate tables" {
+    try testing.expectEqual(@as(u64, 0), jumpTableInterpolationIndex(7, 0, 100));
+    try testing.expectEqual(@as(u64, 9), jumpTableInterpolationIndex(100, 10, 100));
+    try testing.expectEqual(@as(u64, 9), jumpTableInterpolationIndex(std.math.maxInt(u32), 10, 100));
+    try testing.expectEqual(@as(u64, 9), jumpTableInterpolationIndex(5, 10, 0));
+    try testing.expectEqual(@as(u64, 0), jumpTableInterpolationIndex(0, 1, 1));
+}
+
+test "W3-12: jumpTableInterpolationIndex is below len for every in-range target" {
+    var prng = std.Random.DefaultPrng.init(0x5733_1200);
+    const random = prng.random();
+    for (0..20_000) |_| {
+        const len = random.int(u32) | 1;
+        const pc_range = random.int(u32) | 1;
+        const target_offset = random.uintLessThan(u32, pc_range);
+        const index = jumpTableInterpolationIndex(target_offset, len, pc_range);
+        try testing.expect(index < len);
+        const exact = (@as(u128, target_offset) * len) / pc_range;
+        try testing.expectEqual(@as(u128, index), exact);
+    }
 }

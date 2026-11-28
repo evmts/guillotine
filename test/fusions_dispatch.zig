@@ -34,7 +34,7 @@ test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
     var iter = bc.createIterator();
     var push_jump_count: usize = 0;
     var push_jumpi_count: usize = 0;
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_jump_fusion => push_jump_count += 1,
             .push_jumpi_fusion => push_jumpi_count += 1,
@@ -223,7 +223,7 @@ test "fusion dispatch: the schedule keeps one compact jump table and BLOCK_BEGIN
     var jumpdests: usize = 0;
     while (true) {
         const pc = iter.pc;
-        const op_data = iter.next() orelse break;
+        const op_data = try iter.next() orelse break;
         switch (op_data) {
             .jumpdest => {
                 jumpdests += 1;

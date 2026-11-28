@@ -18,6 +18,7 @@ const builtin = @import("builtin");
 const root = @import("root");
 
 const StackConfig = @import("stack_config.zig").StackConfig;
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// True when compiled as a shared library embedded in a host process (never abort).
 const embedded_build = @hasDecl(root, "guillotine_embedded") and root.guillotine_embedded;
@@ -188,20 +189,21 @@ pub fn Stack(config: StackConfig) type {
             self.stack_ptr += 1;
         }
 
-        // Generic dup function for DUP1-DUP16
+        /// Checked DUPn: push a copy of the nth item from the top (`n == 1` is the top).
+        /// `n == 0` names no item and `n` above the stack height names one that is
+        /// not there; both are `StackUnderflow`. The operand's domain is validated
+        /// (`verified_ops.checkedDupIndex`) before any index arithmetic.
         pub fn dup_n(self: *Self, n: u8) Error!void {
-            // Check if we have n items on stack
-            const current_elements = self.size_internal();
-            if (current_elements < n) {
+            const index = verified_ops.checkedDupIndex(n, self.size_internal()) orelse {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
-            }
+            };
             // Check if we have room for one more
             if (@intFromPtr(self.stack_ptr) <= @intFromPtr(self.stack_limit())) {
                 @branchHint(.cold);
                 return Error.StackOverflow;
             }
-            const value = self.stack_ptr[n - 1];
+            const value = self.stack_ptr[index];
             self.push_unsafe(value);
         }
 
@@ -267,16 +269,17 @@ pub fn Stack(config: StackConfig) type {
             return self.dup_n(16);
         }
 
-        // Generic swap function for SWAP1-SWAP16
+        /// Checked SWAPn: exchange the top with the item `n` below it (`n == 1` is the
+        /// second item). `n == 0` is no swap operand and `n + 1` above the stack
+        /// height reaches past the bottom; both are `StackUnderflow`. The check
+        /// (`verified_ops.checkedSwapIndex`) is in `usize` and never forms `n + 1`,
+        /// which wraps in `u8` for `n == 255`.
         pub fn swap_n(self: *Self, n: u8) Error!void {
-            // Check if we have n+1 items on stack
-            const current_elements = self.size_internal();
-            if (current_elements < n + 1) {
+            const index = verified_ops.checkedSwapIndex(n, self.size_internal()) orelse {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
-            }
-            // Swap top with nth item
-            std.mem.swap(WordType, &self.stack_ptr[0], &self.stack_ptr[n]);
+            };
+            std.mem.swap(WordType, &self.stack_ptr[0], &self.stack_ptr[index]);
         }
 
         // Unsafe generic swap without bounds checks (validated by planner)
@@ -957,7 +960,7 @@ test "Mock allocator and allocation failure" {
     };
 
     // Test that init fails with AllocationError when allocator fails
-    try std.testing.expectError(error.AllocationError, Stack(.{}).init(failing_allocator));
+    try std.testing.expectError(error.AllocationError, Stack(.{}).init(failing_allocator, null));
 }
 
 test "Complex operation sequences at boundaries" {
@@ -1127,4 +1130,70 @@ test "Unsafe operations at exact boundaries" {
     try std.testing.expectEqual(@as(u256, 100), stack.peek_unsafe());
     _ = stack.pop_unsafe();
     try std.testing.expectEqual(@as(usize, 0), stack.size());
+}
+
+test "W3-14: checked dup_n and swap_n reject an operand of zero with a typed error" {
+    const S = Stack(.{});
+    var stack = try S.init(std.testing.allocator, null);
+    defer stack.deinit(std.testing.allocator);
+
+    // Empty stack: before the fix `n - 1` wrapped below zero here.
+    try std.testing.expectError(S.Error.StackUnderflow, stack.dup_n(0));
+    try std.testing.expectError(S.Error.StackUnderflow, stack.swap_n(0));
+
+    try stack.push(11);
+    try stack.push(22);
+    try std.testing.expectError(S.Error.StackUnderflow, stack.dup_n(0));
+    try std.testing.expectError(S.Error.StackUnderflow, stack.swap_n(0));
+    // A refused operation leaves the stack as it was.
+    try std.testing.expectEqual(@as(usize, 2), stack.size());
+    try std.testing.expectEqual(@as(S.WordType, 22), try stack.peek());
+}
+
+test "W3-14: checked swap_n(255) and dup_n(255) never overflow the operand" {
+    const S = Stack(.{});
+    var stack = try S.init(std.testing.allocator, null);
+    defer stack.deinit(std.testing.allocator);
+
+    // Before the fix `n + 1` overflowed `u8` for n == 255 on every stack height.
+    try std.testing.expectError(S.Error.StackUnderflow, stack.swap_n(255));
+    try std.testing.expectError(S.Error.StackUnderflow, stack.dup_n(255));
+
+    for (0..255) |i| try stack.push(@intCast(i));
+    // 255 items: DUP255 has its operand, SWAP255 needs 256.
+    try std.testing.expectError(S.Error.StackUnderflow, stack.swap_n(255));
+    try stack.dup_n(255);
+    try std.testing.expectEqual(@as(S.WordType, 0), try stack.peek());
+
+    // 256 items: SWAP255 exchanges the top with the bottom item.
+    try stack.set_top(999);
+    try stack.swap_n(255);
+    try std.testing.expectEqual(@as(S.WordType, 0), try stack.peek());
+    try std.testing.expectEqual(@as(S.WordType, 999), stack.get_slice()[255]);
+}
+
+test "W3-14: checked dup_n and swap_n accept exactly the operands the stack height allows" {
+    const S = Stack(.{});
+    var stack = try S.init(std.testing.allocator, null);
+    defer stack.deinit(std.testing.allocator);
+
+    for (1..17) |height| {
+        try stack.push(@intCast(height));
+        var n: u8 = 1;
+        while (n <= 17) : (n += 1) {
+            if (n <= height) {
+                try stack.dup_n(n);
+                _ = try stack.pop();
+            } else {
+                try std.testing.expectError(S.Error.StackUnderflow, stack.dup_n(n));
+            }
+            if (n < height) {
+                try stack.swap_n(n);
+                try stack.swap_n(n);
+            } else {
+                try std.testing.expectError(S.Error.StackUnderflow, stack.swap_n(n));
+            }
+        }
+        try std.testing.expectEqual(height, stack.size());
+    }
 }

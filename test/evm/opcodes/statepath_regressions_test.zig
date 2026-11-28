@@ -590,7 +590,7 @@ test "storage: an overlay shadows base slots and its counts never reach the base
     try db.set_storage(address, 1, 10);
     try db.set_storage(address, 2, 20);
 
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     try db.set_storage(address, 1, 0); // hides a base slot
     try db.set_storage(address, 3, 30); // adds a slot
     try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 1));

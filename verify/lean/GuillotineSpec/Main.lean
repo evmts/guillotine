@@ -104,7 +104,7 @@ def cmdGas : List String → Option String
   | ["CREATE", fk, len] => do
     let f ← Fork.ofName fk
     let n ← nat? len
-    pure s!"{hx (Gas.createGas f n)} {hx (Gas.initcodeWordCost f n)} {hx (Gas.initcodeSizeLimit f)}"
+    pure s!"{hx (Gas.createGas f n)} {hx (Gas.initcodeWordCost f n)} {hxOpt (Gas.initcodeSizeLimit f)}"
   | ["SD", fk, cold, hasBal, ex, dead] => do
     let f ← Fork.ofName fk
     pure s!"{hx (Gas.selfdestructGas f (← bool? cold) (← bool? hasBal) (← bool? ex) (← bool? dead))} {hx (Gas.selfdestructRefund f)}"

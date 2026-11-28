@@ -152,5 +152,7 @@ test {
     _ = @import("r1_integration_regressions.zig");
     _ = @import("statepath_regressions_test.zig");
     _ = @import("dispatchpath_regressions_test.zig");
+    _ = @import("w3tracer_regressions_test.zig");
+    _ = @import("w3core_regressions_test.zig");
     _ = @import("state_root.zig");
 }

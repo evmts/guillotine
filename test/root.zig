@@ -115,6 +115,7 @@ test {
     _ = @import("evm/selfdestruct_records_test.zig");
     _ = @import("evm/allocation_failure_snapshot_test.zig");
     _ = @import("evm/transaction_admission_test.zig");
+    _ = @import("evm/state_atomicity_test.zig");
     _ = @import("evm/eip161_state_clearing_test.zig");
     _ = @import("evm/host_oom_abort_test.zig");
     _ = @import("evm/gas_and_code_bounds_test.zig");
@@ -128,8 +129,11 @@ test {
     // Trace validation tests
     _ = @import("trace_validation_test.zig");
 
-    // C FFI API tracing tests
-    // _ = @import("evm_c_api_tracing_test.zig"); // Temporarily disabled - missing C symbols
+    // C ABI tests: additive setters, bounded tracing, simulate isolation, structLogs
+    _ = @import("c_api/c_abi_extensions_test.zig");
+
+    // Frame debug printer
+    _ = @import("frame/frame_pretty_print_test.zig");
 
     // Provider integration tests
     _ = @import("provider/mock_provider.zig");

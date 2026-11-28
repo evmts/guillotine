@@ -1,28 +1,35 @@
 //! In-memory implementation of the database interface.
 //!
-//! Provides a complete state storage solution for testing and development.
-//! Supports snapshots for transaction rollback and batch operations for
-//! atomic updates. Not suitable for production due to memory constraints.
+//! A small state store for tests and development. Snapshots are full copies of
+//! the account, storage and transient-storage maps, so reverting one moves the
+//! copy back in and cannot fail part-way. Code is content-addressed and stored
+//! once per hash. Not suitable for production: every snapshot costs O(state).
 
 const std = @import("std");
 const Database = @import("database.zig").Database;
 const Account = @import("database.zig").Account;
-const crypto = @import("crypto");
 const primitives = @import("voltaire");
 
 /// In-memory database with snapshot and batch operation support.
 pub const MemoryDatabase = struct {
     allocator: std.mem.Allocator,
-    accounts: std.hash_map.HashMap([20]u8, Account, AccountContext, 80),
-    storage: std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80),
-    transient_storage: std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80),
+    accounts: AccountMap,
+    storage: StorageMap,
+    transient_storage: StorageMap,
     codes: std.hash_map.HashMap([32]u8, []u8, CodeHashContext, 80),
+    /// Code hashes in insertion order. A snapshot remembers the length, so a
+    /// revert frees exactly the code stored after it.
+    code_order: std.ArrayList([32]u8),
     snapshots: std.ArrayList(Snapshot),
     next_snapshot_id: u64,
     batch_in_progress: bool,
     batch_changes: ?BatchChanges,
 
     const Self = @This();
+
+    const AccountMap = std.hash_map.HashMap([20]u8, Account, AccountContext, 80);
+    const StorageMap = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80);
+    const AddressSet = std.hash_map.HashMap([20]u8, void, AccountContext, 80);
 
     const StorageKey = struct {
         address: [20]u8,
@@ -31,13 +38,30 @@ pub const MemoryDatabase = struct {
 
     const Snapshot = struct {
         id: u64,
-        accounts: std.hash_map.HashMap([20]u8, Account, AccountContext, 80),
-        storage: std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80),
+        accounts: AccountMap,
+        storage: StorageMap,
+        transient_storage: StorageMap,
+        code_count: usize,
+
+        fn deinit(self: *Snapshot) void {
+            self.accounts.deinit();
+            self.storage.deinit();
+            self.transient_storage.deinit();
+        }
     };
 
     const BatchChanges = struct {
         accounts: std.hash_map.HashMap([20]u8, ?Account, AccountContext, 80),
-        storage: std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80),
+        storage: StorageMap,
+        /// Accounts deleted in this batch. Their committed storage reads as zero
+        /// until the batch ends, and is dropped when the batch commits.
+        deleted: AddressSet,
+
+        fn deinit(self: *BatchChanges) void {
+            self.accounts.deinit();
+            self.storage.deinit();
+            self.deleted.deinit();
+        }
     };
 
     const AccountContext = struct {
@@ -80,11 +104,12 @@ pub const MemoryDatabase = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .accounts = std.hash_map.HashMap([20]u8, Account, AccountContext, 80).init(allocator),
-            .storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(allocator),
-            .transient_storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(allocator),
+            .accounts = AccountMap.init(allocator),
+            .storage = StorageMap.init(allocator),
+            .transient_storage = StorageMap.init(allocator),
             .codes = std.hash_map.HashMap([32]u8, []u8, CodeHashContext, 80).init(allocator),
-            .snapshots = std.ArrayList(Snapshot).empty,
+            .code_order = .empty,
+            .snapshots = .empty,
             .next_snapshot_id = 0,
             .batch_in_progress = false,
             .batch_changes = null,
@@ -96,25 +121,15 @@ pub const MemoryDatabase = struct {
         self.storage.deinit();
         self.transient_storage.deinit();
 
-        // Free all stored code
-        var code_iter = self.codes.iterator();
-        while (code_iter.next()) |entry| {
-            self.allocator.free(entry.value_ptr.*);
-        }
+        var code_iter = self.codes.valueIterator();
+        while (code_iter.next()) |code| self.allocator.free(code.*);
         self.codes.deinit();
+        self.code_order.deinit(self.allocator);
 
-        // Free all snapshots
-        for (self.snapshots.items) |*snapshot| {
-            snapshot.accounts.deinit();
-            snapshot.storage.deinit();
-        }
+        for (self.snapshots.items) |*snapshot| snapshot.deinit();
         self.snapshots.deinit(self.allocator);
 
-        // Free batch changes if any
-        if (self.batch_changes) |*batch| {
-            batch.accounts.deinit();
-            batch.storage.deinit();
-        }
+        if (self.batch_changes) |*batch| batch.deinit();
     }
 
     /// Convert to the generic database interface.
@@ -126,43 +141,45 @@ pub const MemoryDatabase = struct {
     // Account operations
 
     pub fn get_account(self: *Self, address: [20]u8) Database.Error!?Account {
-        if (self.batch_in_progress) {
-            if (self.batch_changes) |*batch| {
-                if (batch.accounts.get(address)) |maybe_account| {
-                    return maybe_account;
-                }
-            }
+        if (self.batch_changes) |*batch| {
+            if (batch.accounts.get(address)) |maybe_account| return maybe_account;
         }
         return self.accounts.get(address);
     }
 
     pub fn set_account(self: *Self, address: [20]u8, account: Account) Database.Error!void {
-        if (self.batch_in_progress) {
-            if (self.batch_changes) |*batch| {
-                try batch.accounts.put(address, account);
-                return;
-            }
-        }
+        if (self.batch_changes) |*batch| return batch.accounts.put(address, account);
         try self.accounts.put(address, account);
     }
 
+    /// Delete an account together with its persistent storage, so a later
+    /// account at the same address never reads the old slots.
     pub fn delete_account(self: *Self, address: [20]u8) Database.Error!void {
-        if (self.batch_in_progress) {
-            if (self.batch_changes) |*batch| {
-                try batch.accounts.put(address, null);
-                return;
-            }
+        if (self.batch_changes) |*batch| {
+            // Reserve first: once both maps have room nothing below can fail.
+            try batch.accounts.ensureUnusedCapacity(1);
+            try batch.deleted.ensureUnusedCapacity(1);
+            batch.accounts.putAssumeCapacity(address, null);
+            batch.deleted.putAssumeCapacity(address, {});
+            removeAddressSlots(&batch.storage, address);
+            return;
         }
         _ = self.accounts.remove(address);
+        removeAddressSlots(&self.storage, address);
+    }
+
+    /// Remove every slot of `address`. Removing through the iterator's key pointer
+    /// leaves the table in place, so the iteration stays valid.
+    fn removeAddressSlots(map: *StorageMap, address: [20]u8) void {
+        var it = map.keyIterator();
+        while (it.next()) |slot| {
+            if (std.mem.eql(u8, &slot.address, &address)) map.removeByPtr(slot);
+        }
     }
 
     pub fn account_exists(self: *Self, address: [20]u8) bool {
-        if (self.batch_in_progress) {
-            if (self.batch_changes) |*batch| {
-                if (batch.accounts.get(address)) |maybe_account| {
-                    return maybe_account != null;
-                }
-            }
+        if (self.batch_changes) |*batch| {
+            if (batch.accounts.get(address)) |maybe_account| return maybe_account != null;
         }
         return self.accounts.contains(address);
     }
@@ -176,29 +193,21 @@ pub const MemoryDatabase = struct {
 
     pub fn get_storage(self: *Self, address: [20]u8, key: u256) Database.Error!u256 {
         const storage_key = StorageKey{ .address = address, .key = key };
-        if (self.batch_in_progress) {
-            if (self.batch_changes) |*batch| {
-                if (batch.storage.get(storage_key)) |value| {
-                    return value;
-                }
-            }
+        if (self.batch_changes) |*batch| {
+            if (batch.storage.get(storage_key)) |value| return value;
+            if (batch.deleted.contains(address)) return 0;
         }
         return self.storage.get(storage_key) orelse 0;
     }
 
     pub fn set_storage(self: *Self, address: [20]u8, key: u256, value: u256) Database.Error!void {
         const storage_key = StorageKey{ .address = address, .key = key };
-        if (self.batch_in_progress) {
-            if (self.batch_changes) |*batch| {
-                try batch.storage.put(storage_key, value);
-                return;
-            }
-        }
+        if (self.batch_changes) |*batch| return batch.storage.put(storage_key, value);
         if (value == 0) {
             _ = self.storage.remove(storage_key);
-        } else {
-            try self.storage.put(storage_key, value);
+            return;
         }
+        try self.storage.put(storage_key, value);
     }
 
     pub fn get_transient_storage(self: *Self, address: [20]u8, key: u256) Database.Error!u256 {
@@ -210,9 +219,9 @@ pub const MemoryDatabase = struct {
         const storage_key = StorageKey{ .address = address, .key = key };
         if (value == 0) {
             _ = self.transient_storage.remove(storage_key);
-        } else {
-            try self.transient_storage.put(storage_key, value);
+            return;
         }
+        try self.transient_storage.put(storage_key, value);
     }
 
     // Code operations
@@ -222,44 +231,38 @@ pub const MemoryDatabase = struct {
     }
 
     pub fn get_code_by_address(self: *Self, address: [20]u8) Database.Error![]const u8 {
-        const account = try self.get_account(address);
-        if (account) |acc| {
-            if (std.mem.eql(u8, &acc.code_hash, &@as([32]u8, @splat(0)))) {
-                return &[_]u8{};
-            }
-            return self.get_code(acc.code_hash);
-        }
-        return &[_]u8{};
+        const account = (try self.get_account(address)) orelse return &.{};
+        if (!Account.is_code_hash_present(account.code_hash)) return &.{};
+        return self.get_code(account.code_hash);
     }
 
+    /// Store `code` under its keccak256 hash and return the hash. Code is stored
+    /// once per hash: storing the same bytes again allocates nothing.
     pub fn set_code(self: *Self, code: []const u8) Database.Error![32]u8 {
-        // Calculate keccak256 hash of the code
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
+        if (self.codes.contains(hash)) return hash;
 
-        // Store the code
+        try self.code_order.ensureUnusedCapacity(self.allocator, 1);
         const code_copy = try self.allocator.dupe(u8, code);
         errdefer self.allocator.free(code_copy);
-
         try self.codes.put(hash, code_copy);
-
+        self.code_order.appendAssumeCapacity(hash);
         return hash;
     }
 
-    // State root operations (simplified for in-memory)
+    // State root operations
 
+    /// This backend keeps no trie: its state root is always the zero hash.
     pub fn get_state_root(self: *Self) Database.Error![32]u8 {
         _ = self;
-        // For in-memory database, return a dummy root
         return @as([32]u8, @splat(0));
     }
 
+    /// End a transaction: clear transient storage (EIP-1153) and return the state root.
     pub fn commit_changes(self: *Self) Database.Error![32]u8 {
-        // Clear transient storage (EIP-1153)
         self.clear_transient_storage();
-
-        // Return dummy root
-        return @as([32]u8, @splat(0));
+        return self.get_state_root();
     }
 
     /// Clear transient storage (called at transaction end per EIP-1153)
@@ -270,92 +273,64 @@ pub const MemoryDatabase = struct {
 
     // Snapshot operations
 
+    /// Copy accounts, storage and transient storage. On error nothing changes.
     pub fn create_snapshot(self: *Self) Database.Error!u64 {
+        try self.snapshots.ensureUnusedCapacity(self.allocator, 1);
+        var accounts = try self.accounts.clone();
+        errdefer accounts.deinit();
+        var storage = try self.storage.clone();
+        errdefer storage.deinit();
+        var transient_storage = try self.transient_storage.clone();
+        errdefer transient_storage.deinit();
+
         const snapshot_id = self.next_snapshot_id;
         self.next_snapshot_id += 1;
-
-        // Clone current state
-        var snapshot_accounts = std.hash_map.HashMap([20]u8, Account, AccountContext, 80).init(self.allocator);
-        errdefer snapshot_accounts.deinit();
-
-        var accounts_iter = self.accounts.iterator();
-        while (accounts_iter.next()) |entry| {
-            try snapshot_accounts.put(entry.key_ptr.*, entry.value_ptr.*);
-        }
-
-        var snapshot_storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(self.allocator);
-        errdefer snapshot_storage.deinit();
-
-        var storage_iter = self.storage.iterator();
-        while (storage_iter.next()) |entry| {
-            try snapshot_storage.put(entry.key_ptr.*, entry.value_ptr.*);
-        }
-
-        try self.snapshots.append(self.allocator, Snapshot{
+        self.snapshots.appendAssumeCapacity(.{
             .id = snapshot_id,
-            .accounts = snapshot_accounts,
-            .storage = snapshot_storage,
+            .accounts = accounts,
+            .storage = storage,
+            .transient_storage = transient_storage,
+            .code_count = self.code_order.items.len,
         });
-
         return snapshot_id;
     }
 
-    pub fn revert_to_snapshot(self: *Self, snapshot_id: u64) Database.Error!void {
-        // Find the snapshot
-        var snapshot_index: ?usize = null;
+    fn snapshotIndex(self: *const Self, snapshot_id: u64) ?usize {
         for (self.snapshots.items, 0..) |snapshot, i| {
-            if (snapshot.id == snapshot_id) {
-                snapshot_index = i;
-                break;
-            }
+            if (snapshot.id == snapshot_id) return i;
         }
-
-        const index = snapshot_index orelse return Database.Error.SnapshotNotFound;
-
-        // Revert to the snapshot state
-        const snapshot = self.snapshots.items[index];
-
-        // Clear current state
-        self.accounts.clearAndFree();
-        self.storage.clearAndFree();
-
-        // Copy snapshot state
-        var accounts_iter = snapshot.accounts.iterator();
-        while (accounts_iter.next()) |entry| {
-            try self.accounts.put(entry.key_ptr.*, entry.value_ptr.*);
-        }
-
-        var storage_iter = snapshot.storage.iterator();
-        while (storage_iter.next()) |entry| {
-            try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
-        }
-
-        // Remove this and all later snapshots
-        while (self.snapshots.items.len > index) {
-            if (self.snapshots.items.len > 0) {
-                var removed = self.snapshots.items[self.snapshots.items.len - 1];
-                _ = self.snapshots.pop();
-                removed.accounts.deinit();
-                removed.storage.deinit();
-            }
-        }
+        return null;
     }
 
-    pub fn commit_snapshot(self: *Self, snapshot_id: u64) Database.Error!void {
-        // Find and remove the snapshot
-        var snapshot_index: ?usize = null;
-        for (self.snapshots.items, 0..) |snapshot, i| {
-            if (snapshot.id == snapshot_id) {
-                snapshot_index = i;
-                break;
-            }
+    /// Restore accounts, storage, transient storage and code to the snapshot and
+    /// drop it and every later snapshot. The snapshot's own maps become the live
+    /// state, so this allocates nothing: it either fails with `SnapshotNotFound`
+    /// before touching anything or completes.
+    pub fn revert_to_snapshot(self: *Self, snapshot_id: u64) Database.Error!void {
+        const index = self.snapshotIndex(snapshot_id) orelse return Database.Error.SnapshotNotFound;
+        const snapshot = self.snapshots.items[index];
+
+        while (self.code_order.items.len > snapshot.code_count) {
+            const hash = self.code_order.pop() orelse break;
+            if (self.codes.fetchRemove(hash)) |removed| self.allocator.free(removed.value);
         }
 
-        const index = snapshot_index orelse return Database.Error.SnapshotNotFound;
+        self.accounts.deinit();
+        self.storage.deinit();
+        self.transient_storage.deinit();
+        self.accounts = snapshot.accounts;
+        self.storage = snapshot.storage;
+        self.transient_storage = snapshot.transient_storage;
 
+        for (self.snapshots.items[index + 1 ..]) |*later| later.deinit();
+        self.snapshots.shrinkRetainingCapacity(index);
+    }
+
+    /// Keep the current state and drop the snapshot.
+    pub fn commit_snapshot(self: *Self, snapshot_id: u64) Database.Error!void {
+        const index = self.snapshotIndex(snapshot_id) orelse return Database.Error.SnapshotNotFound;
         var removed = self.snapshots.orderedRemove(index);
-        removed.accounts.deinit();
-        removed.storage.deinit();
+        removed.deinit();
     }
 
     // Batch operations
@@ -366,63 +341,57 @@ pub const MemoryDatabase = struct {
         self.batch_in_progress = true;
         self.batch_changes = BatchChanges{
             .accounts = std.hash_map.HashMap([20]u8, ?Account, AccountContext, 80).init(self.allocator),
-            .storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(self.allocator),
+            .storage = StorageMap.init(self.allocator),
+            .deleted = AddressSet.init(self.allocator),
         };
     }
 
+    /// Apply the batch. Room for every write is reserved first, so an allocation
+    /// failure leaves both the committed state and the pending batch as they were.
     pub fn commit_batch(self: *Self) Database.Error!void {
-        if (!self.batch_in_progress) return Database.Error.NoBatchInProgress;
+        const batch = if (self.batch_changes) |*b| b else return Database.Error.NoBatchInProgress;
+        try self.accounts.ensureUnusedCapacity(batch.accounts.count());
+        try self.storage.ensureUnusedCapacity(batch.storage.count());
 
-        if (self.batch_changes) |*batch| {
-            // Apply account changes
-            var accounts_iter = batch.accounts.iterator();
-            while (accounts_iter.next()) |entry| {
-                if (entry.value_ptr.*) |account| {
-                    try self.accounts.put(entry.key_ptr.*, account);
-                } else {
-                    _ = self.accounts.remove(entry.key_ptr.*);
-                }
+        var deleted_iter = batch.deleted.keyIterator();
+        while (deleted_iter.next()) |address| removeAddressSlots(&self.storage, address.*);
+
+        var accounts_iter = batch.accounts.iterator();
+        while (accounts_iter.next()) |entry| {
+            if (entry.value_ptr.*) |account| {
+                self.accounts.putAssumeCapacity(entry.key_ptr.*, account);
+            } else {
+                _ = self.accounts.remove(entry.key_ptr.*);
             }
-
-            // Apply storage changes
-            var storage_iter = batch.storage.iterator();
-            while (storage_iter.next()) |entry| {
-                if (entry.value_ptr.* == 0) {
-                    _ = self.storage.remove(entry.key_ptr.*);
-                } else {
-                    try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
-                }
-            }
-
-            batch.accounts.deinit();
-            batch.storage.deinit();
         }
 
+        var storage_iter = batch.storage.iterator();
+        while (storage_iter.next()) |entry| {
+            if (entry.value_ptr.* == 0) {
+                _ = self.storage.remove(entry.key_ptr.*);
+            } else {
+                self.storage.putAssumeCapacity(entry.key_ptr.*, entry.value_ptr.*);
+            }
+        }
+
+        batch.deinit();
         self.batch_in_progress = false;
         self.batch_changes = null;
     }
 
-    /// Get all account addresses (for state dumping)
+    /// Get all account addresses (for state dumping). Caller owns the slice.
     pub fn getAllAccounts(self: *Self, allocator: std.mem.Allocator) ![]const primitives.Address {
-        var addresses = std.ArrayList(primitives.Address).init(allocator);
-        errdefer addresses.deinit();
+        var addresses = try std.ArrayList(primitives.Address).initCapacity(allocator, self.accounts.count());
+        errdefer addresses.deinit(allocator);
 
-        var iter = self.accounts.iterator();
-        while (iter.next()) |entry| {
-            try addresses.append(primitives.Address{ .bytes = entry.key_ptr.* });
-        }
-
+        var iter = self.accounts.keyIterator();
+        while (iter.next()) |address| addresses.appendAssumeCapacity(.{ .bytes = address.* });
         return addresses.toOwnedSlice(allocator);
     }
 
     pub fn rollback_batch(self: *Self) Database.Error!void {
-        if (!self.batch_in_progress) return Database.Error.NoBatchInProgress;
-
-        if (self.batch_changes) |*batch| {
-            batch.accounts.deinit();
-            batch.storage.deinit();
-        }
-
+        const batch = if (self.batch_changes) |*b| b else return Database.Error.NoBatchInProgress;
+        batch.deinit();
         self.batch_in_progress = false;
         self.batch_changes = null;
     }
@@ -433,8 +402,6 @@ test "MemoryDatabase basic operations" {
 
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-
-    // Database is now used directly
 
     // Test account operations
     const address = @as([20]u8, @splat(1));
@@ -466,8 +433,6 @@ test "MemoryDatabase snapshot operations" {
 
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
-
-    // Database is now used directly
 
     // Set initial state
     const address = @as([20]u8, @splat(1));
@@ -505,200 +470,222 @@ test "MemoryDatabase snapshot operations" {
     try std.testing.expectEqual(@as(u256, 1000), reverted.?.balance);
 }
 
-// Tests for CREATE/CREATE2 code storage and retrieval
-// These tests verify that contract code is properly stored in the database
-// and can be retrieved after deployment
+test "W3-16: MemoryDatabase.set_code stores each code once and never leaks on overwrite" {
+    var db = MemoryDatabase.init(std.testing.allocator);
+    defer db.deinit();
 
-fn to_address(n: u32) [20]u8 {
-    var addr = @as([20]u8, @splat(0));
-    std.mem.writeInt(u32, addr[16..20], n, .big);
-    return addr;
+    const code = [_]u8{ 0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+    const first = try db.set_code(&code);
+    const stored = try db.get_code(first);
+    for (0..8) |_| {
+        const again = try db.set_code(&code);
+        try std.testing.expectEqualSlices(u8, &first, &again);
+        // The stored copy is reused, not replaced.
+        try std.testing.expectEqual(stored.ptr, (try db.get_code(again)).ptr);
+    }
+    try std.testing.expectEqual(@as(usize, 1), db.codes.count());
+    try std.testing.expectEqualSlices(u8, &code, try db.get_code(first));
+
+    var expected: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&code, &expected, .{});
+    try std.testing.expectEqualSlices(u8, &expected, &first);
 }
 
-fn to_u256(addr: [20]u8) u256 {
-    return primitives.Address.to_u256(addr);
+test "W3-16: MemoryDatabase.set_code leaks nothing when any allocation fails" {
+    const code = [_]u8{ 0x5f, 0x5f, 0xf3 };
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var db = MemoryDatabase.init(failing.allocator());
+        defer db.deinit();
+        const hash = db.set_code(&code) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(@as(usize, 0), db.codes.count());
+            try std.testing.expectEqual(@as(usize, 0), db.code_order.items.len);
+            continue;
+        };
+        try std.testing.expectEqualSlices(u8, &code, try db.get_code(hash));
+        break;
+    }
+    try std.testing.expect(fail_index >= 3);
 }
 
-// Helper to create test EVM
-const TestEvm = struct {
-    evm: *@import("../root.zig").DefaultEvm,
-    memory_db: *MemoryDatabase,
-};
+test "W3-16: MemoryDatabase.delete_account removes the account's storage and no other" {
+    var db = MemoryDatabase.init(std.testing.allocator);
+    defer db.deinit();
 
-fn createTestEvm(allocator: std.mem.Allocator) !TestEvm {
-    const memory_db = try allocator.create(MemoryDatabase);
-    memory_db.* = MemoryDatabase.init(allocator);
-
-    // Using database directly now
-    const evm_ptr = try allocator.create(@import("../root.zig").DefaultEvm);
-    const block_info = @import("../block/block_info.zig").BlockInfo.init();
-    const tx_context = @import("../block/transaction_context.zig").TransactionContext{
-        .gas_limit = 1_000_000,
-        .coinbase = primitives.Address.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-    evm_ptr.* = try @import("../root.zig").DefaultEvm.init(allocator, memory_db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .CANCUN);
-
-    return TestEvm{ .evm = evm_ptr, .memory_db = memory_db };
-}
-
-// Simple contract that returns its own code
-const RETURN_OWN_CODE_CONTRACT = [_]u8{
-    // Get code size
-    0x38, // CODESIZE
-    0x60, 0x00, // PUSH1 0 (offset)
-    0x52, // MSTORE
-
-    // Copy code to memory
-    0x38, // CODESIZE
-    0x60, 0x00, // PUSH1 0 (dest offset)
-    0x60, 0x00, // PUSH1 0 (src offset)
-    0x39, // CODECOPY
-
-    // Return the code
-    0x38, // CODESIZE
-    0x60, 0x00, // PUSH1 0 (memory offset)
-    0xF3, // RETURN
-};
-
-// Simple contract constructor that deploys a minimal contract
-// Constructor: stores a simple "hello" contract
-const CONSTRUCTOR_CONTRACT = [_]u8{
-    // Load the runtime code and return it
-    0x60, 0x0A, // PUSH1 10 (size of runtime code)
-    0x60, 0x0C, // PUSH1 12 (offset to runtime code)
-    0x60, 0x00, // PUSH1 0 (memory dest)
-    0x39, // CODECOPY
-    0x60, 0x0A, // PUSH1 10 (size)
-    0x60, 0x00, // PUSH1 0 (offset)
-    0xF3, // RETURN
-
-    // Runtime code starts here (offset 12):
-    0x60, 0x42, // PUSH1 0x42 ("hello" value)
-    0x60, 0x00, // PUSH1 0
-    0x52, // MSTORE
-    0x60, 0x20, // PUSH1 32
-    0x60, 0x00, // PUSH1 0
-    0xF3, // RETURN
-};
-
-test "CREATE stores code and retrieves via get_code_by_address" {
-    return error.SkipZigTest; // TODO: Update to use new architecture
-}
-
-test "CREATE2 stores code with deterministic address" {
-    return error.SkipZigTest; // TODO: Update to use new architecture
-}
-
-test "get_code_by_address returns empty for non-existent contracts" {
-    const allocator = std.testing.allocator;
-
-    const result = try createTestEvm(allocator);
-    var evm = result.evm;
-    var memory_db = result.memory_db;
-    defer {
-        evm.deinit();
-        allocator.destroy(evm);
-        memory_db.deinit();
-        allocator.destroy(memory_db);
+    const doomed = @as([20]u8, @splat(0xaa));
+    const kept = @as([20]u8, @splat(0xbb));
+    try db.set_account(doomed, Account.zero());
+    try db.set_account(kept, Account.zero());
+    for (0..64) |slot| {
+        try db.set_storage(doomed, slot, slot + 1);
+        try db.set_storage(kept, slot, slot + 100);
     }
 
-    const non_existent_address = to_address(0x9999);
-
-    // Should return empty slice for non-existent contract
-    const code = try evm.database.get_code_by_address(non_existent_address);
-    try std.testing.expectEqual(@as(usize, 0), code.len);
-}
-
-test "get_code_by_address returns empty for EOA (externally owned account)" {
-    const allocator = std.testing.allocator;
-
-    const result = try createTestEvm(allocator);
-    var evm = result.evm;
-    var memory_db = result.memory_db;
-    defer {
-        evm.deinit();
-        allocator.destroy(evm);
-        memory_db.deinit();
-        allocator.destroy(memory_db);
+    try db.delete_account(doomed);
+    try std.testing.expect(!db.account_exists(doomed));
+    try std.testing.expectEqual(@as(usize, 64), db.storage.count());
+    for (0..64) |slot| {
+        try std.testing.expectEqual(@as(u256, 0), try db.get_storage(doomed, slot));
+        try std.testing.expectEqual(@as(u256, slot + 100), try db.get_storage(kept, slot));
     }
 
-    const eoa_address = to_address(0x4000);
-
-    // Create an EOA (account with balance but no code)
-    var eoa_account = Account.zero();
-    eoa_account.balance = 1000;
-    try evm.database.set_account(eoa_address, eoa_account);
-
-    // Should return empty code for EOA
-    const code = try evm.database.get_code_by_address(eoa_address);
-    try std.testing.expectEqual(@as(usize, 0), code.len);
+    // An account created later at the same address starts with empty storage.
+    try db.set_account(doomed, Account.zero());
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(doomed, 7));
 }
 
-test "Code storage persistence across multiple operations" {
-    const allocator = std.testing.allocator;
+test "W3-16: MemoryDatabase.delete_account inside a batch hides storage and purges it on commit" {
+    var db = MemoryDatabase.init(std.testing.allocator);
+    defer db.deinit();
 
-    const result = try createTestEvm(allocator);
-    var evm = result.evm;
-    var memory_db = result.memory_db;
-    defer {
-        evm.deinit();
-        allocator.destroy(evm);
-        memory_db.deinit();
-        allocator.destroy(memory_db);
-    }
+    const address = @as([20]u8, @splat(0x11));
+    try db.set_account(address, Account.zero());
+    try db.set_storage(address, 1, 111);
+    try db.set_storage(address, 2, 222);
 
-    const test_code = [_]u8{ 0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xF3 };
-    const contract_address = to_address(0x5000);
+    // Rolled back: the deletion never happened.
+    try db.begin_batch();
+    try db.delete_account(address);
+    try std.testing.expect(!db.account_exists(address));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 1));
+    try db.rollback_batch();
+    try std.testing.expect(db.account_exists(address));
+    try std.testing.expectEqual(@as(u256, 111), try db.get_storage(address, 1));
 
-    // Manually set contract code
-    const code_hash = try evm.database.set_code(&test_code);
+    // Committed: old slots are gone, a slot written after the deletion survives.
+    try db.begin_batch();
+    try db.set_storage(address, 2, 999);
+    try db.delete_account(address);
+    try db.set_account(address, Account.zero());
+    try db.set_storage(address, 3, 333);
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+    try db.commit_batch();
+    try std.testing.expect(db.account_exists(address));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 1));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+    try std.testing.expectEqual(@as(u256, 333), try db.get_storage(address, 3));
+    try std.testing.expectEqual(@as(usize, 1), db.storage.count());
+}
+
+test "W3-16: MemoryDatabase.revert_to_snapshot restores accounts, storage, transient storage and code" {
+    var db = MemoryDatabase.init(std.testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x01));
+    const other = @as([20]u8, @splat(0x02));
+    const old_code = [_]u8{ 0x60, 0x01 };
+    const new_code = [_]u8{ 0x60, 0x02, 0x00 };
     var account = Account.zero();
-    account.code_hash = code_hash;
-    try evm.database.set_account(contract_address, account);
+    account.balance = 1000;
+    account.code_hash = try db.set_code(&old_code);
+    try db.set_account(address, account);
+    try db.set_storage(address, 1, 11);
+    try db.set_transient_storage(address, 1, 21);
 
-    // Retrieve code multiple times to ensure persistence
-    for (0..5) |_| {
-        const retrieved_code = try evm.database.get_code_by_address(contract_address);
-        try std.testing.expectEqualSlices(u8, &test_code, retrieved_code);
+    const snapshot = try db.create_snapshot();
+    account.balance = 5;
+    try db.set_account(address, account);
+    try db.set_account(other, Account.zero());
+    try db.set_storage(address, 1, 12);
+    try db.set_storage(address, 2, 13);
+    try db.set_transient_storage(address, 1, 0);
+    try db.set_transient_storage(other, 9, 99);
+    const new_hash = try db.set_code(&new_code);
+    const inner = try db.create_snapshot();
 
-        const retrieved_code_by_hash = try evm.database.get_code(code_hash);
-        try std.testing.expectEqualSlices(u8, &test_code, retrieved_code_by_hash);
-    }
+    // An unknown id fails before anything is touched.
+    try std.testing.expectError(Database.Error.SnapshotNotFound, db.revert_to_snapshot(inner + 100));
+    try std.testing.expectEqual(@as(u256, 12), try db.get_storage(address, 1));
+    try std.testing.expectEqual(@as(usize, 2), db.snapshots.items.len);
 
-    // Modify account but keep same code hash
-    account.balance = 9999;
-    try evm.database.set_account(contract_address, account);
-
-    // Code should still be the same
-    const code_after_balance_change = try evm.database.get_code_by_address(contract_address);
-    try std.testing.expectEqualSlices(u8, &test_code, code_after_balance_change);
+    try db.revert_to_snapshot(snapshot);
+    try std.testing.expectEqual(@as(u256, 1000), (try db.get_account(address)).?.balance);
+    try std.testing.expect(!db.account_exists(other));
+    try std.testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+    try std.testing.expectEqual(@as(u256, 21), try db.get_transient_storage(address, 1));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_transient_storage(other, 9));
+    try std.testing.expectEqualSlices(u8, &old_code, try db.get_code_by_address(address));
+    try std.testing.expectError(Database.Error.CodeNotFound, db.get_code(new_hash));
+    // The snapshot and the one nested inside it are both gone.
+    try std.testing.expectEqual(@as(usize, 0), db.snapshots.items.len);
+    try std.testing.expectError(Database.Error.SnapshotNotFound, db.revert_to_snapshot(inner));
 }
 
-// Helper function to calculate CREATE2 address
-// address = keccak256(0xff ++ creator ++ salt ++ keccak256(init_code))[12:]
-fn calculateCreate2Address(creator: [20]u8, salt: u256, init_code: []const u8) ![20]u8 {
-    // Calculate init_code hash
-    var init_code_hash: [32]u8 = undefined;
-    std.crypto.hash.sha3.Keccak256.hash(init_code, &init_code_hash, .{});
+test "W3-16: MemoryDatabase.revert_to_snapshot allocates nothing, so it cannot fail half-way" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    var db = MemoryDatabase.init(failing.allocator());
+    defer db.deinit();
 
-    // Prepare data for CREATE2 address calculation
-    var data: [85]u8 = undefined;
-    data[0] = 0xFF;
-    @memcpy(data[1..21], &creator);
+    const address = @as([20]u8, @splat(0x07));
+    try db.set_account(address, Account.zero());
+    for (0..32) |slot| try db.set_storage(address, slot, slot + 1);
+    const snapshot = try db.create_snapshot();
+    for (0..32) |slot| try db.set_storage(address, slot, 0);
+    for (100..400) |slot| try db.set_storage(address, slot, 7);
+    _ = try db.set_code(&[_]u8{ 0xfe, 0xfe });
 
-    // Convert salt to big-endian bytes
-    var salt_bytes: [32]u8 = @bitCast(salt);
-    std.mem.reverse(u8, &salt_bytes);
-    @memcpy(data[21..53], &salt_bytes);
-    @memcpy(data[53..85], &init_code_hash);
+    // From here on every allocation fails.
+    failing.fail_index = failing.alloc_index;
+    try db.revert_to_snapshot(snapshot);
+    try std.testing.expectEqual(@as(usize, 32), db.storage.count());
+    for (0..32) |slot| try std.testing.expectEqual(@as(u256, slot + 1), try db.get_storage(address, slot));
+    try std.testing.expectEqual(@as(usize, 0), db.codes.count());
+}
 
-    // Hash the data
-    var hash: [32]u8 = undefined;
-    std.crypto.hash.sha3.Keccak256.hash(&data, &hash, .{});
+test "W3-16: MemoryDatabase.create_snapshot leaves the database unchanged when it runs out of memory" {
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+        var db = MemoryDatabase.init(failing.allocator());
+        defer db.deinit();
+        const address = @as([20]u8, @splat(0x09));
+        try db.set_account(address, Account.zero());
+        try db.set_storage(address, 1, 2);
+        try db.set_transient_storage(address, 3, 4);
 
-    // Take last 20 bytes as address
-    var address: [20]u8 = undefined;
-    @memcpy(&address, hash[12..32]);
-    return address;
+        failing.fail_index = failing.alloc_index + fail_index;
+        const snapshot = db.create_snapshot() catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(@as(usize, 0), db.snapshots.items.len);
+            try std.testing.expectEqual(@as(u64, 0), db.next_snapshot_id);
+            try std.testing.expectEqual(@as(u256, 2), try db.get_storage(address, 1));
+            failures += 1;
+            continue;
+        };
+        try db.commit_snapshot(snapshot);
+        break;
+    }
+    try std.testing.expect(failures >= 4);
+}
+
+test "W3-16: MemoryDatabase.getAllAccounts returns every address once" {
+    var db = MemoryDatabase.init(std.testing.allocator);
+    defer db.deinit();
+
+    for (1..6) |i| try db.set_account(@as([20]u8, @splat(@intCast(i))), Account.zero());
+    const addresses = try db.getAllAccounts(std.testing.allocator);
+    defer std.testing.allocator.free(addresses);
+    try std.testing.expectEqual(@as(usize, 5), addresses.len);
+    var seen: u8 = 0;
+    for (addresses) |address| seen |= @as(u8, 1) << @intCast(address.bytes[0]);
+    try std.testing.expectEqual(@as(u8, 0b0011_1110), seen);
+
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, db.getAllAccounts(failing.allocator()));
+}
+
+test "W3-16: MemoryDatabase.get_code_by_address treats the empty code hash as no code" {
+    var db = MemoryDatabase.init(std.testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x33));
+    var account = Account.zero();
+    account.code_hash = primitives.EMPTY_CODE_HASH;
+    try db.set_account(address, account);
+    try std.testing.expectEqual(@as(usize, 0), (try db.get_code_by_address(address)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try db.get_code_by_address(@as([20]u8, @splat(0x34)))).len);
 }

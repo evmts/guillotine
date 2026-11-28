@@ -14,6 +14,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const fuzz_alloc = @import("fuzz_alloc.zig");
+const testing = std.testing;
 const Opcode = evm.Opcode;
 
 const BytecodeFusionOn = evm.Bytecode(.{ .fusions_enabled = true });
@@ -85,7 +86,7 @@ pub fn fuzzBytecodeJumpdestOracle(_: void, input: []const u8) !void {
     var iter = bc_on.createIterator();
     var prev_pc: usize = 0;
     var steps: usize = 0;
-    while (iter.next()) |op| {
+    while (try iter.next()) |op| {
         const cur_pc = iter.pc;
         try std.testing.expect(cur_pc <= code.len);
         try std.testing.expect(cur_pc >= prev_pc);
@@ -107,7 +108,7 @@ pub fn fuzzDispatchScheduleBuild(_: void, input: []const u8) !void {
         defer bc.deinit();
         var iter = bc.createIterator();
         var count: usize = 0;
-        while (iter.next()) |_| {
+        while (try iter.next()) |_| {
             count += 1;
             try std.testing.expect(count <= code.len + 1);
         }
@@ -118,7 +119,7 @@ pub fn fuzzDispatchScheduleBuild(_: void, input: []const u8) !void {
         defer bc.deinit();
         var iter = bc.createIterator();
         var count: usize = 0;
-        while (iter.next()) |_| {
+        while (try iter.next()) |_| {
             count += 1;
             try std.testing.expect(count <= code.len + 1);
         }
@@ -380,6 +381,215 @@ const pc_width_corpus: []const []const u8 = &.{
     &.{ 0x00, 0xc0, 0, 0, 7, 0, 0, 0, 1 }, // 49,152 before Shanghai: unbounded
 };
 
+const BytecodeParis = evm.Bytecode(.{ .hardfork = .MERGE, .fusions_enabled = false });
+const BytecodeShanghai = evm.Bytecode(.{ .hardfork = .SHANGHAI, .fusions_enabled = false });
+const BytecodeCancun = evm.Bytecode(.{ .hardfork = .CANCUN, .fusions_enabled = false });
+
+/// PC of the first instruction from `start` that halts as INVALID on `Bc`'s fork,
+/// walking whole instructions (PUSH immediates are data). Null when there is none.
+fn firstHaltingPc(comptime Bc: type, code: []const u8, start: usize) ?usize {
+    var pc = start;
+    while (pc < code.len) {
+        const opcode = code[pc];
+        if (Bc.Iterator.halts_as_invalid[opcode]) return pc;
+        pc += if (opcode >= 0x60 and opcode <= 0x7f) @as(usize, opcode - 0x5f) + 1 else 1;
+    }
+    return null;
+}
+
+/// `calculateBlockInfo` must end a block at the first opcode that halts as INVALID
+/// on the fork: the block's gas and stack bounds are those of the code cut off at
+/// that opcode, whatever bytes follow it.
+fn checkBlockInfoIgnoresDeadTail(comptime Bc: type, code: []const u8, filler: u8) !void {
+    const allocator = fuzz_alloc.get();
+    const halt_pc = firstHaltingPc(Bc, code, 0) orelse return;
+
+    var prefix = Bc.init(allocator, code[0..halt_pc]) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        error.InitcodeTooLarge, error.InvalidJumpDestination, error.InvalidOpcode, error.TruncatedPush => return,
+    };
+    defer prefix.deinit();
+    const expected = Bc.Iterator.calculateBlockInfo(&prefix, 0, 0);
+
+    // The same prefix and halting opcode, followed by the input's tail and by a
+    // tail of one repeated byte (expensive opcodes, deep stack inputs, PUSH data).
+    const refilled = try allocator.dupe(u8, code);
+    defer allocator.free(refilled);
+    @memset(refilled[halt_pc + 1 ..], filler);
+    for ([_][]const u8{ code, refilled, code[0 .. halt_pc + 1] }) |variant| {
+        var bytecode = Bc.init(allocator, variant) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            error.InitcodeTooLarge, error.InvalidJumpDestination, error.InvalidOpcode, error.TruncatedPush => continue,
+        };
+        defer bytecode.deinit();
+        try testing.expectEqual(expected, Bc.Iterator.calculateBlockInfo(&bytecode, 0, 0));
+    }
+}
+
+pub fn fuzzBlockInfoStopsAtInvalidOpcodes(_: void, input: []const u8) !void {
+    if (input.len == 0) return;
+    const filler = input[0];
+    const code = input[1..@min(input.len, 257)];
+
+    // Bytes no fork assigns, and the withdrawn AUTH/AUTHCALL, halt on every fork.
+    inline for (.{ BytecodeParis, BytecodeShanghai, BytecodeCancun }) |Bc| {
+        inline for (.{ 0x0C, 0x0D, 0x0E, 0x0F, 0x21, 0x2F, 0x4B, 0x4F, 0xA5, 0xEF, 0xF6, 0xF7, 0xF8, 0xFB, 0xFC, 0xFE }) |byte| {
+            try testing.expect(Bc.Iterator.halts_as_invalid[byte]);
+        }
+        inline for (.{ 0x00, 0x01, 0x50, 0x54, 0x55, 0x56, 0x57, 0x5B, 0x60, 0x7F, 0x80, 0x9F, 0xA4, 0xF1, 0xF3, 0xFD, 0xFF }) |byte| {
+            try testing.expect(!Bc.Iterator.halts_as_invalid[byte]);
+        }
+    }
+    // Fork-introduced opcodes halt before their fork and run from it on.
+    try testing.expect(BytecodeParis.Iterator.halts_as_invalid[0x5F]); // PUSH0
+    try testing.expect(!BytecodeShanghai.Iterator.halts_as_invalid[0x5F]);
+    inline for (.{ 0x49, 0x4A, 0x5C, 0x5D, 0x5E }) |cancun_opcode| { // BLOBHASH, BLOBBASEFEE, TLOAD, TSTORE, MCOPY
+        try testing.expect(BytecodeParis.Iterator.halts_as_invalid[cancun_opcode]);
+        try testing.expect(BytecodeShanghai.Iterator.halts_as_invalid[cancun_opcode]);
+        try testing.expect(!BytecodeCancun.Iterator.halts_as_invalid[cancun_opcode]);
+    }
+
+    try checkBlockInfoIgnoresDeadTail(BytecodeParis, code, filler);
+    try checkBlockInfoIgnoresDeadTail(BytecodeShanghai, code, filler);
+    try checkBlockInfoIgnoresDeadTail(BytecodeCancun, code, filler);
+}
+
+const AnalyzeBlock = struct { start: u16, end: u16 };
+const AnalyzeFusion = struct {
+    fusion_type: enum { constant_fold, iszero_jumpi },
+    original_length: u16,
+    folded_value: u256 = 0,
+};
+
+/// Big-endian value of the immediate of the PUSH at `push_pc`, or null when the end
+/// of the code truncates it.
+fn referencePushValue(code: []const u8, push_pc: usize) ?u256 {
+    const size = @as(usize, code[push_pc] - 0x5f);
+    if (push_pc + 1 + size > code.len) return null;
+    var value: u256 = 0;
+    for (code[push_pc + 1 .. push_pc + 1 + size]) |byte| value = value * 256 + byte;
+    return value;
+}
+
+/// `bytecodeAnalyze` (the C API's analyzer) against an independent decoder:
+/// - its JUMPDEST list is the Yellow Paper's,
+/// - a static jump recorded at a JUMPDEST names the JUMP's PUSH, or the SECOND PUSH
+///   of a `PUSH cond PUSH dest JUMPI`, at full 256-bit width, and is a JUMPDEST,
+/// - `PUSH1 a PUSH1 b SUB` folds to `b - a` (top minus second).
+pub fn fuzzBytecodeAnalyzeStaticJumps(_: void, input: []const u8) !void {
+    const allocator = fuzz_alloc.get();
+    const analyze = evm.bytecode_analyze.bytecodeAnalyze;
+
+    // (1) Arbitrary code.
+    {
+        const code = input[0..@min(input.len, 512)];
+        var analysis = try analyze(u16, AnalyzeBlock, AnalyzeFusion, allocator, code);
+        defer analysis.deinit(allocator);
+        const valid = try referenceIsValidJumpDest(code, allocator);
+        defer allocator.free(valid);
+
+        var expected_jumpdests: usize = 0;
+        for (valid) |is_jumpdest| expected_jumpdests += @intFromBool(is_jumpdest);
+        try testing.expectEqual(expected_jumpdests, analysis.jumpdests.len);
+        for (analysis.jumpdests) |pc| try testing.expect(valid[pc]);
+        for (analysis.push_pcs) |pc| try testing.expect(code[pc] >= 0x60 and code[pc] <= 0x7f);
+
+        var fusions = analysis.jump_fusions.iterator();
+        while (fusions.next()) |entry| {
+            const source: usize = entry.key_ptr.*;
+            const target: usize = entry.value_ptr.*;
+            try testing.expect(valid[source]);
+            try testing.expect(target < code.len and valid[target]);
+
+            const first_push = source + 1;
+            try testing.expect(first_push < code.len);
+            try testing.expect(code[first_push] >= 0x60 and code[first_push] <= 0x7f);
+            const after_first = first_push + 1 + @as(usize, code[first_push] - 0x5f);
+            try testing.expect(after_first < code.len);
+            const destination = if (code[after_first] == 0x56)
+                referencePushValue(code, first_push)
+            else destination: {
+                try testing.expect(code[after_first] >= 0x60 and code[after_first] <= 0x7f);
+                const jumpi_pc = after_first + 1 + @as(usize, code[after_first] - 0x5f);
+                try testing.expect(jumpi_pc < code.len);
+                try testing.expectEqual(@as(u8, 0x57), code[jumpi_pc]);
+                break :destination referencePushValue(code, after_first);
+            };
+            try testing.expectEqual(@as(?u256, target), destination);
+        }
+    }
+    if (input.len < 3) return;
+
+    // (2) JUMPDEST PUSH1 cond PUSH1 dest JUMPI, then ten JUMPDESTs at PCs 6..15.
+    {
+        const condition = input[0] % 24;
+        const destination = input[1] % 24;
+        const code = [_]u8{ 0x5b, 0x60, condition, 0x60, destination, 0x57 } ++ @as([10]u8, @splat(0x5b));
+        var analysis = try analyze(u16, AnalyzeBlock, AnalyzeFusion, allocator, &code);
+        defer analysis.deinit(allocator);
+        const is_jumpdest = destination == 0 or (destination >= 6 and destination <= 15);
+        const expected: ?u16 = if (is_jumpdest) destination else null;
+        try testing.expectEqual(expected, analysis.jump_fusions.get(0));
+    }
+
+    // (3) JUMPDEST PUSH3 0x01HHLL JUMP: the low 16 bits may name a JUMPDEST, the
+    // value never does. A truncating decoder would record it.
+    {
+        const low = input[1] % 24;
+        const code = [_]u8{ 0x5b, 0x62, 0x01 + (input[0] % 8), 0x00, low, 0x56 } ++ @as([10]u8, @splat(0x5b));
+        var analysis = try analyze(u16, AnalyzeBlock, AnalyzeFusion, allocator, &code);
+        defer analysis.deinit(allocator);
+        try testing.expectEqual(@as(?u16, null), analysis.jump_fusions.get(0));
+    }
+
+    // (4) PUSH1 a PUSH1 b ADD|SUB|MUL: b is the top of the stack.
+    {
+        const first: u256 = input[0];
+        const second: u256 = input[1];
+        const Fold = struct { opcode: u8, value: u256 };
+        const folds = [_]Fold{
+            .{ .opcode = 0x01, .value = first +% second },
+            .{ .opcode = 0x03, .value = second -% first },
+            .{ .opcode = 0x02, .value = first *% second },
+        };
+        for (folds) |fold| {
+            const code = [_]u8{ 0x60, input[0], 0x60, input[1], fold.opcode, 0x00 };
+            var analysis = try analyze(u16, AnalyzeBlock, AnalyzeFusion, allocator, &code);
+            defer analysis.deinit(allocator);
+            const fusion = analysis.advanced_fusions.get(0) orelse return error.ConstantFoldMissing;
+            try testing.expectEqual(@as(u16, 5), fusion.original_length);
+            try testing.expectEqual(fold.value, fusion.folded_value);
+        }
+    }
+}
+
+const block_info_corpus: []const []const u8 = &.{
+    &.{},
+    &.{ 0x54, 0x60, 0x01, 0x0C, 0x60, 0x02, 0x60, 0x03, 0x01, 0x54, 0xF1 }, // undefined 0x0C, then a dead tail
+    &.{ 0xF1, 0x60, 0x01, 0xEF, 0x54, 0x55, 0xF1 }, // 0xEF
+    &.{ 0x7F, 0x60, 0x01, 0xF6, 0x80, 0x80, 0x80 }, // AUTH
+    &.{ 0x7F, 0x60, 0x01, 0xF7, 0x80, 0x80, 0x80 }, // AUTHCALL
+    &.{ 0x54, 0x60, 0x01, 0x5F, 0x60, 0x02, 0x01, 0x01 }, // PUSH0: halts on Paris only
+    &.{ 0x55, 0x60, 0x01, 0x5C, 0x60, 0x02, 0x01, 0x50 }, // TLOAD: halts before Cancun
+    &.{ 0x50, 0x60, 0x0C, 0x61, 0xEF, 0xF6, 0x01, 0xFE, 0x54 }, // halting bytes as PUSH data, then INVALID
+    &.{ 0x80, 0x0C }, // the block is the halting byte alone
+    &.{ 0x80, 0x60, 0x01, 0x56, 0x0C, 0x54 }, // JUMP ends the block before the halting byte
+};
+
+const analyze_corpus: []const []const u8 = &.{
+    &.{},
+    &.{ 0x5b, 0x60, 0x01, 0x60, 0x08, 0x57, 0x00, 0x00, 0x5b, 0x00 }, // JUMPI: condition 1, destination 8
+    &.{ 0x5b, 0x60, 0x08, 0x60, 0x07, 0x57, 0x00, 0x00, 0x5b, 0x00 }, // condition names a JUMPDEST, destination does not
+    &.{ 0x5b, 0x62, 0x01, 0x00, 0x06, 0x56, 0x5b, 0x00 }, // PUSH3 0x010006 JUMP
+    &.{ 0x5b, 0x60, 0x04, 0x56, 0x5b, 0x00 }, // PUSH1 4 JUMP
+    &.{ 0x60, 0x05, 0x60, 0x03, 0x03, 0x00 }, // 3 - 5 wraps
+    &.{ 0x5b, 0x7f }, // PUSH32 truncated right after a JUMPDEST
+    &.{ 0x5b, 0x60, 0x01, 0x7f, 0x57 }, // second PUSH truncated
+    &.{ 0x06, 0x09, 0x00 },
+    &.{ 0x00, 0x00, 0xff },
+    &.{ 0xff, 0x01, 0x00 },
+};
+
 const seed_corpus: []const []const u8 = &.{
     &.{},
     &.{0x00},
@@ -395,6 +605,14 @@ const seed_corpus: []const []const u8 = &.{
 
 test "fuzz bytecode jumpdest reference oracle and fusion invariants" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBytecodeJumpdestOracle), .{ .corpus = seed_corpus });
+}
+
+test "fuzz calculateBlockInfo ends the block at undefined, fork-disabled and withdrawn opcodes" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBlockInfoStopsAtInvalidOpcodes), .{ .corpus = block_info_corpus });
+}
+
+test "fuzz bytecodeAnalyze static JUMP and JUMPI targets, PC range and SUB folding" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBytecodeAnalyzeStaticJumps), .{ .corpus = analyze_corpus });
 }
 
 test "fuzz dispatch schedule build fusion on and off" {

@@ -16,9 +16,16 @@
  * existing callers.
  *
  * Tracing: a tracing handle (GUILLOTINE_MAINNET_WITH_TRACER) fills trace_json
- * with {"structLogs":[...]}: one entry per executed bytecode instruction at
- * every call depth, read from the executing EVM. "stack" lists the stack
- * before the instruction, top first; "gas" and "gasCost" are per instruction.
+ * with {"structLogs":[...],"truncated":false,"truncationReason":"none"}: one
+ * entry per executed bytecode instruction at every call depth, read from the
+ * executing EVM. "stack" lists the stack before the instruction, top first;
+ * "gas" and "gasCost" are per instruction. Capture is bounded (by default
+ * 1,000,000 steps and 256 MiB of retained trace data; see
+ * guillotine_set_trace_limits). When a bound is reached or memory for a step
+ * cannot be allocated, capture stops, "truncated" is true and
+ * "truncationReason" is "max_steps", "max_bytes" or "out_of_memory": the
+ * listed steps are then a valid prefix of the execution. Truncation never
+ * changes success, gas_left, output, logs or state.
  *
  * Stack: handle creation runs on a library thread with its own stack, and
  * deep call chains move to a large-stack worker, so callers may run on small
@@ -41,6 +48,15 @@
  *
  * Pointer arguments: a NULL pointer with a non-zero length (input, code, data)
  * is rejected. A NULL pointer with length 0 is accepted as empty.
+ *
+ * ABI stability: BlockInfoFFI, CallParams, TxParamsFFI and EvmResult are
+ * frozen. Their sizes and field offsets never change, so a host built against
+ * an older header keeps working. Fields they have no room for (blob base fee,
+ * ancestor block hashes, blob hashes, blob fee cap, access list, authorization
+ * list, trace limits) are set on the handle with the "C ABI v3" setters at the
+ * end of this header. The library copies every buffer passed to a setter, so
+ * the caller may free it as soon as the setter returns. A setter that fails
+ * leaves the previous value in place.
  */
 #ifndef GUILLOTINE_H
 #define GUILLOTINE_H
@@ -170,6 +186,26 @@ typedef struct TxParamsFFI {
     bool disable_balance_check;
 } TxParamsFFI;
 
+/* C ABI v3 structures (additive block and transaction fields). */
+typedef struct AccessListEntryFFI {
+    uint8_t address[20];
+    /* storage_keys_len big-endian 32-byte keys; may be NULL when the length is 0. */
+    const uint8_t (*storage_keys)[32];
+    size_t storage_keys_len;
+} AccessListEntryFFI;
+typedef struct AuthorizationFFI {
+    uint64_t chain_id;
+    uint8_t address[20];
+    uint64_t nonce;
+    uint8_t y_parity; /* 0 or 1; any other value makes the tuple invalid */
+    uint8_t r[32];
+    uint8_t s[32];
+} AuthorizationFFI;
+/* guillotine_set_trace_limits value that removes a bound. */
+#define GUILLOTINE_TRACE_UNLIMITED UINT64_MAX
+/* Most ancestor hashes BLOCKHASH can reach. */
+#define GUILLOTINE_MAX_BLOCK_HASHES 256
+
 typedef struct CBasicBlock { uint32_t start; uint32_t end; } CBasicBlock;
 typedef uint8_t CFusionType;
 /* Mirrors CFusionType in src/bytecode/bytecode_c.zig: the analyzer reports these two. */
@@ -213,8 +249,8 @@ typedef struct COpcodeInfo {
 
 void guillotine_init(void);
 void guillotine_cleanup(void);
-/* config is GUILLOTINE_MAINNET, GUILLOTINE_MAINNET_WITH_TRACER, or
- * GUILLOTINE_TEST_MODE; any other byte returns NULL. chain_id is u64 end to
+/* config is GUILLOTINE_MAINNET, GUILLOTINE_MAINNET_WITH_TRACER,
+ * GUILLOTINE_TEST_MODE, or GUILLOTINE_CALL_TRACER; any other byte returns NULL. chain_id is u64 end to
  * end: every value is accepted and CHAINID returns it unchanged. */
 EvmHandle * guillotine_evm_create_with_config(const BlockInfoFFI * block_info_ptr, EvmConfiguration config);
 EvmHandle * guillotine_evm_create(const BlockInfoFFI * block_info_ptr);
@@ -269,9 +305,74 @@ StateDumpFFI * guillotine_dump_state_test(EvmHandle * handle);
 EvmHandle * guillotine_evm_create_call_tracer(const BlockInfoFFI * block_info_ptr);
 EvmHandle * guillotine_evm_create_with_fork(const BlockInfoFFI * block_info_ptr, uint8_t hardfork_id);
 EvmHandle * guillotine_evm_create_with_host(const BlockInfoFFI * block_info_ptr, const GuillotineHostVTable * vtable, void * user_ctx);
+/* Replace the block context. Also resets the v3 block extensions: the blob
+ * base fee becomes 0 and the ancestor block hashes are cleared. Set them again
+ * for the new block. Transaction extensions (blob hashes, blob fee cap, access
+ * list, authorization list) and trace limits are kept. */
 bool guillotine_set_block_info(EvmHandle * handle, const BlockInfoFFI * block_info_ptr);
 bool guillotine_get_nonce(EvmHandle * handle, const uint8_t address[20], uint64_t * nonce_out);
+/* Execute a full transaction and commit it. The transaction's origin, gas
+ * price and fee fields apply to this call only: later guillotine_call and
+ * guillotine_simulate calls run with the handle's own context again. The v3
+ * transaction extensions ride on the transaction types that carry them: the
+ * access list on tx_type >= 1, blob hashes and the blob fee cap on tx_type 3,
+ * the authorization list on tx_type 4. */
 EvmResult * guillotine_execute_tx(EvmHandle * handle, const TxParamsFFI * params);
+
+/* C ABI v3 additions (backwards-compatible). Every setter returns false with
+ * an error for a NULL, unknown or destroyed handle. */
+
+/* Block: blob base fee (EIP-4844; the BLOBBASEFEE opcode of EIP-7516) as a
+ * big-endian u256. A new handle has 0. Lasts until guillotine_set_block_info. */
+bool guillotine_set_blob_base_fee(EvmHandle * handle, const uint8_t blob_base_fee[32]);
+/* Block: replace the ancestor hashes BLOCKHASH reads. hashes[i] is the hash of
+ * block (number - 1 - i), newest first; count is at most
+ * GUILLOTINE_MAX_BLOCK_HASHES. Ancestors without an entry read as zero, as do
+ * the current block, later blocks and blocks more than 256 back. count 0
+ * clears the list. Lasts until guillotine_set_block_info. */
+bool guillotine_set_block_hashes(EvmHandle * handle, const uint8_t (*hashes)[32], size_t count);
+/* Block: set the hash of one ancestor and keep the others. block_number must be
+ * one of the 256 blocks before the handle's current block number; any other
+ * number is rejected because BLOCKHASH could never return it. */
+bool guillotine_set_block_hash(EvmHandle * handle, uint64_t block_number, const uint8_t hash[32]);
+/* Transaction: blob versioned hashes read by BLOBHASH (EIP-4844); an index at
+ * or past count reads as zero. They apply to every later guillotine_call and
+ * guillotine_simulate, and to guillotine_execute_tx with tx_type 3, where each
+ * blob also costs 131072 blob gas at the block's blob base fee. count 0 clears
+ * them. */
+bool guillotine_set_blob_hashes(EvmHandle * handle, const uint8_t (*hashes)[32], size_t count);
+/* Transaction: EIP-4844 fee cap per unit of blob gas, big-endian u256, for
+ * guillotine_execute_tx with tx_type 3. A cap below the block's blob base fee
+ * rejects the transaction (NULL result, "MaxFeePerBlobGasBelowBlobBaseFee"),
+ * and the sender must afford every blob at the cap. NULL removes the cap and
+ * both checks, which is the state of a new handle. */
+bool guillotine_set_max_fee_per_blob_gas(EvmHandle * handle, const uint8_t max_fee_per_blob_gas[32]);
+/* Transaction: EIP-2930 access list. Every address and storage key starts the
+ * transaction warm and adds intrinsic gas (2400 per address, 1900 per key).
+ * Applies to guillotine_call and guillotine_simulate, and to
+ * guillotine_execute_tx with tx_type >= 1. count 0 clears the list. */
+bool guillotine_set_access_list(EvmHandle * handle, const AccessListEntryFFI * entries, size_t count);
+/* Transaction: EIP-7702 authorization list. Tuples are applied before
+ * execution; an invalid tuple (wrong chain id or nonce, bad signature) is
+ * skipped as the EIP specifies and is not an error. Each tuple adds 25000
+ * intrinsic gas. While the list is not empty, guillotine_call and
+ * guillotine_simulate run as set-code transactions: they fail on a handle
+ * older than Prague and for CREATE and CREATE2. guillotine_execute_tx uses the
+ * list with tx_type 4. count 0 clears the list. */
+bool guillotine_set_authorization_list(EvmHandle * handle, const AuthorizationFFI * authorizations, size_t count);
+/* Forget the addresses and storage slots touched by calls on this handle so
+ * far: the next result's accessed_addresses and accessed_storage, and
+ * guillotine_dump_state, start again from the accounts configured through
+ * guillotine_set_balance, _nonce, _code and _storage, which stay in the dump.
+ * No balance, nonce, code or storage value changes. */
+bool guillotine_reset_touched(EvmHandle * handle);
+/* Bound the structLogs capture of a tracing handle: at most max_steps entries
+ * and max_bytes bytes of retained trace data (each entry and the stack copy it
+ * holds) per call. Reaching a bound sets
+ * "truncated":true in trace_json and leaves the execution result untouched.
+ * GUILLOTINE_TRACE_UNLIMITED removes a bound; 0 captures nothing. Returns
+ * false on a handle that is not a tracing handle. */
+bool guillotine_set_trace_limits(EvmHandle * handle, uint64_t max_steps, uint64_t max_bytes);
 
 #ifdef __cplusplus
 }

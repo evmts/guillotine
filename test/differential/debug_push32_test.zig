@@ -29,7 +29,7 @@ test "PUSH32 dispatch investigation" {
     var iter = bc.createIterator();
     var op_index: usize = 0;
     log.warn("\nParsed opcodes:", .{});
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push => |data| {
                 log.warn("  [{}] PC={}: PUSH{} value=0x{x}", .{ op_index, iter.pc - data.size - 1, data.size, data.value });

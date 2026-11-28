@@ -46,6 +46,10 @@ pub const Transaction = struct {
     input: []const u8 = &.{},
     access_list: []const AccessListEntry = &.{},
     blob_hashes: []const [32]u8 = &.{},
+    /// EIP-4844 fee cap per unit of blob gas. When set, the transaction is rejected
+    /// if the cap is below the block's blob base fee, and the sender must be able
+    /// to afford every blob at the cap. Null skips both checks.
+    max_fee_per_blob_gas: ?u256 = null,
     authorizations: []const Authorization = &.{},
     /// When true, skips sender balance deduction (useful for eth_call / simulations).
     disable_balance_check: bool = false,
@@ -60,6 +64,7 @@ pub const TxResult = struct {
     output: []const u8,
     created_address: ?Address = null,
     logs: []const call_result_mod.Log = &.{},
+    trace: ?call_result_mod.ExecutionTrace = null,
 
     pub fn deinit(self: *TxResult, allocator: std.mem.Allocator) void {
         if (self.output.len > 0) allocator.free(self.output);
@@ -68,6 +73,7 @@ pub const TxResult = struct {
             if (entry.data.len > 0) allocator.free(entry.data);
         }
         if (self.logs.len > 0) allocator.free(self.logs);
+        if (self.trace) |*t| t.deinit();
         self.* = undefined;
     }
 };
@@ -77,6 +83,7 @@ pub const TxError = error{
     GasBelowIntrinsic,
     GasLimitExceedsBlock,
     MaxFeeBelowBaseFee,
+    MaxFeePerBlobGasBelowBlobBaseFee,
     PriorityFeeExceedsMaxFee,
     InsufficientBalance,
     NonceMismatch,
@@ -178,10 +185,28 @@ pub fn executeTx(
     }
     const next_nonce = std.math.add(u64, sender.nonce, 1) catch return error.NonceOverflow;
 
-    const blob_fee: u256 = @as(u256, tx.blob_hashes.len) * 131_072 * @as(u256, vm.block_info.blob_base_fee);
+    const blob_gas: u256 = @as(u256, tx.blob_hashes.len) * 131_072;
+    const blob_fee: u256 = std.math.mul(u256, blob_gas, @as(u256, vm.block_info.blob_base_fee)) catch
+        return error.InsufficientBalance;
+    if (tx.max_fee_per_blob_gas) |cap| {
+        if (cap < vm.block_info.blob_base_fee) return error.MaxFeePerBlobGasBelowBlobBaseFee;
+    }
+    // The sender must cover the blobs at the cap, and is charged at the base fee.
+    const max_blob_fee: u256 = if (tx.max_fee_per_blob_gas) |cap|
+        (std.math.mul(u256, blob_gas, cap) catch return error.InsufficientBalance)
+    else
+        blob_fee;
     const max_price = tx.max_fee_per_gas orelse effective_price;
-    const max_upfront = @as(u256, tx.gas_limit) * max_price + blob_fee + tx.value;
-    const actual_upfront = @as(u256, tx.gas_limit) * effective_price + blob_fee;
+    const max_gas_cost = std.math.mul(u256, @as(u256, tx.gas_limit), max_price) catch
+        return error.InsufficientBalance;
+    const max_gas_and_blob = std.math.add(u256, max_gas_cost, max_blob_fee) catch
+        return error.InsufficientBalance;
+    const max_upfront = std.math.add(u256, max_gas_and_blob, tx.value) catch
+        return error.InsufficientBalance;
+    const actual_gas_cost = std.math.mul(u256, @as(u256, tx.gas_limit), effective_price) catch
+        return error.InsufficientBalance;
+    const actual_upfront = std.math.add(u256, actual_gas_cost, blob_fee) catch
+        return error.InsufficientBalance;
     if (!tx.disable_balance_check and sender.balance < max_upfront) return error.InsufficientBalance;
 
     if (!tx.disable_balance_check) sender.balance -= actual_upfront;
@@ -194,7 +219,8 @@ pub fn executeTx(
     if (tx.to) |to| vm.warmDelegatedTarget(to) catch return error.HostFailure;
 
     const exec_gas = tx.gas_limit - schedule.intrinsic;
-    const call_res = runInnerMessage(EvmType, vm, tx, exec_gas);
+    var call_res = runInnerMessage(EvmType, vm, tx, exec_gas);
+    errdefer if (call_res.trace) |*t| t.deinit();
     if (vm.host_failure != null) return error.HostFailure;
 
     const settled = try settlePostExecution(
@@ -211,6 +237,8 @@ pub fn executeTx(
     errdefer if (owned_output.len > 0) allocator.free(owned_output);
     const owned_logs = if (call_res.success) try cloneLogs(allocator, vm.logs.items) else &.{};
 
+    const trace = call_res.trace;
+    call_res.trace = null;
     return TxResult{
         .success = call_res.success,
         .gas_used = settled.gas_used,
@@ -220,6 +248,7 @@ pub fn executeTx(
         .output = owned_output,
         .created_address = if (call_res.success) call_res.created_address else null,
         .logs = owned_logs,
+        .trace = trace,
     };
 }
 
@@ -229,6 +258,7 @@ fn configureVmContext(comptime EvmType: type, vm: *EvmType, tx: Transaction, eff
     vm.context.gas_limit = tx.gas_limit;
     vm.context.blob_versioned_hashes = tx.blob_hashes;
     vm.context.is_blob_transaction = tx.tx_type == 3;
+    vm.context.max_fee_per_blob_gas = tx.max_fee_per_blob_gas orelse 0;
     vm.context.max_fee_per_gas = tx.max_fee_per_gas;
     vm.context.max_priority_fee_per_gas = tx.max_priority_fee_per_gas;
 }
@@ -307,6 +337,7 @@ fn settlePostExecution(
                 Account.zero();
             cb.balance += @as(u256, gas_used) * tip;
             db.set_account(vm.block_info.coinbase.bytes, cb) catch return error.HostFailure;
+            vm.touchAddress(vm.block_info.coinbase) catch return error.HostFailure;
         }
     }
 

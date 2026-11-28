@@ -290,7 +290,18 @@ void test_trace_json() {
     const char *prefix = "{\"structLogs\":[{\"pc\":0,\"op\":\"PUSH1\"";
     assert(result->trace_json_len > strlen(prefix));
     assert(memcmp(result->trace_json, prefix, strlen(prefix)) == 0);
-    assert(memcmp(result->trace_json + result->trace_json_len - 2, "]}", 2) == 0);
+    const char *suffix = "],\"truncated\":false,\"truncationReason\":\"none\"}";
+    assert(result->trace_json_len > strlen(suffix));
+    assert(memcmp(result->trace_json + result->trace_json_len - strlen(suffix), suffix, strlen(suffix)) == 0);
+    guillotine_free_result(result);
+
+    /* A capture bound truncates the trace and leaves the execution result alone. */
+    assert(guillotine_set_trace_limits(tracing, 1, GUILLOTINE_TRACE_UNLIMITED));
+    result = guillotine_call_tracing(tracing, &params);
+    assert(result != NULL && result->success);
+    const char *cut = "],\"truncated\":true,\"truncationReason\":\"max_steps\"}";
+    assert(result->trace_json_len > strlen(cut));
+    assert(memcmp(result->trace_json + result->trace_json_len - strlen(cut), cut, strlen(cut)) == 0);
     guillotine_free_result(result);
     guillotine_evm_destroy_tracing(tracing);
 

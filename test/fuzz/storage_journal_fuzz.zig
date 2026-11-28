@@ -153,7 +153,7 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
                 }
             },
             9 => { // Ephemeral view (simulate() isolation invariant!)
-                db.begin_ephemeral_view();
+                try db.begin_ephemeral_view();
                 try db.set_balance(addr, 0xdeadbeefcafebabe);
                 try db.set_storage(addr, @intCast(slot_idx), 0x123456789abcdef0);
                 try std.testing.expectEqual(@as(u256, 0xdeadbeefcafebabe), try db.get_balance(addr));
@@ -363,7 +363,7 @@ pub fn fuzzSlotStoreAndOverlayDirtiness(_: void, input: []const u8) !void {
             },
             4 => { // enter a view: the overlay starts empty
                 if (!active) {
-                    db.begin_ephemeral_view();
+                    try db.begin_ephemeral_view();
                     active = true;
                     model.epoch += 1;
                     model.overlay = @as([NUM_ACCOUNTS][NUM_SLOTS]?u256, @splat(@as([NUM_SLOTS]?u256, @splat(null))));

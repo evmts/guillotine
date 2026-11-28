@@ -249,6 +249,11 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
         /// Charges len * PER_EMPTY_ACCOUNT_COST from gas_remaining after all tuples were
         /// processed. Returns OutOfGas, with no state or gas change, when gas_remaining
         /// cannot cover that cost. The caller owns the returned results.
+        ///
+        /// The list is applied atomically inside one database snapshot. When a
+        /// database or allocation error stops it at any tuple, every delegation and
+        /// nonce bump already written is rolled back and `gas_remaining` keeps its
+        /// value: the caller sees the error and the state it started with.
         pub fn processAuthorizationListWithResults(
             self: *Self,
             allocator: std.mem.Allocator,
@@ -263,6 +268,12 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
             const results = try allocator.alloc(AuthorizationResult, auth_list.len);
             errdefer allocator.free(results);
 
+            // All or nothing: a database or allocation error at tuple k takes back the
+            // delegations of tuples 0..k-1. Reverting never allocates and cannot fail.
+            const depth = self.db.snapshot_depth();
+            _ = try self.db.create_snapshot();
+            errdefer self.db.revert_to_depth(depth);
+
             var successful_count: u32 = 0;
             var failed_count: u32 = 0;
             var refund: i64 = 0;
@@ -276,6 +287,7 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
                 }
             }
 
+            self.db.commit_to_depth(depth);
             self.gas_remaining.* -= total_cost;
             return AuthorizationListResult{
                 .results = results,
@@ -298,11 +310,19 @@ pub fn AuthorizationProcessorFor(comptime DbType: type) type {
             const per_tuple = self.eips.eip_7702_per_empty_account_cost();
             const refund_per = per_tuple - self.eips.eip_7702_per_auth_base_cost();
 
+            if (auth_list.len == 0) return 0;
+
+            // All or nothing, as in `processAuthorizationListWithResults`.
+            const depth = self.db.snapshot_depth();
+            _ = try self.db.create_snapshot();
+            errdefer self.db.revert_to_depth(depth);
+
             var refund: i64 = 0;
             for (auth_list) |auth| {
                 const result = try self.processTuple(auth, per_tuple, refund_per);
                 refund += result.refund;
             }
+            self.db.commit_to_depth(depth);
             self.gas_remaining.* -= total_cost;
             return refund;
         }

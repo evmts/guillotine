@@ -12,7 +12,6 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
         const handler_abi = @import("../preprocessor/handler_abi.zig");
         const N = handler_abi.Native(FrameType);
-        const config = FrameType.frame_config;
 
         /// PUSH_AND_INLINE - Fused PUSH+AND with inline value (≤8 bytes).
         pub fn push_and_inline(

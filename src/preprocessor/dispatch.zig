@@ -421,13 +421,9 @@ pub fn Preprocessor(FrameType: type) type {
         /// Calculate gas and stack requirements for the first basic block
         /// Returns metadata suitable for FirstBlockMetadata
         pub fn calculateFirstBlockInfo(bytecode: anytype) FirstBlockMetadata {
-            const actual_bytecode = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
-                bytecode catch return .{ .gas = 0, .min_stack = 0, .max_stack = 0 }
-            else
-                bytecode;
             // Metadata must describe the original instruction stream, so scan raw
             // bytecode rather than the (possibly fused) iterator output.
-            const iter = actual_bytecode.createIterator();
+            const iter = bytecode.createIterator();
             const info = @TypeOf(iter).calculateBlockInfo(iter.bytecode, 0, 0);
             return .{ .gas = info.gas, .min_stack = info.min_stack, .max_stack = info.max_stack };
         }
@@ -559,9 +555,7 @@ pub fn Preprocessor(FrameType: type) type {
             // at most `bytecode.len()` steps.
             while (true) {
                 const instr_pc = iter.pc;
-                const maybe = iter.next();
-                if (maybe == null) break;
-                const op_data = maybe.?;
+                const op_data = try iter.next() orelse break;
 
                 switch (op_data) {
                     .regular => |data| {

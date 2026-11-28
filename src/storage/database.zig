@@ -135,8 +135,10 @@ pub const Database = struct {
     failure: ?Error = null,
     /// Overlay storage. A zero value hides a non-zero base slot.
     overlay_storage: SlotStore,
-    overlay_transient: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
+    overlay_transient: TransientMap,
     overlay_code: CodeMap,
+    /// Ephemeral views opened inside the outermost one, oldest first.
+    nested_views: std.ArrayList(NestedView) = .empty,
     /// Which overlay tables have been written since they were last cleared.
     overlay_dirty: OverlayDirty = .{},
     /// True when base transient storage has been written since it was last cleared.
@@ -154,6 +156,16 @@ pub const Database = struct {
         fn any(self: OverlayDirty) bool {
             return @as(u8, @bitCast(self)) != 0;
         }
+    };
+
+    const TransientMap = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage);
+
+    /// Where a nested ephemeral view started.
+    const NestedView = struct {
+        /// Open snapshots when the view began; its own snapshot sits at this index.
+        snapshot_depth: usize,
+        /// The overlay's transient slots when the view began, or null if it had none.
+        saved_transient: ?TransientMap,
     };
 
     /// Code by code hash.
@@ -302,16 +314,56 @@ pub const Database = struct {
         return !self.overlay_dirty.any();
     }
 
-    pub fn begin_ephemeral_view(self: *Database) void {
-        if (self.overlay_active) return;
-        self.clearOverlay();
-        self.overlay_active = true;
+    /// Open an ephemeral view: until the matching `discard_ephemeral_view`, every
+    /// write lands in the overlay and base state is not changed.
+    ///
+    /// Views nest. The outermost view owns the overlay and clears it on discard. A
+    /// view opened inside another one keeps the outer view's writes visible and
+    /// marks its own start with a snapshot (plus a copy of the overlay's transient
+    /// slots, which `clear_transient_storage` drops without an undo record), so
+    /// discarding it removes exactly the writes made since, never the outer view's.
+    /// Opening the outermost view cannot fail; a nested one allocates its mark.
+    pub fn begin_ephemeral_view(self: *Database) Error!void {
+        if (!self.overlay_active) {
+            self.clearOverlay();
+            self.overlay_active = true;
+            return;
+        }
+        errdefer self.noteAllocationFailure();
+        try self.nested_views.ensureUnusedCapacity(self.allocator, 1);
+        var saved_transient: ?TransientMap = null;
+        if (self.overlay_transient.count() != 0) saved_transient = try self.overlay_transient.clone();
+        errdefer if (saved_transient) |*saved| saved.deinit();
+        const depth = self.snapshots.items.len;
+        _ = try self.create_snapshot();
+        self.nested_views.appendAssumeCapacity(.{ .snapshot_depth = depth, .saved_transient = saved_transient });
     }
 
+    /// Close the innermost open ephemeral view and drop its writes. Does nothing
+    /// when no view is open. Never allocates and cannot fail.
     pub fn discard_ephemeral_view(self: *Database) void {
         if (!self.overlay_active) return;
-        self.overlay_active = false;
-        self.clearOverlay();
+        var view = self.nested_views.pop() orelse {
+            self.overlay_active = false;
+            self.clearOverlay();
+            return;
+        };
+        self.revert_to_depth(view.snapshot_depth);
+        // Transient slots the nested view left behind have no undo record once a
+        // transaction end cleared them, so the saved table replaces the current one.
+        if (view.saved_transient) |*saved| {
+            std.mem.swap(TransientMap, &self.overlay_transient, saved);
+            saved.deinit();
+            self.overlay_dirty.transient = true;
+            return;
+        }
+        if (self.overlay_transient.count() != 0) self.overlay_transient.clearRetainingCapacity();
+    }
+
+    /// Number of open ephemeral views, the outermost included.
+    pub fn ephemeral_view_depth(self: *const Database) usize {
+        if (!self.overlay_active) return 0;
+        return self.nested_views.items.len + 1;
     }
 
     /// Clean up database resources
@@ -333,6 +385,10 @@ pub const Database = struct {
         self.overlay_accounts.deinit();
         self.overlay_storage.deinit();
         self.overlay_transient.deinit();
+        for (self.nested_views.items) |*view| {
+            if (view.saved_transient) |*saved| saved.deinit();
+        }
+        self.nested_views.deinit(self.allocator);
     }
 
     /// Remember that a write or snapshot ran out of memory. See `failure`. Used by
@@ -794,8 +850,10 @@ pub const Database = struct {
             .overlay => self.overlay_dirty.transient or self.overlay_transient.count() != 0,
         };
         if (!dirty) return;
-        // Undo entries for cleared slots must not bring the values back.
-        for (self.undo_log.items) |*entry| {
+        // Undo entries for cleared slots must not bring the values back. Entries
+        // older than the innermost nested view belong to the enclosing view, whose
+        // transient slots that view's discard restores, so they are kept.
+        for (self.undo_log.items[self.transientClearStart(layer)..]) |*entry| {
             switch (entry.*) {
                 .transient => |e| if (e.layer == layer) {
                     entry.* = .noop;
@@ -813,6 +871,14 @@ pub const Database = struct {
                 self.overlay_dirty.transient = false;
             },
         }
+    }
+
+    /// First undo-log index a transient clear of `layer` may erase.
+    fn transientClearStart(self: *const Database, layer: Layer) usize {
+        if (layer != .overlay or self.nested_views.items.len == 0) return 0;
+        const depth = self.nested_views.items[self.nested_views.items.len - 1].snapshot_depth;
+        if (depth >= self.snapshots.items.len) return 0;
+        return self.snapshots.items[depth].undo_len;
     }
 
     // Snapshot operations
@@ -2500,7 +2566,7 @@ test "Database get_balance with overlay" {
     try db.set_balance(addr, 100);
 
     // Begin ephemeral view
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
 
     // Set balance in overlay
     try db.set_balance(addr, 200);
@@ -2524,7 +2590,7 @@ test "Database get_nonce with overlay" {
     try db.set_nonce(addr, 5);
 
     // Begin ephemeral view
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
 
     // Set nonce in overlay
     try db.set_nonce(addr, 10);
@@ -2960,7 +3026,7 @@ test "Database overlay: revert rolls back overlay writes, tombstones and transie
     try db.set_storage(address, 1, 10);
     try db.set_transient_storage(address, 1, 70);
 
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     try db.set_storage(address, 1, 11);
     try db.set_transient_storage(address, 1, 71);
 
@@ -2994,7 +3060,7 @@ test "Database overlay: discarding the view under an open snapshot drops its und
     try db.set_storage(address, 1, 10);
 
     const snapshot = try db.create_snapshot();
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     try db.set_storage(address, 1, 11);
     db.discard_ephemeral_view();
     try db.set_storage(address, 1, 12);
@@ -3038,7 +3104,7 @@ test "Database has_storage: storage root, non-zero slots, and layers" {
 
     // A view that zeroes the only slot hides the storage; one that adds a slot shows it.
     try db.set_storage(slotted, 6, 9);
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     try db.set_storage(slotted, 6, 0);
     try testing.expect(!(try db.has_storage(slotted)));
     try db.set_storage(empty, 1, 1);
@@ -3156,7 +3222,7 @@ test "Database overlay: delete_account hides base storage and never writes it" {
     try db.set_storage(address, 1, 11);
     try db.set_storage(address, 2, 22);
 
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     try db.set_storage(address, 2, 23);
     try db.set_storage(address, 3, 33);
 
@@ -3255,7 +3321,7 @@ test "EIP-7702: designator normalization applies inside an ephemeral view" {
     const delegate = @as([20]u8, @splat(0x77));
     const designator = DELEGATION_PREFIX ++ delegate;
 
-    db.begin_ephemeral_view();
+    try db.begin_ephemeral_view();
     var account = Account.zero();
     account.code_hash = try db.set_code(&designator);
     try db.set_account(eoa, account);
@@ -3294,4 +3360,168 @@ test "Database commit_to_depth keeps writes and leaves them undoable by outer sn
     db.commit_to_depth(0);
     try testing.expectEqual(@as(usize, 0), db.undo_log.items.len);
     try testing.expectEqual(@as(u256, 4), try db.get_storage(address, 1));
+}
+
+test "W3-4: a nested ephemeral view keeps the outer view's writes and drops only its own" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x4A));
+    const other = @as([20]u8, @splat(0x4B));
+    try db.set_account(address, Account.zero());
+    try db.set_storage(address, 1, 10);
+
+    try db.begin_ephemeral_view();
+    try testing.expectEqual(@as(usize, 1), db.ephemeral_view_depth());
+    try db.set_storage(address, 1, 11);
+    try db.set_storage(address, 2, 22);
+    try db.set_balance(address, 500);
+    const outer_code = try db.set_code(&[_]u8{ 0x60, 0x01, 0x00 });
+
+    try db.begin_ephemeral_view();
+    try testing.expectEqual(@as(usize, 2), db.ephemeral_view_depth());
+    // The nested view reads through to the outer view.
+    try testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+    try db.set_storage(address, 1, 111);
+    try db.set_storage(address, 3, 333);
+    try db.set_balance(address, 9);
+    try db.set_account(other, Account.zero());
+    try db.delete_account(address);
+    const inner_code = try db.set_code(&[_]u8{ 0x60, 0x02, 0x00 });
+    try testing.expect(!db.account_exists(address));
+    db.discard_ephemeral_view();
+
+    // The outer view is still open and holds exactly what it wrote.
+    try testing.expectEqual(@as(usize, 1), db.ephemeral_view_depth());
+    try testing.expect(db.overlay_active);
+    try testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 22), try db.get_storage(address, 2));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 3));
+    try testing.expectEqual(@as(u256, 500), try db.get_balance(address));
+    try testing.expect(!db.account_exists(other));
+    try testing.expectEqual(@as(usize, 3), (try db.get_code(outer_code)).len);
+    try testing.expectError(Database.Error.CodeNotFound, db.get_code(inner_code));
+    try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(usize, 0), db.ephemeral_view_depth());
+    try testing.expectEqual(@as(u256, 10), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+    try testing.expectEqual(@as(u256, 0), try db.get_balance(address));
+    try testing.expect(db.overlayIsClean());
+}
+
+test "W3-4: nested ephemeral views are LIFO three levels deep" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x4C));
+    try db.begin_ephemeral_view();
+    try db.set_storage(address, 0, 1);
+    try db.begin_ephemeral_view();
+    try db.set_storage(address, 0, 2);
+    try db.begin_ephemeral_view();
+    try db.set_storage(address, 0, 3);
+    try testing.expectEqual(@as(usize, 3), db.ephemeral_view_depth());
+
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(u256, 2), try db.get_storage(address, 0));
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(u256, 1), try db.get_storage(address, 0));
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 0));
+    // A discard without an open view is a no-op.
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(usize, 0), db.ephemeral_view_depth());
+    try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+}
+
+test "W3-4: a nested view restores the outer view's transient slots after a transient clear" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x4D));
+    try db.begin_ephemeral_view();
+    try db.set_transient_storage(address, 1, 100);
+    try db.set_transient_storage(address, 2, 200);
+
+    // A transaction run in the nested view writes transient slots and clears
+    // them all when it ends.
+    try db.begin_ephemeral_view();
+    try db.set_transient_storage(address, 1, 101);
+    try db.set_transient_storage(address, 3, 300);
+    db.clear_transient_storage();
+    try db.set_transient_storage(address, 4, 400);
+    try testing.expectEqual(@as(u256, 0), try db.get_transient_storage(address, 1));
+    db.discard_ephemeral_view();
+
+    try testing.expectEqual(@as(u256, 100), try db.get_transient_storage(address, 1));
+    try testing.expectEqual(@as(u256, 200), try db.get_transient_storage(address, 2));
+    try testing.expectEqual(@as(u256, 0), try db.get_transient_storage(address, 3));
+    try testing.expectEqual(@as(u256, 0), try db.get_transient_storage(address, 4));
+
+    // A nested view that starts without transient slots leaves none behind.
+    db.clear_transient_storage();
+    try db.begin_ephemeral_view();
+    try db.set_transient_storage(address, 5, 500);
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(u256, 0), try db.get_transient_storage(address, 5));
+    db.discard_ephemeral_view();
+}
+
+test "W3-4: a snapshot opened in the outer view still reverts outer writes after a nested view" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x4E));
+    try db.begin_ephemeral_view();
+    try db.set_storage(address, 1, 1);
+    const snapshot = try db.create_snapshot();
+    try db.set_storage(address, 1, 2);
+    try db.set_transient_storage(address, 7, 70);
+
+    try db.begin_ephemeral_view();
+    try db.set_storage(address, 1, 3);
+    db.clear_transient_storage();
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(u256, 2), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 70), try db.get_transient_storage(address, 7));
+
+    try db.revert_to_snapshot(snapshot);
+    try testing.expectEqual(@as(u256, 1), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 0), try db.get_transient_storage(address, 7));
+    db.discard_ephemeral_view();
+}
+
+test "W3-4: a nested view that cannot be opened leaves the outer view intact and leaks nothing" {
+    const address = @as([20]u8, @splat(0x4F));
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(testing.allocator, .{});
+        var db = Database.init(failing.allocator());
+        defer db.deinit();
+
+        try db.begin_ephemeral_view();
+        try db.set_storage(address, 1, 11);
+        try db.set_transient_storage(address, 2, 22);
+
+        failing.fail_index = failing.alloc_index + fail_index;
+        const opened = db.begin_ephemeral_view();
+        failing.fail_index = std.math.maxInt(usize);
+        if (opened) |_| {
+            try testing.expectEqual(@as(usize, 2), db.ephemeral_view_depth());
+            db.discard_ephemeral_view();
+        } else |err| {
+            try testing.expectEqual(Database.Error.OutOfMemory, err);
+            failures += 1;
+        }
+        try testing.expectEqual(@as(usize, 1), db.ephemeral_view_depth());
+        try testing.expectEqual(@as(usize, 0), db.snapshot_depth());
+        try testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+        try testing.expectEqual(@as(u256, 22), try db.get_transient_storage(address, 2));
+        db.discard_ephemeral_view();
+        if (opened) |_| break else |_| {}
+    }
+    try testing.expect(failures >= 2);
 }

@@ -272,6 +272,8 @@ pub fn build(b: *std.Build) void {
     integration_tests.root_module.addImport("trie", modules.trie_mod);
     integration_tests.root_module.addImport("Guillotine_lib", modules.lib_mod);
     integration_tests.root_module.addImport("build_options", options_mod);
+    // The C ABI tests under test/c_api call the exported symbols of the FFI module.
+    integration_tests.root_module.addImport("evm_c_api", shared_lib_mod);
     if (bn254_lib) |bn254| integration_tests.root_module.linkLibrary(bn254);
     integration_tests.root_module.link_libc = true;
     if (test_filter) |filter| {

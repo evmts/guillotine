@@ -30,6 +30,36 @@ pub fn HandlerOverride(FrameType: type) type {
     };
 }
 
+/// The handler of every byte that is not an instruction on the configured fork.
+/// Written against the register ABI: it does no host work. An invalid opcode
+/// consumes all remaining gas, so the frame's gas is written back as zero.
+/// Every call with the same `FrameType` returns the same pointer.
+pub fn invalidHandler(comptime FrameType: type) FrameType.OpcodeHandler {
+    return &InvalidHandler(FrameType).handler;
+}
+
+fn InvalidHandler(comptime FrameType: type) type {
+    return struct {
+        fn handler(
+            frame: *FrameType,
+            cursor: [*]const FrameType.Dispatch.Item,
+            sp: [*]FrameType.WordType,
+            gas: FrameType.GasType,
+            t0: u64,
+            t1: u64,
+            t2: u64,
+            t3: u64,
+        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            const N = handler_abi.Native(FrameType);
+            // Tracing: the sidecar takes this instruction too, so both interpreters
+            // are seen to halt on it. Compiled out when the frame is not traced.
+            N.before(frame, .INVALID, cursor, N.StackView.init(sp, t0, t1, t2, t3), gas);
+            N.flush(frame, N.StackView.init(sp, t0, t1, t2, t3), 0);
+            return .invalid_opcode;
+        }
+    };
+}
+
 /// Returns opcode handlers array with optional custom overrides
 pub fn getOpcodeHandlers(
     comptime FrameType: type,
@@ -48,27 +78,7 @@ pub fn getOpcodeHandlers(
     const KeccakHandlers = stack_frame_keccak.Handlers(FrameType);
     const LogHandlers = stack_frame_log.Handlers(FrameType);
 
-    // The default opcode handler used for any opcode that is not supported by the EVM.
-    // Written against the register ABI: it does no host work. An invalid opcode
-    // consumes all remaining gas, so the frame's gas is written back as zero.
-    const invalid: FrameType.OpcodeHandler = &struct {
-        fn handler(
-            frame: *FrameType,
-            cursor: [*]const FrameType.Dispatch.Item,
-            sp: [*]FrameType.WordType,
-            gas: FrameType.GasType,
-            t0: u64,
-            t1: u64,
-            t2: u64,
-            t3: u64,
-        ) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-            _ = cursor;
-            _ = gas;
-            const N = handler_abi.Native(FrameType);
-            N.flush(frame, N.StackView.init(sp, t0, t1, t2, t3), 0);
-            return .invalid_opcode;
-        }
-    }.handler;
+    const invalid = invalidHandler(FrameType);
 
     var h: [256]FrameType.OpcodeHandler = undefined;
     @setEvalBranchQuota(10000);
@@ -238,6 +248,17 @@ pub fn getSyntheticHandler(FrameType: type, synthetic_opcode: OpcodeSynthetic) F
         .BLOCK_BEGIN => &JumpSyntheticHandlers.block_begin,
         .INVALID_JUMP_TARGET => &JumpSyntheticHandlers.invalid_jump_target,
     };
+}
+
+/// Synthetic handler for a raw byte. A byte that names no synthetic opcode maps to the
+/// invalid handler, so an unvalidated value can never reach an illegal enum conversion.
+pub fn getSyntheticHandlerForByte(comptime FrameType: type, synthetic_byte: u8) FrameType.OpcodeHandler {
+    inline for (comptime std.meta.tags(OpcodeSynthetic)) |synthetic_opcode| {
+        if (synthetic_byte == @backingInt(synthetic_opcode)) {
+            return getSyntheticHandler(FrameType, synthetic_opcode);
+        }
+    }
+    return invalidHandler(FrameType);
 }
 
 test "frame_handlers exports handler lookup function" {

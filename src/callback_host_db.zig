@@ -65,6 +65,31 @@ pub const CallbackHostDb = struct {
     loaded_accounts: std.AutoHashMap([20]u8, void),
     loaded_storage: std.AutoHashMap(SlotKey, void),
     failure: ?Error = null,
+    views: std.ArrayList(View) = .empty,
+
+    const View = struct {
+        accounts: std.AutoHashMap([20]u8, void),
+        storage: std.AutoHashMap(SlotKey, void),
+    };
+
+    pub fn begin_ephemeral_view(self: *CallbackHostDb) Error!void {
+        try self.views.ensureUnusedCapacity(self.inner.allocator, 1);
+        var accounts = try self.loaded_accounts.clone();
+        errdefer accounts.deinit();
+        var storage = try self.loaded_storage.clone();
+        errdefer storage.deinit();
+        try self.inner.begin_ephemeral_view();
+        self.views.appendAssumeCapacity(.{ .accounts = accounts, .storage = storage });
+    }
+
+    pub fn discard_ephemeral_view(self: *CallbackHostDb) void {
+        const saved = self.views.pop() orelse return;
+        self.inner.discard_ephemeral_view();
+        self.loaded_accounts.deinit();
+        self.loaded_storage.deinit();
+        self.loaded_accounts = saved.accounts;
+        self.loaded_storage = saved.storage;
+    }
 
     pub fn init(allocator: std.mem.Allocator, vtable: GuillotineHostVTable, user_ctx: ?*anyopaque) CallbackHostDb {
         return .{
@@ -77,6 +102,8 @@ pub const CallbackHostDb = struct {
     }
 
     pub fn deinit(self: *CallbackHostDb) void {
+        while (self.views.items.len != 0) self.discard_ephemeral_view();
+        self.views.deinit(self.inner.allocator);
         self.loaded_accounts.deinit();
         self.loaded_storage.deinit();
         self.inner.deinit();

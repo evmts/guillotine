@@ -114,7 +114,7 @@ test "benchmark: constant folding performance" {
         
         // Iterate through to trigger fusion detection
         var iter = bc.createIterator();
-        while (iter.next()) |_| {}
+        while (try iter.next()) |_| {}
     }
     const fusion_time = timer.read();
     
@@ -126,7 +126,7 @@ test "benchmark: constant folding performance" {
         defer bc.deinit();
         
         var iter = bc.createIterator();
-        while (iter.next()) |_| {}
+        while (try iter.next()) |_| {}
     }
     const no_fusion_time = timer.read();
     
@@ -173,7 +173,7 @@ test "benchmark: multi-PUSH performance" {
         defer bc.deinit();
         
         var iter = bc.createIterator();
-        while (iter.next()) |_| {}
+        while (try iter.next()) |_| {}
     }
     const fusion_time = timer.read();
     
@@ -185,7 +185,7 @@ test "benchmark: multi-PUSH performance" {
         defer bc.deinit();
         
         var iter = bc.createIterator();
-        while (iter.next()) |_| {}
+        while (try iter.next()) |_| {}
     }
     const no_fusion_time = timer.read();
     
@@ -232,7 +232,7 @@ test "benchmark: multi-POP performance" {
         defer bc.deinit();
         
         var iter = bc.createIterator();
-        while (iter.next()) |_| {}
+        while (try iter.next()) |_| {}
     }
     const fusion_time = timer.read();
     
@@ -244,7 +244,7 @@ test "benchmark: multi-POP performance" {
         defer bc.deinit();
         
         var iter = bc.createIterator();
-        while (iter.next()) |_| {}
+        while (try iter.next()) |_| {}
     }
     const no_fusion_time = timer.read();
     

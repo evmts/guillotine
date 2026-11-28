@@ -41,7 +41,7 @@ test "fusion: PUSH+ADD fusion detection and execution" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_add_fusion => |data| {
                 found_fusion = true;
@@ -130,7 +130,7 @@ test "fusion: Bytecode analysis detects PUSH+SUB fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_sub_fusion => |data| {
                 found_fusion = true;
@@ -165,7 +165,7 @@ test "fusion: Bytecode analysis detects PUSH+MUL fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_mul_fusion => |data| {
                 found_fusion = true;
@@ -200,7 +200,7 @@ test "fusion: Bytecode analysis detects PUSH+DIV fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_div_fusion => |data| {
                 found_fusion = true;
@@ -235,7 +235,7 @@ test "fusion: Bytecode analysis detects PUSH+AND fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_and_fusion => |data| {
                 found_fusion = true;
@@ -270,7 +270,7 @@ test "fusion: Bytecode analysis detects PUSH+OR fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_or_fusion => |data| {
                 found_fusion = true;
@@ -305,7 +305,7 @@ test "fusion: Bytecode analysis detects PUSH+XOR fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_xor_fusion => |data| {
                 found_fusion = true;
@@ -344,7 +344,7 @@ test "fusion: Bytecode analysis detects PUSH+JUMP fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_jump_fusion => |data| {
                 found_fusion = true;
@@ -384,7 +384,7 @@ test "fusion: Bytecode analysis detects PUSH+JUMPI fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_jumpi_fusion => |data| {
                 found_fusion = true;
@@ -424,7 +424,7 @@ test "fusion: Large PUSH32+ADD fusion" {
     var iter = bc.createIterator();
     var found_fusion = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_add_fusion => |data| {
                 found_fusion = true;
@@ -465,7 +465,7 @@ test "fusion: Multiple fusions in sequence" {
     var iter = bc.createIterator();
     var fusion_count: u32 = 0;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_add_fusion => {
                 fusion_count += 1;
@@ -541,7 +541,7 @@ test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
     var fusion_count: u32 = 0;
     var push_jump_count: u32 = 0;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_jump_fusion => |data| {
                 push_jump_count += 1;
@@ -699,7 +699,7 @@ test "fusion: No fusion when disabled" {
     var found_regular_push = false;
     var found_regular_add = false;
     
-    while (iter.next()) |op_data| {
+    while (try iter.next()) |op_data| {
         switch (op_data) {
             .push_add_fusion => {
                 found_fusion = true;

@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const FrameConfig = @import("frame/frame_config.zig").FrameConfig;
-const BlockInfoConfig = @import("frame/block_info_config.zig").BlockInfoConfig;
 const Eips = @import("eips_and_hardforks/eips.zig").Eips;
 const EipOverride = @import("eips_and_hardforks/eips.zig").EipOverride;
 const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
@@ -40,19 +39,13 @@ pub const PrecompileOutput = struct {
 pub const EvmConfig = struct {
     // Comptime known configuration of Eip and hardfork information
     // Default to the latest mainnet hardfork, OSAKA (Fusaka, December 2025).
+    // `eips.overrides` is the one place that turns a single EIP on or off; every
+    // EIP check of the EVM reads it through `Eips.is_eip_active`.
     eips: Eips = Eips{ .hardfork = Hardfork.DEFAULT },
-
-    /// EIP overrides to apply on top of the base hardfork
-    /// Allows granular control over specific EIP features
-    eip_overrides: []const EipOverride = &.{},
 
     /// Maximum call depth allowed in the EVM (defaults to 1024 levels)
     /// This prevents infinite recursion and stack overflow attacks
     max_call_depth: u11 = 1024,
-
-    /// Maximum input size for interpreter operations (128 KB)
-    /// This prevents excessive memory usage in single operations
-    max_input_size: u18 = 131072, // 128 KB
 
     /// Enable precompiled contracts support (default: true)
     /// When disabled, precompile calls will fail with an error
@@ -72,8 +65,12 @@ pub const EvmConfig = struct {
     /// Maximum total bytes kept by DispatchCache (default 32 MiB).
     dispatch_cache_bytes: usize = 32 * 1024 * 1024,
 
-    /// Disable gas checks for testing/development (default: false)
-    /// When enabled, gas consumption methods become no-ops
+    /// Disable gas checks for testing/development (default: false).
+    /// Honored by the interpreter in Debug builds only (`Frame.gas_checks_disabled`):
+    /// there no block, dynamic or memory charge is made and none can fail, so gas
+    /// no longer bounds execution. Other build modes always charge gas.
+    /// Transaction admission skips its fee-cap and calldata-floor checks whenever
+    /// the flag is set.
     disable_gas_checks: bool = false,
 
     /// Disable balance checks for testing/development (default: false)
@@ -106,28 +103,13 @@ pub const EvmConfig = struct {
 
     memory_limit: u64 = 0xFFFFFF,
 
-    /// Arena allocator configuration
-    /// Initial and maximum retained capacity for the arena allocator (in bytes)
-    /// Default: 64MB - optimized for complex EVM operations and modern hardware
+    /// Most call-arena capacity (in bytes) an EVM keeps from one call to the next.
+    /// It is a retain limit, not a limit on one call: a call that needs more
+    /// gets it, and the arena is trimmed back to its initial size afterwards.
+    /// The hard limit on one call is `GrowingArenaAllocator.MAX_ABSOLUTE_CAPACITY`.
     arena_capacity_limit: usize = 64 * 1024 * 1024,
-    /// Growth factor for arena allocator (as percentage, e.g., 150 = 50% growth)
-    arena_growth_factor: u32 = 150,
     /// Database implementation type for storage operations (always required)
     DatabaseType: type = @import("storage/database.zig").Database,
-
-    /// Block information configuration
-    /// Controls the types used for difficulty and base_fee fields
-    /// Default uses u64 for both difficulty and base_fee for efficiency
-    block_info_config: BlockInfoConfig = .{
-        .DifficultyType = u64,
-        .BaseFeeType = u64,
-        .use_compact_types = false,
-    },
-
-    /// Custom opcode handler overrides
-    /// These will override the default handlers in frame_handlers.zig
-    /// Set to empty slice for no overrides
-    opcode_overrides: []const struct { opcode: u8, handler: *const anyopaque } = &.{},
 
     /// Custom precompile implementations
     /// These will override or add new precompiles
@@ -203,13 +185,11 @@ pub const EvmConfig = struct {
             .memory_initial_capacity = self.memory_initial_capacity,
             .memory_limit = self.memory_limit,
             .DatabaseType = self.DatabaseType,
-            .block_info_config = self.block_info_config,
             .disable_gas_checks = self.disable_gas_checks,
             .disable_balance_checks = self.disable_balance_checks,
             .disable_fusion = !self.enable_fusion,
             .vector_length = self.getVectorLength(),
             .loop_quota = self.loop_quota,
-            .opcode_overrides = &.{}, // Pass empty overrides - custom overrides should be handled differently
             // TracerType removed - tracer is always present but enabled/disabled via config
         };
     }
@@ -235,9 +215,8 @@ test "EvmConfig - default initialization" {
     const config = EvmConfig{};
 
     try testing.expectEqual(Hardfork.OSAKA, config.eips.hardfork);
-    try testing.expectEqual(@as(usize, 0), config.eip_overrides.len);
+    try testing.expectEqual(@as(usize, 0), config.eips.overrides.len);
     try testing.expectEqual(@as(u11, 1024), config.max_call_depth);
-    try testing.expectEqual(@as(u18, 131072), config.max_input_size);
     try testing.expectEqual(true, config.enable_precompiles);
     try testing.expectEqual(true, config.enable_fusion);
     try testing.expectEqual(false, config.disable_gas_checks);
@@ -248,16 +227,13 @@ test "EvmConfig - default initialization" {
 test "EvmConfig - custom configuration" {
     const config = EvmConfig{
         .eips = Eips{ .hardfork = Hardfork.BERLIN },
-        .eip_overrides = &.{},
         .max_call_depth = 512,
-        .max_input_size = 65536,
         .enable_precompiles = false,
         .enable_fusion = false,
     };
 
     try testing.expectEqual(Hardfork.BERLIN, config.eips.hardfork);
     try testing.expectEqual(@as(u11, 512), config.max_call_depth);
-    try testing.expectEqual(@as(u18, 65536), config.max_input_size);
     try testing.expectEqual(false, config.enable_precompiles);
     try testing.expectEqual(false, config.enable_fusion);
 }
@@ -304,19 +280,6 @@ test "EvmConfig - hardfork variations" {
         try testing.expectEqual(@as(u11, 1024), config.max_call_depth);
         try testing.expectEqual(true, config.enable_precompiles);
     }
-}
-
-test "EvmConfig - max input size variations" {
-    const small_config = EvmConfig{ .max_input_size = 1024 };
-    try testing.expectEqual(@as(u18, 1024), small_config.max_input_size);
-
-    // u18 cannot represent 262144 (2^18); use max-1 instead
-    const large_config = EvmConfig{ .max_input_size = 262143 }; // 2^18 - 1
-    try testing.expectEqual(@as(u18, 262143), large_config.max_input_size);
-
-    // Test maximum value for u18
-    const max_config = EvmConfig{ .max_input_size = 262143 }; // 2^18 - 1
-    try testing.expectEqual(@as(u18, 262143), max_config.max_input_size);
 }
 
 test "EvmConfig - call depth limits" {
@@ -366,27 +329,16 @@ test "EvmConfig - tracer type handling" {
     _ = DummyTracer;
 }
 
-test "EvmConfig - block info config integration" {
-    const config = EvmConfig{};
-
-    // Default block info config should be initialized with u64 types
-    try testing.expectEqual(u64, config.block_info_config.DifficultyType);
-    try testing.expectEqual(u64, config.block_info_config.BaseFeeType);
-    try testing.expectEqual(false, config.block_info_config.use_compact_types);
-}
-
 test "EvmConfig - complete custom configuration" {
     const config = EvmConfig{
         .eips = Eips{ .hardfork = Hardfork.ISTANBUL },
         .max_call_depth = 2000,
-        .max_input_size = 200000,
         .enable_precompiles = false,
         .enable_fusion = false,
     };
 
     try testing.expectEqual(Hardfork.ISTANBUL, config.eips.hardfork);
     try testing.expectEqual(@as(u11, 2000), config.max_call_depth);
-    try testing.expectEqual(@as(u18, 200000), config.max_input_size);
     try testing.expectEqual(false, config.enable_precompiles);
     try testing.expectEqual(false, config.enable_fusion);
     try testing.expectEqual(u11, config.get_depth_type());
@@ -402,10 +354,6 @@ test "EvmConfig - EIP overrides" {
                 .{ .eip = 1153, .enabled = true }, // Enable transient storage on London
             },
         },
-        .eip_overrides = &[_]EipOverride{
-            .{ .eip = 3855, .enabled = true },
-            .{ .eip = 1153, .enabled = true },
-        },
     };
 
     // London normally doesn't have PUSH0 (EIP-3855)
@@ -420,10 +368,6 @@ test "EvmConfig - EIP overrides" {
                 .{ .eip = 6780, .enabled = false }, // Disable SELFDESTRUCT restriction
                 .{ .eip = 4844, .enabled = false }, // Disable blob transactions
             },
-        },
-        .eip_overrides = &[_]EipOverride{
-            .{ .eip = 6780, .enabled = false },
-            .{ .eip = 4844, .enabled = false },
         },
     };
 

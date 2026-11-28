@@ -1004,9 +1004,9 @@ _decls, _items = stack_vars(2)
 _fold_goals = []
 _fold_err = ""
 for _op_smt, _fold in [
-    ("bvadd", "(bvadd v1 v2)"),  # folded_value = value1 +% value2
-    ("bvsub", "(bvsub v2 v1)"),  # folded_value = value2 -% value1
-    ("bvmul", "(bvmul v1 v2)"),  # folded_value = value1 *% value2
+    ("bvadd", "(bvadd v1 v2)"),  # folded = first +% second
+    ("bvsub", "(bvsub v2 v1)"),  # folded = second -% first
+    ("bvmul", "(bvmul v1 v2)"),  # folded = first *% second
 ]:
     _e = EvmStack(_items)
     _e.push("v1")
@@ -1031,9 +1031,10 @@ pushing bytecode_analyze.zig's folded_value, for OP in {ADD, SUB, MUL}.""",
 {_decls}""",
         hyps=[],
         goal=conj(_fold_goals),
-        sources=src(BYTECODE_ANALYZE, "check"),
-        notes="""Folder transcription: ADD -> value1 +% value2; SUB -> value2 -% value1;
-MUL -> value1 *% value2 (bytecode_analyze.zig checkConstantFoldingPatternWithFusion).""",
+        sources=src(BYTECODE_ANALYZE, "constantFold"),
+        notes="""Folder transcription (value1 = `first`, value2 = `second`, the top of the stack):
+ADD -> first +% second; SUB -> second -% first (top minus second, LIFO order);
+MUL -> first *% second (bytecode_analyze.zig constantFold).""",
         structural_error=_fold_err,
     )
 )
@@ -1308,6 +1309,7 @@ high = height - inputs + outputs exactly.""",
 # is what makes the integer model equal to the Zig fixed-width code: no u512
 # product wraps and the final `@intCast` to u256 cannot trap.
 
+POW32 = 1 << 32
 POW64 = 1 << 64
 POW128 = 1 << 128
 POW256 = 1 << 256
@@ -1552,6 +1554,188 @@ free-slot bitmap; bit set = slot free):
         sources=src(VERIFIED_OPS, "slotBitmapMask", "slotBitmapLowest", "slotBitmapTake", "slotBitmapRelease"),
         notes="""The cache keeps one such word per 64 slots and searches the words in order, so
 the lowest set bit of the first non-zero word is the lowest free slot overall.""",
+    )
+)
+
+# ---------------------------------------------------------------------------
+# Bounds and ordering helpers: jump table probe, checked DUPn/SWAPn, arena
+# capacity, EIP-7685 request order
+# ---------------------------------------------------------------------------
+
+theorem(
+    Theorem(
+        name="jump_table_interpolation_index_bounds",
+        claim="""For ALL u32 target_offset, len, pc_range with len != 0, pc_range != 0 and
+target_offset < pc_range (the in-range branch of jumpTableInterpolationIndex,
+which returns (target_offset * len) / pc_range computed in u64):
+  (1) the product never wraps: target_offset * len <= (2^32 - 1)^2 < 2^64,
+  (2) the quotient is an index of the table: 0 <= index < len,
+  (3) the quotient fits u32, so it also fits a 32-bit `usize` after the divide.
+Every other input takes a clamp branch, proved in
+`jump_table_interpolation_index_clamp`.""",
+        logic="QF_NIA",
+        solver="z3",
+        decls="""(declare-const target_offset Int)
+(declare-const len Int)
+(declare-const pc_range Int)
+; verified_ops.zig jumpTableInterpolationIndex, in-range branch:
+;   index = (target_offset * len) / pc_range, remainder `rest`
+(declare-const index Int)
+(declare-const rest Int)""",
+        hyps=[
+            ("target_offset, len, pc_range are u32", f"(and (<= 0 target_offset) (< target_offset {POW32}) (<= 0 len) (< len {POW32}) (<= 0 pc_range) (< pc_range {POW32}))"),
+            ("the function did not take a clamp branch", "(and (not (= len 0)) (not (= pc_range 0)) (< target_offset pc_range))"),
+            ("index = (target_offset * len) / pc_range", euclid("(* target_offset len)", "pc_range", "index", "rest")),
+        ],
+        goal=f"""(and (<= (* target_offset len) {(POW32 - 1) * (POW32 - 1)})
+     (< (* target_offset len) {POW64})
+     (<= 0 index)
+     (< index len)
+     (< index {POW32}))""",
+        sources=src(VERIFIED_OPS, "jumpTableInterpolationIndex"),
+        notes="""Solved by Z3 over the integers (Bitwuzla has no integer theory). The Euclidean
+hypothesis is satisfiable for every in-range input (see the vacuity file).
+Regression model: with a 32-bit `usize`, target_offset = len = 65536 gives the
+product 2^32, which wraps to 0 and selects entry 0 instead of len / 2 for
+pc_range = 131072. Claim (1) rules that out for the u64 product.""",
+    )
+)
+
+theorem(
+    Theorem(
+        name="jump_table_interpolation_index_clamp",
+        claim="""For ALL u32 target_offset, len, pc_range, the clamp branches of
+jumpTableInterpolationIndex:
+  (1) an empty table (len == 0) yields 0 (first line of the function),
+  (2) an empty range (pc_range == 0) or a target at or past the range yields
+      len - 1 for a non-empty table; `@as(u64, len) - 1` cannot wrap there,
+  (3) in both cases the result is an index of a non-empty table: result < len,
+  (4) the three branches are exhaustive and exclusive: every input takes exactly
+      one of empty-table, clamp, or the in-range quotient.""",
+        logic="QF_BV",
+        decls=f"""(declare-const target_offset (_ BitVec 32))
+(declare-const len (_ BitVec 32))
+(declare-const pc_range (_ BitVec 32))
+(define-fun l64 () (_ BitVec 64) ((_ zero_extend 32) len))
+; verified_ops.zig jumpTableInterpolationIndex branch conditions, in source order
+(define-fun emptyTable () Bool (= len {bv(0, 32)}))
+(define-fun clamp () Bool (and (not emptyTable) (or (= pc_range {bv(0, 32)}) (bvuge target_offset pc_range))))
+(define-fun quotient () Bool (and (not emptyTable) (not clamp)))
+(define-fun last () (_ BitVec 64) (bvsub l64 {bv(1, 64)}))""",
+        hyps=[],
+        goal=f"""(and
+  (=> clamp (and (bvult last l64) (= (bvadd last {bv(1, 64)}) l64)))
+  (=> quotient (and (not (= pc_range {bv(0, 32)})) (bvult target_offset pc_range) (not (= len {bv(0, 32)}))))
+  (or emptyTable clamp quotient)
+  (not (and emptyTable clamp))
+  (not (and emptyTable quotient))
+  (not (and clamp quotient)))""",
+        sources=src(VERIFIED_OPS, "jumpTableInterpolationIndex"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="stack_checked_dup_swap_index",
+        claim="""For ALL u8 n and ALL 64-bit stack heights, the checked DUPn/SWAPn domain tests:
+  checkedDupIndex(n, height):
+    (1) is some  iff  1 <= n <= height,
+    (2) when some, equals n - 1 over the integers (the subtraction never wraps)
+        and is a slot of the stack: result < height,
+  checkedSwapIndex(n, height):
+    (3) is some  iff  n >= 1 and n + 1 <= height over the integers (SWAPn needs
+        n + 1 items; the test never computes n + 1),
+    (4) when some, equals n, is at least 1 (never the top itself) and is a slot
+        of the stack: result < height.""",
+        logic="QF_BV",
+        decls=f"""(declare-const n (_ BitVec 8))
+(declare-const height (_ BitVec 64))
+(define-fun depth () (_ BitVec 64) ((_ zero_extend 56) n))
+; verified_ops.zig checkedDupIndex
+(define-fun dupSome () Bool (and (not (= n {bv(0, 8)})) (not (bvugt depth height))))
+(define-fun dupValue () (_ BitVec 64) (bvsub depth {bv(1, 64)}))
+; verified_ops.zig checkedSwapIndex
+(define-fun swapSome () Bool (and (not (= n {bv(0, 8)})) (not (bvuge depth height))))
+(define-fun swapValue () (_ BitVec 64) depth)
+; exact integer views
+(define-fun int ((x (_ BitVec 64))) (_ BitVec 72) ((_ zero_extend 8) x))""",
+        hyps=[],
+        goal=f"""(and
+  ; (1)
+  (= dupSome (and (bvuge n {bv(1, 8)}) (bvule (int depth) (int height))))
+  ; (2)
+  (=> dupSome (and (= (bvadd (int dupValue) {bv(1, 72)}) (int depth))
+                   (bvult dupValue height)))
+  ; (3)
+  (= swapSome (and (bvuge n {bv(1, 8)}) (bvule (bvadd (int depth) {bv(1, 72)}) (int height))))
+  ; (4)
+  (=> swapSome (and (= swapValue depth)
+                    (bvuge swapValue {bv(1, 64)})
+                    (bvult swapValue height))))""",
+        sources=src(VERIFIED_OPS, "checkedDupIndex", "checkedSwapIndex"),
+        notes="""Regression model: `n - 1` in u8 wraps for n = 0 and `n + 1` in u8 wraps for
+n = 255. Both helpers reject n = 0 first and compare in the 64-bit height type,
+so neither expression is evaluated.""",
+    )
+)
+
+theorem(
+    Theorem(
+        name="arena_checked_capacity_add",
+        claim="""For ALL 64-bit used, len, limit, checkedCapacityAdd(used, len, limit):
+  (1) is some  iff  used + len <= limit over the integers (65-bit sum): a sum that
+      does not fit 64 bits is refused, never wrapped,
+  (2) when some, equals the exact integer sum, is at least `used` and at least
+      `len`, and is at most `limit`.""",
+        logic="QF_BV",
+        decls=f"""(declare-const used (_ BitVec 64))
+(declare-const len (_ BitVec 64))
+(declare-const limit (_ BitVec 64))
+; @addWithOverflow(used, len): wrapped sum and carry
+(define-fun sum () (_ BitVec 64) (bvadd used len))
+(define-fun carry () Bool (bvult sum used))
+; verified_ops.zig checkedCapacityAdd
+(define-fun addSome () Bool (and (not carry) (not (bvugt sum limit))))
+(define-fun exactSum () (_ BitVec 65) (bvadd ((_ zero_extend 1) used) ((_ zero_extend 1) len)))""",
+        hyps=[],
+        goal="""(and
+  (= carry (= ((_ extract 64 64) exactSum) #b1))
+  (= addSome (bvule exactSum ((_ zero_extend 1) limit)))
+  (=> addSome (and (= ((_ zero_extend 1) sum) exactSum)
+                   (bvuge sum used)
+                   (bvuge sum len)
+                   (bvule sum limit))))""",
+        sources=src(VERIFIED_OPS, "checkedCapacityAdd"),
+    )
+)
+
+theorem(
+    Theorem(
+        name="eip7685_request_types_strictly_ascending",
+        claim="""For ALL request type bytes a, b, c, requestTypeFollows (the order test of
+EIP-7685 computeRequestsHash) is a strict order:
+  (1) irreflexive: a type never follows itself, so a duplicate is refused,
+  (2) asymmetric: b following a excludes a following b, so an inversion is refused,
+  (3) transitive: accepted neighbours a < b < c give a < c, so in any accepted
+      list EVERY pair of request types is distinct and ascending, not only
+      adjacent ones,
+  (4) total on distinct types: of two different types exactly one order is
+      accepted, so every set of types has an accepted arrangement.""",
+        logic="QF_BV",
+        decls="""(declare-const a (_ BitVec 8))
+(declare-const b (_ BitVec 8))
+(declare-const c (_ BitVec 8))
+; verified_ops.zig requestTypeFollows: previous < current
+(define-fun follows ((previous (_ BitVec 8)) (current (_ BitVec 8))) Bool (bvult previous current))""",
+        hyps=[],
+        goal="""(and
+  (not (follows a a))
+  (=> (follows a b) (not (follows b a)))
+  (=> (and (follows a b) (follows b c)) (and (follows a c) (not (= a c))))
+  (=> (not (= a b)) (xor (follows a b) (follows b a))))""",
+        sources=src(VERIFIED_OPS, "requestTypeFollows"),
+        notes="""Regression model: the earlier test refused only `current < previous`, which
+accepts current == previous, i.e. two requests of one type.""",
     )
 )
 

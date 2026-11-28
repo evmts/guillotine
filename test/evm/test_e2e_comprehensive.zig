@@ -50,7 +50,6 @@ const E2EFrameConfig = frame_mod.FrameConfig{
 const E2EFrame = frame_mod.Frame(E2EFrameConfig);
 const E2EEvm = evm_mod.Evm(.{
     .max_call_depth = 1024,
-    .max_input_size = 1024 * 1024, // 1MB
     .frame_config = E2EFrameConfig,
 });
 

@@ -5,22 +5,29 @@ const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 
 pub const CreatedContracts = struct {
-    created: std.AutoHashMap(Address, void),
+    /// Created addresses in the order they were first marked. Insertion order
+    /// makes a checkpoint a count: reverting drops the entries added after it.
+    created: Map,
     allocator: std.mem.Allocator,
+
+    const Map = std.array_hash_map.Auto(Address, void);
+
+    /// The number of addresses marked when the checkpoint was taken.
+    pub const Checkpoint = usize;
 
     pub inline fn init(allocator: std.mem.Allocator) CreatedContracts {
         return CreatedContracts{
-            .created = std.AutoHashMap(Address, void).init(allocator),
+            .created = .empty,
             .allocator = allocator,
         };
     }
 
     pub inline fn deinit(self: *CreatedContracts) void {
-        self.created.deinit();
+        self.created.deinit(self.allocator);
     }
 
     pub inline fn mark_created(self: *CreatedContracts, address: Address) !void {
-        try self.created.put(address, {});
+        try self.created.put(self.allocator, address, {});
     }
 
     pub inline fn was_created_in_tx(self: *const CreatedContracts, address: Address) bool {
@@ -31,14 +38,82 @@ pub const CreatedContracts = struct {
         return @intCast(self.created.count());
     }
 
-    pub inline fn clear(self: *CreatedContracts) void {
-        self.created.clearAndFree();
+    /// Mark the current state of the set. Costs O(1) and allocates nothing.
+    pub inline fn checkpoint(self: *const CreatedContracts) Checkpoint {
+        return self.created.count();
     }
 
+    /// Forget every address first marked since `mark` was taken: the frame that
+    /// created them failed, so the creations never happened (EIP-6780 must not
+    /// treat such an address as created in this transaction). Addresses marked
+    /// before `mark` stay, also when they were marked again later. A mark above
+    /// the current count changes nothing. Never allocates.
+    pub fn revert(self: *CreatedContracts, mark: Checkpoint) void {
+        if (mark >= self.created.count()) return;
+        self.created.shrinkRetainingCapacity(mark);
+    }
+
+    pub inline fn clear(self: *CreatedContracts) void {
+        self.created.clearRetainingCapacity();
+    }
+
+    /// Remove one address, keeping the order of the others. A checkpoint taken
+    /// before the removal no longer names the same entries, so do not remove
+    /// while a checkpoint is outstanding.
     pub inline fn remove(self: *CreatedContracts, address: Address) bool {
-        return self.created.remove(address);
+        return self.created.orderedRemove(address);
     }
 };
+
+test "W3-6: CreatedContracts checkpoint and revert are LIFO" {
+    var created = CreatedContracts.init(std.testing.allocator);
+    defer created.deinit();
+
+    const outer: Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
+    const middle: Address = .{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0)) };
+    const inner: Address = .{ .bytes = [_]u8{0x03} ++ @as([19]u8, @splat(0)) };
+
+    try created.mark_created(outer);
+    const middle_mark = created.checkpoint();
+    try created.mark_created(middle);
+    const inner_mark = created.checkpoint();
+    try created.mark_created(inner);
+    // Marking an address again inside a nested frame adds nothing to revert.
+    try created.mark_created(outer);
+    try std.testing.expectEqual(@as(u32, 3), created.count());
+
+    created.revert(inner_mark);
+    try std.testing.expect(created.was_created_in_tx(outer));
+    try std.testing.expect(created.was_created_in_tx(middle));
+    try std.testing.expect(!created.was_created_in_tx(inner));
+
+    created.revert(middle_mark);
+    try std.testing.expect(created.was_created_in_tx(outer));
+    try std.testing.expect(!created.was_created_in_tx(middle));
+    try std.testing.expectEqual(@as(u32, 1), created.count());
+
+    // An address dropped by a revert can be created again.
+    try created.mark_created(inner);
+    try std.testing.expect(created.was_created_in_tx(inner));
+}
+
+test "W3-6: CreatedContracts revert ignores a mark above the count and allocates nothing" {
+    var created = CreatedContracts.init(std.testing.allocator);
+    defer created.deinit();
+
+    const address: Address = .{ .bytes = [_]u8{0x0A} ++ @as([19]u8, @splat(0)) };
+    try created.mark_created(address);
+    const mark = created.checkpoint();
+    created.clear();
+    created.revert(mark);
+    try std.testing.expectEqual(@as(u32, 0), created.count());
+
+    try created.mark_created(address);
+    created.revert(created.checkpoint());
+    try std.testing.expect(created.was_created_in_tx(address));
+    created.revert(0);
+    try std.testing.expect(!created.was_created_in_tx(address));
+}
 
 test "created contracts initialization" {
     const allocator = std.testing.allocator;

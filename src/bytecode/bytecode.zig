@@ -39,6 +39,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             InitcodeTooLarge,
         };
 
+        /// A broken invariant of the analysis itself, never caused by the code analyzed.
+        pub const IteratorError = error{AnalysisInvariant};
+
         pub const Stats = @import("bytecode_stats.zig").BytecodeStats;
         pub const PcType = cfg.PcType();
 
@@ -79,14 +82,15 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             /// Disable fusion when analyzing original gas and stack effects.
             enable_fusion: bool = true,
 
-            pub fn next(iterator: *Iterator) ?OpcodeData {
+            /// The next instruction, or null at the end of the code.
+            /// `error.AnalysisInvariant` reports a validation bitmap shorter than the
+            /// code: stopping early there would silently drop the rest of the code from
+            /// the schedule, so the caller must fail the analysis instead.
+            pub fn next(iterator: *Iterator) IteratorError!?OpcodeData {
                 if (iterator.pc >= iterator.bytecode.len()) return null;
 
                 const opcode = iterator.bytecode.get_unsafe(iterator.pc);
-                if (iterator.pc >= iterator.bytecode.packed_bitmap.len) {
-                    log.err("Iterator PC {} exceeds packed_bitmap len {}", .{ iterator.pc, iterator.bytecode.packed_bitmap.len });
-                    return null;
-                }
+                if (iterator.pc >= iterator.bytecode.packed_bitmap.len) return error.AnalysisInvariant;
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
                 // Handle fusion opcodes first (only if fusions are enabled)
@@ -200,12 +204,29 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 return calculateBlockInfo(iterator.bytecode, iterator.pc + 1, 1);
             }
 
+            /// True for every byte that dispatches to the `invalid` handler on the configured
+            /// fork: bytes no fork assigns (0x0C, 0xEF, ...), opcodes a later fork introduces
+            /// (PUSH0 before Shanghai, TLOAD before Cancun, ...), and the withdrawn EIP-3074
+            /// AUTH/AUTHCALL (0xF6/0xF7). The designated INVALID (0xFE) is listed as well.
+            pub const halts_as_invalid: [256]bool = blk: {
+                @setEvalBranchQuota(200_000);
+                var table: [256]bool = @splat(false);
+                for (&table, 0..) |*halts, byte| {
+                    const opcode: u8 = @intCast(byte);
+                    halts.* = std.enums.fromInt(Opcode, opcode) == null or
+                        !fork_gas.isOpcodeDefined(cfg.hardfork, opcode) or
+                        opcode == 0xF6 or opcode == 0xF7 or opcode == 0xFE;
+                }
+                break :blk table;
+            };
+
             /// Static gas and stack bounds of the basic block whose first instruction is at `start_pc`.
             ///
-            /// A basic block runs until the first JUMP, STOP, RETURN, REVERT, INVALID,
-            /// SELFDESTRUCT or `endsBlockWithFallthrough` instruction (inclusive: its static gas
-            /// and stack inputs belong to the block) or until the next JUMPDEST (exclusive: it
-            /// charges its own block).
+            /// A basic block runs until the first JUMP, STOP, RETURN, REVERT, SELFDESTRUCT or
+            /// `endsBlockWithFallthrough` instruction (inclusive: its static gas and stack
+            /// inputs belong to the block), until the next JUMPDEST (exclusive: it charges its
+            /// own block), or until the first `halts_as_invalid` opcode (exclusive: it charges
+            /// nothing and consumes all gas when reached).
             /// `initial_gas` seeds the total, e.g. 1 for a JUMPDEST that heads the block.
             pub fn calculateBlockInfo(bytecode: *const Self, start_pc: PcType, initial_gas: u32) BlockInfo {
                 const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
@@ -217,6 +238,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     const opcode = bytecode.get_unsafe(@intCast(pc));
 
                     if (opcode == 0x5B) break; // Next JUMPDEST starts a new block.
+                    // An undefined, fork-disabled or withdrawn opcode halts the frame and
+                    // consumes all gas. Nothing after it in this block is reachable, so it
+                    // ends the block and contributes no gas or stack requirement.
+                    if (halts_as_invalid[opcode]) break;
 
                     // The table holds the Berlin+ schedule; earlier forks price the
                     // state-access opcodes differently.
@@ -245,7 +270,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         0x56, // JUMP
                         0xF3, // RETURN
                         0xFD, // REVERT
-                        0xFE, // INVALID
                         0xFF, // SELFDESTRUCT
                         => break,
                         else => {},
@@ -1569,7 +1593,7 @@ test "debug: fusion detection for CALL bytecode" {
     var iter = bytecode.createIterator();
     var op_count: usize = 0;
 
-    while (iter.next()) |_| {
+    while (try iter.next()) |_| {
         op_count += 1;
     }
 }
@@ -1617,10 +1641,10 @@ test "Bytecode validation - truncated PUSH instruction" {
     try testing.expectEqual(@as(u256, 0), bytecode.pushValuePadded(0, 1));
 
     var iter = bytecode.createIterator();
-    const first = iter.next().?;
+    const first = (try iter.next()).?;
     try testing.expectEqual(@as(u256, 0), first.push.value);
     try testing.expectEqual(@as(u8, 1), first.push.size);
-    try testing.expect(iter.next() == null);
+    try testing.expect((try iter.next()) == null);
 }
 
 test "Bytecode validation - truncated PUSH32" {
@@ -1635,9 +1659,9 @@ test "Bytecode validation - truncated PUSH32" {
     try testing.expectEqual(expected, bytecode.pushValuePadded(0, 32));
 
     var iter = bytecode.createIterator();
-    const first = iter.next().?;
+    const first = (try iter.next()).?;
     try testing.expectEqual(expected, first.push.value);
-    try testing.expect(iter.next() == null);
+    try testing.expect((try iter.next()) == null);
 }
 
 test "Bytecode validation - truncated PUSH is zero-padded for every PUSH size" {
@@ -1662,9 +1686,9 @@ test "Bytecode validation - truncated PUSH is zero-padded for every PUSH size" {
 
             var iter = bytecode.createIterator();
             iter.enable_fusion = false;
-            const first = iter.next().?;
+            const first = (try iter.next()).?;
             try testing.expectEqual(expected, first.push.value);
-            try testing.expect(iter.next() == null);
+            try testing.expect((try iter.next()) == null);
             // No byte of a truncated PUSH is a jump destination.
             var pc: usize = 0;
             while (pc < 1 + k) : (pc += 1) {
@@ -1768,7 +1792,7 @@ test "Iterator functionality - basic iteration" {
     var iter = bytecode.createIterator();
 
     // First instruction: PUSH1
-    var opcode_data = iter.next();
+    var opcode_data = try iter.next();
     try testing.expect(opcode_data != null);
     switch (opcode_data.?) {
         .push => |p| {
@@ -1779,7 +1803,7 @@ test "Iterator functionality - basic iteration" {
     }
 
     // Second instruction: ADD (should skip push data)
-    opcode_data = iter.next();
+    opcode_data = try iter.next();
     try testing.expect(opcode_data != null);
     switch (opcode_data.?) {
         .regular => |r| try testing.expectEqual(@as(u8, 0x01), r.opcode),
@@ -1787,7 +1811,7 @@ test "Iterator functionality - basic iteration" {
     }
 
     // Third instruction: JUMPDEST
-    opcode_data = iter.next();
+    opcode_data = try iter.next();
     try testing.expect(opcode_data != null);
     switch (opcode_data.?) {
         .jumpdest => |j| {
@@ -1797,7 +1821,7 @@ test "Iterator functionality - basic iteration" {
     }
 
     // Fourth instruction: STOP
-    opcode_data = iter.next();
+    opcode_data = try iter.next();
     try testing.expect(opcode_data != null);
     switch (opcode_data.?) {
         .stop => {},
@@ -1805,7 +1829,7 @@ test "Iterator functionality - basic iteration" {
     }
 
     // Should be at end
-    opcode_data = iter.next();
+    opcode_data = try iter.next();
     try testing.expect(opcode_data == null);
 }
 
@@ -2182,11 +2206,11 @@ test "Iterator should not read past truncated PUSH32" {
     var bytecode = try BytecodeDefault.init(allocator, &code);
     defer bytecode.deinit();
     var iter = bytecode.createIterator();
-    const first = iter.next().?;
+    const first = (try iter.next()).?;
     try testing.expectEqual(@as(u256, 0), first.push.value);
     // The iterator stops exactly at the end of the code.
     try testing.expectEqual(@as(usize, code.len), @as(usize, iter.pc));
-    try testing.expect(iter.next() == null);
+    try testing.expect((try iter.next()) == null);
 }
 
 test "Deployment vs Runtime bytecode handling" {

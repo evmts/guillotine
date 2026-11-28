@@ -38,7 +38,7 @@ EVM worst-case limits are large (e.g., `arena_capacity_limit = 64 MiB`, `memory_
 
 - **`FrameMemoryPool`** (`src/memory/frame_memory_pool.zig`): reserves virtual address space lazily committed by the OS (zero copy on EVM memory expansion), retains up to `max_retained_buffers = 8`, and trims oversized buffers via `madvise(MADV_DONTNEED)` at transaction end.
 - **`FrameStackPool`** (`src/evm.zig`): pools 64-byte-aligned 32 KiB stacks across nested frames (retaining up to 16).
-- **`GrowingArenaAllocator`** (`src/evm_arena_allocator.zig`): grows by `arena_growth_factor` (default 150%) up to `arena_capacity_limit` and retains capacity across transactions.
+- **`GrowingArenaAllocator`** (`src/evm_arena_allocator.zig`): grows on demand, retains up to `arena_capacity_limit` across transactions, and trims an arena that one call grew past that limit back to its initial size. The hard per-call limit is `MAX_ABSOLUTE_CAPACITY`.
 - **`DispatchCache`** (`src/evm.zig`): caches preprocessed bytecode schedules by code hash.
 
 ### Expected Production Pattern: Use a Pool of `Evm` Instances

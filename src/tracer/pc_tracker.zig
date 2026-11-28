@@ -56,7 +56,7 @@ pub const PcTracker = struct {
 
         // Validate opcode matches
         if (expected_opcode != opcode) {
-            log.err("PcTracker: Opcode mismatch at PC {}: expected 0x{x:0>2} ({s}), got 0x{x:0>2} ({s})", .{
+            log.warn("PcTracker: Opcode mismatch at PC {}: expected 0x{x:0>2} ({s}), got 0x{x:0>2} ({s})", .{
                 self.pc,
                 expected_opcode,
                 getOpcodeName(expected_opcode),
@@ -202,8 +202,9 @@ pub const PcTracker = struct {
 
 const opcode_names: [256][]const u8 = blk: {
     var table: [256][]const u8 = @splat("UNKNOWN");
-    for (@typeInfo(Opcode).@"enum".fields) |field| {
-        table[field.value] = field.name;
+    @setEvalBranchQuota(20_000);
+    for (std.enums.values(Opcode)) |opcode| {
+        table[@backingInt(opcode)] = @tagName(opcode);
     }
     break :blk table;
 };

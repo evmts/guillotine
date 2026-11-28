@@ -84,10 +84,13 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
             return self.base_fee > 0 or self.number > 0; // Simplified check
         }
 
-        /// Validate block info constraints
+        /// Validate block info constraints.
+        ///
+        /// The gas limit has no protocol maximum: EIP-1559 only bounds how far it
+        /// moves from the parent block, and L2s and test networks run well above
+        /// mainnet's limit. Only a zero limit, which admits no transaction, is rejected.
         pub fn validate(self: Self) bool {
-            // Gas limit must be reasonable
-            if (self.gas_limit == 0 or self.gas_limit > 100_000_000) return false;
+            if (self.gas_limit == 0) return false;
             // Timestamp should be reasonable (not before 2015)
             if (self.timestamp > 0 and self.timestamp < 1438269973) return false; // Ethereum genesis
             return true;
@@ -178,11 +181,6 @@ test "block info validation" {
     // Invalid gas limit - zero
     block = BlockInfo(.{}).init();
     block.gas_limit = 0;
-    try std.testing.expect(!block.validate());
-
-    // Invalid gas limit - too high
-    block = BlockInfo(.{}).init();
-    block.gas_limit = 200_000_000;
     try std.testing.expect(!block.validate());
 
     // Invalid timestamp - before Ethereum genesis
@@ -310,11 +308,11 @@ test "block info gas limit boundary values" {
     block.gas_limit = 1; // Minimum valid
     try std.testing.expect(block.validate());
 
-    block.gas_limit = 100_000_000; // Maximum valid
-    try std.testing.expect(block.validate());
-
-    block.gas_limit = 100_000_001; // Just over maximum
+    block.gas_limit = 0; // Admits no transaction
     try std.testing.expect(!block.validate());
+
+    block.gas_limit = std.math.maxInt(u64); // No protocol maximum
+    try std.testing.expect(block.validate());
 }
 
 test "block info timestamp edge cases" {
@@ -557,11 +555,14 @@ test "block info validation comprehensive" {
     block.gas_limit = 15_000_000;
     try std.testing.expect(block.validate());
 
-    // Test all invalid gas limit cases
-    const invalid_gas_limits = [_]u64{ 0, 100_000_001, std.math.maxInt(u64) };
-    for (invalid_gas_limits) |gas_limit| {
+    // A zero gas limit admits no transaction and is the only invalid one. The
+    // protocol sets no maximum, so limits above mainnet's are valid.
+    block.gas_limit = 0;
+    try std.testing.expect(!block.validate());
+    const high_gas_limits = [_]u64{ 100_000_000, 100_000_001, 1_000_000_000, std.math.maxInt(u64) };
+    for (high_gas_limits) |gas_limit| {
         block.gas_limit = gas_limit;
-        try std.testing.expect(!block.validate());
+        try std.testing.expect(block.validate());
     }
     block.gas_limit = 15_000_000; // Reset to valid
 
@@ -594,4 +595,22 @@ test "block info struct field ordering" {
 
     // This test ensures struct layout is as expected
     try std.testing.expect(true);
+}
+
+test "W3-16: BlockInfo.validate accepts gas limits above 100 million" {
+    var block = BlockInfo(.{}).init();
+    for ([_]u64{ 100_000_000, 100_000_001, 200_000_000, 1 << 40, std.math.maxInt(u64) }) |gas_limit| {
+        block.gas_limit = gas_limit;
+        try std.testing.expect(block.validate());
+    }
+    var compact = CompactBlockInfo.init();
+    compact.gas_limit = 5_000_000_000;
+    try std.testing.expect(compact.validate());
+
+    // A zero gas limit and a pre-genesis timestamp are still rejected.
+    block.gas_limit = 0;
+    try std.testing.expect(!block.validate());
+    block.gas_limit = 300_000_000;
+    block.timestamp = 1;
+    try std.testing.expect(!block.validate());
 }

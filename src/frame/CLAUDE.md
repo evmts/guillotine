@@ -1,98 +1,104 @@
 # CLAUDE.md - Frame Module
 
-## MISSION CRITICAL: Execution Context Integrity
-**Frame bugs cause execution errors, consensus failures, fund loss.**
+## Mission critical: execution context integrity
 
-### EVM Frame Specs
-- **Call Depth**: Max 1024 nested calls
-- **Context**: Isolated stack/memory/storage per frame
-- **Gas**: Precise accounting and forwarding
-- **Return Data**: Proper call return handling
-- **Exceptions**: Correct revert/failure propagation
+A frame bug is a consensus failure. After every change run
+`zig build && zig build test-opcodes`.
 
-### Core Files
-- `frame.zig` - Main execution frame
-- `call_params.zig` - Call parameters/validation
-- `call_result.zig` - Call result handling
-- `frame_handlers.zig` - Opcode dispatch
-- `frame_config.zig` - Configuration/limits
+## What a Frame is
 
-## Frame Lifecycle
+`Frame(config, EvmType)` in `frame.zig` is the execution context of one call. It
+executes a preprocessed **dispatch schedule**, not bytecode, and it has no program
+counter: `cursor` points into the schedule.
 
-**Creation (CRITICAL)**:
+| Field | Use |
+| --- | --- |
+| `stack` | Downward-growing word stack; `stack_ptr` is stale while handlers run |
+| `gas_remaining` | Signed gas counter; stale while handlers run |
+| `memory` | Call memory, lazily expanded in words |
+| `evm_ptr`, `database` | The owning EVM (`getEvm()`) and its database |
+| `contract_address`, `caller`, `value`, `calldata_slice` | Call context |
+| `code` | Raw bytecode, for `CODESIZE`/`CODECOPY` only |
+| `jump_table` | Sorted JUMPDEST table for dynamic `JUMP`/`JUMPI` |
+| `dispatch` | Cursor into the schedule |
+| `output_data` | `RETURN`/`REVERT` payload |
+
+The frame does not own call depth, static-call state, access lists, the journal or
+return data. Those live on the EVM (`src/evm.zig`).
+
+## Files
+
+- `frame.zig` - `Frame`, `interpret`, gas and tracer hooks, `pretty_print`
+- `frame_handlers.zig` - the 256-entry opcode handler table and synthetic handlers
+- `frame_config.zig` - stack size, word type, gas type, limits
+- `fork_gas.zig` - per-fork opcode availability and static gas
+- `call_params.zig`, `call_result.zig` - call inputs and results
+- `block_info_config.zig` - block field types
+
+## Lifecycle
+
+The EVM creates one frame per call in `Evm.inner_call` and the create paths:
+
 ```zig
-pub fn create_frame(allocator: std.mem.Allocator, call_params: CallParams, parent_frame: ?*Frame) !*Frame {
-    const depth = if (parent_frame) |parent| parent.depth + 1 else 0;
-    if (depth >= MAX_CALL_DEPTH) return FrameError.CallDepthExceeded;
-
-    const frame = try allocator.create(Frame);
-    errdefer allocator.destroy(frame);
-    frame.* = Frame{ .depth = depth, .call_params = call_params, /* ... */ };
-    return frame;
-}
+var frame = try Frame.init(frame_allocator, gas, caller, value, input, @ptrCast(evm));
+defer frame.deinit(frame_allocator);
+try frame.interpret(&schedule, &jump_table, code);
 ```
 
-**Cleanup**:
+`interpret`:
+
+1. Notifies the tracer (`onInterpret`), which starts the reference interpreter in
+   validating builds.
+2. Charges the first basic block's gas and validates its stack bounds, when the
+   schedule starts with `first_block_gas` metadata. Schedule index 0 is therefore
+   not always the handler of PC 0.
+3. Enters the handler chain with `handler_abi.enter`. Handlers tail-call each other
+   until one returns an `ExitCode`.
+4. Maps the exit code back to `Frame.Error` with `handler_abi.errorFromExit`.
+
+Every exit is an error value, successes included: `Stop`, `Return` and
+`SelfDestruct` end a frame successfully, `REVERT` reverts it, anything else is an
+exceptional halt that consumes all gas. `evm.zig` turns the value into a
+`CallResult`.
+
+## Handler ABI
+
 ```zig
-pub fn destroy_frame(allocator: std.mem.Allocator, frame: *Frame) void {
-    frame.stack.deinit(allocator);
-    frame.memory.deinit(allocator);
-    frame.* = undefined;
-    allocator.destroy(frame);
-}
+pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType,
+    gas: GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 ```
 
-## Call Management
+`handler_cc` is `preserve_none` on LLVM x86_64 and aarch64. `sp` and `gas` are the
+live stack pointer and gas counter and `t0..t3` are the top stack item as 64-bit
+limbs. See `src/preprocessor/handler_abi.zig` and `src/instructions/CLAUDE.md`.
 
-**Types**: CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
+## Tracer hooks
 
-**Gas Forwarding (EIP-150)**:
-```zig
-pub fn forward_gas(available_gas: u64, requested_gas: u64) u64 {
-    const max_forward = available_gas - (available_gas / 64); // 63/64 rule
-    return @min(requested_gas, max_forward);
-}
-```
+Handlers call three frame hooks, which compile to nothing when hooks are disabled
+(`handler_abi.hooksEnabled`):
 
-## Gas Accounting (CONSENSUS CRITICAL)
-```zig
-pub fn calculate_call_gas(frame: *Frame, call_type: CallType, to: Address, value: u256) u64 {
-    var gas_cost: u64 = if (frame.storage.access_list.contains_address(to))
-        WARM_ACCOUNT_ACCESS else COLD_ACCOUNT_ACCESS;
+- `beforeInstruction(opcode, cursor)` - steps the reference interpreter
+- `afterInstruction(opcode, next_handler, next_cursor)` - compares state
+- `afterComplete(opcode)` - on every terminating path, error exits included
 
-    if (value > 0) {
-        gas_cost += CALL_VALUE_TRANSFER_GAS;
-        if (!frame.storage.account_exists(to)) gas_cost += NEW_ACCOUNT_GAS;
-    }
-    return gas_cost;
-}
-```
+A handler that skips a hook desynchronizes the tracer.
 
-## Static Call Enforcement
-```zig
-pub fn check_static_violation(frame: *Frame, opcode: u8) FrameError!void {
-    if (frame.is_static) {
-        switch (opcode) {
-            0x54 => return FrameError.StateChangeInStaticContext, // SSTORE
-            0xA0...0xA4 => return FrameError.StateChangeInStaticContext, // LOG*
-            0xF1, 0xF2 => return FrameError.StateChangeInStaticContext, // CALL/CALLCODE
-            0xFF => return FrameError.StateChangeInStaticContext, // SELFDESTRUCT
-            else => {},
-        }
-    }
-}
-```
+## Gas
 
-## Critical Safety
-- Check call depth (1024 max)
-- Validate gas limits before operations
-- Enforce static context restrictions
-- Proper resource cleanup
-- Accurate gas refund tracking (EIP-3529: 1/5 limit)
+- Static gas is charged per basic block: at frame entry for the first block and at
+  each `JUMPDEST` for the following ones.
+- Dynamic gas is charged by the handler with checked arithmetic
+  (`consumeGasChecked`); a charge that does not fit is `OutOfGas`.
+- Call gas forwarding follows EIP-150: at most `available - available / 64`.
 
-## Performance & Testing
-- **Optimization**: Minimize allocations, cache data, jump tables
-- **Tests**: All call types, gas accounting, depth limits, static violations
-- **Integration**: Complex call chains, error propagation, memory isolation
+## Rules
 
-**Frame management is EVM execution backbone. Strict bounds checking and resource cleanup required.**
+- Never crash. Validate and return a typed `Frame.Error`.
+- Assertions are `tracer.assert(condition, "message")`; logging goes through
+  `log.zig`.
+- `pretty_print` returns every failure to the caller (`error.OutOfMemory`,
+  `error.WriteFailed`, `error.OutOfBounds`); it never substitutes empty output.
+- Do not add an analysis-configured `Bytecode` alias to `Frame`. The EVM owns the
+  bytecode configuration, including whether fusion is enabled.
+- Keep hot fields in the first cache lines; do not add per-instruction work to
+  untraced builds.

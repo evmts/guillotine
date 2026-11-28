@@ -1,129 +1,69 @@
-# CLAUDE.md - Ethereum Specs Testing Guide
+# CLAUDE.md - Ethereum Spec Tests
 
-## Overview
+`specs/` holds the conformance runners for Guillotine. Full reference:
+[README.md](README.md).
 
-The specs directory contains Ethereum execution specification tests to validate Guillotine EVM against the official test suite.
+## Runners
 
-## Running Specs
+| Command | Runner | What passes |
+| --- | --- | --- |
+| `zig build state-tests` | `specs/eest_runner.zig` | Official pre-filled EEST `state_tests` fixtures, Frontier through Osaka. A case passes only when the post-state trie root and the logs hash both match the fixture. |
+| `zig build state-tests -Devm-enable-fusion=false` | same, via `specs/evm_fusion_off.zig` | The same fixtures with bytecode fusion off |
+| `zig build specs` | `specs/cases/root.zig` + `specs/runner.zig` | Generated legacy filler cases |
+| `zig build specs-bun` | `specs/bun-runner/` | The Bun/TypeScript runner over the C FFI |
 
-### Basic Commands
+`zig build test` does not run `specs` or `state-tests`: both need fetched fixtures.
+
+## EEST state tests
 
 ```bash
-# Run all spec tests (Zig implementation - default)
+scripts/fetch-eest-fixtures.sh                       # pinned release into .cache/eest-fixtures
+zig build state-tests -Doptimize=ReleaseSafe         # fusion on
+zig build state-tests -Doptimize=ReleaseSafe -Devm-enable-fusion=false
+zig build state-tests -Dspec-fork=Cancun,Prague      # selected forks
+zig build state-tests -Dtest-filter='eip3855_push0'  # substring of <file>::<test name>
+zig build state-tests -Dspec-report=eest.json        # JSON summary
+```
+
+Status: every case from Frontier through Osaka passes in both dispatch modes
+(`66,652 / 66,652` on `tests@v21.0.3`). Amsterdam and `BPO*` posts are counted as
+skipped forks, not failures. A change that drops one case is a consensus
+regression: fix it before anything else.
+
+Exit code `0` means every case passed, `1` at least one failure, `2` a usage error
+(missing fixtures, unknown fork, nothing matched).
+
+The runner validates each transaction (type gating, intrinsic gas, the EIP-7623
+floor, nonce, initcode size, the EIP-7825 gas cap, blob count and fees, signature
+ranges, EIP-1559 fees, balance, EIP-3607), executes it, and compares the state root
+and logs hash. For an `expectException` case the raised exception must be one of the
+listed alternatives and the untouched pre-state must hash to the fixture's root.
+
+## Legacy `specs` step
+
+```bash
 zig build specs
-
-# Run with Bun/TypeScript runner (alternative)
-zig build specs-bun
-
-# Limit number of spec files
 zig build specs -Dspec-max-files=100
-
-# Filter tests by pattern
+zig build specs -Dspec-skip-files=50
 zig build specs -Dtest-filter='add'
-
-# Legacy options still supported
-zig build specs -- -Dspec-isolated=true
-zig build specs -- -Dspec-pattern='add*.json'
 ```
 
-### Optimization Modes
+## Debugging a failing case
 
-**IMPORTANT**: Tests should be run in multiple optimization modes as different code paths may be taken:
+1. Reproduce one case in-process:
+   `zig build state-tests -Dtest-filter='<file>::<test name>' -- --jobs=0 --verbose`
+2. Run it with fusion off. A case that fails in one mode only points at a fused
+   handler or at block gas and stack analysis.
+3. Reduce it to a differential test under `test/differential/` or
+   `test/evm/opcodes/`; `zig build test-opcodes` then compares the frame against
+   the reference interpreter instruction by instruction.
+4. Run Debug and ReleaseSafe as well as ReleaseFast: the tracer hooks and safety
+   checks exist only in the first two.
 
-```bash
-# Debug mode (default) - Best for debugging, includes assertions and stack traces
-zig build specs -Doptimize=Debug
+## Rules
 
-# ReleaseFast mode - Optimized for speed, some code paths differ
-zig build specs -Doptimize=ReleaseFast
-
-# ReleaseSmall mode - Optimized for size, may have different behavior
-zig build specs -Doptimize=ReleaseSmall
-
-# ReleaseSafe mode - Safety checks enabled with optimizations
-zig build specs -Doptimize=ReleaseSafe
-```
-
-**CI/CD Note**: All optimization modes should be tested in CI/CD pipelines since:
-- Debug mode catches assertion failures and provides better diagnostics
-- ReleaseFast/ReleaseSmall modes may take different code paths (e.g., fusion optimizations)
-- Some bugs only manifest in specific optimization levels
-
-**Combining with other options:**
-```bash
-# Fast mode with limited tests for quick iteration
-zig build specs -Doptimize=ReleaseFast -Dspec-max-files=10
-
-# Debug mode with specific pattern for detailed debugging
-zig build specs -Doptimize=Debug -Dspec-pattern='*add*.json'
-
-# Native Zig runner in different modes
-zig build test-execution-spec-guillotine -Doptimize=ReleaseFast
-zig build test-execution-spec-minimal-evm -Doptimize=Debug
-```
-
-## Current Status
-
-- **2124 tests passing**
-- **1043 tests failing**
-- **3167 total expect() calls**
-
-## Test Organization
-
-The specs tests are the **highest priority** in the test hierarchy:
-1. **Specs** - Ethereum protocol compliance (run first)
-2. **Integration** - Cross-module testing  
-3. **Unit** - Module-specific tests
-
-Run all tests in order: `zig build test`
-
-## Working with Specs
-
-### When Debugging Failures
-
-1. Use isolated mode to prevent crashes:
-   ```bash
-   zig build specs -- -Dspec-isolated=true -Dspec-pattern='failing_test*.json'
-   ```
-
-2. Check `specs/test_report.md` for detailed failure information
-
-3. Test files are in `specs/execution-specs/tests/` organized by category
-
-### Key Files
-
-- `specs/bun-runner/ethereum-specs.test.ts` - Main test runner (fast, in-process)
-- `specs/bun-runner/ethereum-specs-safe.test.ts` - Isolated test runner (safer, uses workers)
-- `specs/bun-runner/test-worker.js` - Worker script for isolated execution
-
-### Implementation Notes
-
-The test runner:
-1. Loads JSON test files from `execution-specs/tests/`
-2. Sets up EVM with specified pre-state
-3. Executes transactions
-4. Currently validates execution doesn't crash (post-state validation TODO)
-
-### Known Issues
-
-- Assembly code tests are skipped (`:asm` format not supported)
-- Post-state validation not implemented yet
-- Some tests may crash the runner (use isolated mode)
-
-## Best Practices
-
-1. **Always run specs after EVM changes** to catch regressions
-2. **Use isolated mode** when debugging crashes
-3. **Start with small batches** when investigating failures:
-   ```bash
-   zig build specs -- -Dspec-max-files=10 -Dspec-pattern='specific*.json'
-   ```
-4. **Check test categories** - failures often cluster by feature area
-
-## Improving Test Coverage
-
-Priority areas for improvement:
-1. Implement post-state validation
-2. Add support for assembly code tests
-3. Improve error reporting for failures
-4. Add differential testing against revm
+- Never skip, filter out or comment out a failing case.
+- Fix a crash before the bug that triggered it: the EVM returns errors, it never
+  aborts.
+- Rerun both fusion modes after any change to handlers, dispatch, bytecode
+  analysis, gas or state.

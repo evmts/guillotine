@@ -173,14 +173,23 @@ pub const MinimalFrame = struct {
         return self.stack.items[self.stack.items.len - 1 - index];
     }
 
+    /// Number of 32-byte words that cover `bytes`. Cannot overflow for any u64.
     inline fn wordCount(bytes: u64) u64 {
-        return (bytes + 31) / 32;
+        return bytes / 32 + @intFromBool(bytes % 32 != 0);
     }
 
-    /// Calculate word-aligned memory size for EVM compliance
-    inline fn wordAlignedSize(bytes: u64) u32 {
-        const words = wordCount(bytes);
-        return @intCast(words * 32);
+    /// Word-aligned memory size that covers `bytes`. MinimalFrame addresses memory
+    /// with 32 bits; a larger size costs more gas than any transaction can carry.
+    fn wordAlignedSize(bytes: u64) MinimalEvmError!u32 {
+        const aligned = std.math.mul(u64, wordCount(bytes), 32) catch return error.OutOfBounds;
+        return std.math.cast(u32, aligned) orelse error.OutOfBounds;
+    }
+
+    /// Grow the memory size to cover [0, end). The expansion gas is charged by the caller.
+    fn expandMemoryTo(self: *Self, end: u64) MinimalEvmError!void {
+        if (end == 0) return;
+        const aligned_size = try wordAlignedSize(end);
+        if (aligned_size > self.memory_size) self.memory_size = aligned_size;
     }
 
     /// Read byte from memory
@@ -190,10 +199,10 @@ pub const MinimalFrame = struct {
 
     /// Write byte to memory
     pub fn writeMemory(self: *Self, offset: u32, value: u8) MinimalEvmError!void {
+        // EVM memory expands to word-aligned (32-byte) boundaries. Checked before the
+        // write so that the last addressable word cannot push the size past 32 bits.
+        const word_aligned_size = try wordAlignedSize(@as(u64, offset) + 1);
         try self.memory.put(offset, value);
-        // EVM memory expands to word-aligned (32-byte) boundaries
-        const end_offset = std.math.cast(u64, offset + 1) orelse return error.OutOfBounds;
-        const word_aligned_size = wordAlignedSize(end_offset);
         if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
     }
 
@@ -222,11 +231,16 @@ pub const MinimalFrame = struct {
     /// ----------------------------------- GAS ---------------------------------- ///
     /// Consume gas
     pub fn consumeGas(self: *Self, amount: u64) MinimalEvmError!void {
-        if (self.gas_remaining < @as(i64, @intCast(amount))) {
+        // An amount beyond i64 is more than any frame holds.
+        const charge = std.math.cast(i64, amount) orelse {
+            self.gas_remaining = 0;
+            return error.OutOfGas;
+        };
+        if (self.gas_remaining < charge) {
             self.gas_remaining = 0;
             return error.OutOfGas;
         }
-        self.gas_remaining -= @intCast(amount);
+        self.gas_remaining -= charge;
     }
 
     /// Calculate memory expansion cost
@@ -236,15 +250,14 @@ pub const MinimalFrame = struct {
 
         if (end_bytes <= current_size) return 0;
 
-        const current_words = wordCount(current_size);
-        const new_words = wordCount(end_bytes);
+        return memoryCost(wordCount(end_bytes)) -| memoryCost(wordCount(current_size));
+    }
 
-        // Calculate cost for each size
-        const current_quad = (current_words * current_words) / GasConstants.QuadCoeffDiv;
-        const current_cost = GasConstants.MemoryGas * current_words + current_quad;
-        const new_cost = GasConstants.MemoryGas * new_words + (new_words * new_words) / GasConstants.QuadCoeffDiv;
-
-        return new_cost - current_cost;
+    /// Total memory cost of `words` words: 3n + n²/512. Saturates at the u64
+    /// maximum, which no frame can pay, instead of overflowing.
+    fn memoryCost(words: u64) u64 {
+        const square = std.math.mul(u64, words, words) catch return std.math.maxInt(u64);
+        return (GasConstants.MemoryGas *| words) +| square / GasConstants.QuadCoeffDiv;
     }
 
     /// Calculate memory expansion cost for CALL family opcodes
@@ -351,6 +364,182 @@ pub const MinimalFrame = struct {
         const topic_cost = @as(u64, topic_count) * GasConstants.LogTopicGas;
         const data_cost = @as(u64, data_size) * GasConstants.LogDataGas;
         return base_cost + topic_cost + data_cost;
+    }
+
+    /// Shared body of CALLDATACOPY, CODECOPY, RETURNDATACOPY and EXTCODECOPY once
+    /// their operands are popped: charge `base_gas`, the copy cost and the memory
+    /// expansion, then copy `length` bytes of `source` from `offset` to memory at
+    /// `dest_offset`. Source bytes past the end read as zero. A zero length touches
+    /// no memory, so any `dest_offset` and `offset` are valid then.
+    fn copyToMemory(
+        self: *Self,
+        source: []const u8,
+        dest_offset: u256,
+        offset: u256,
+        length: u256,
+        base_gas: u64,
+    ) MinimalEvmError!void {
+        const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
+        if (len == 0) return self.consumeGas(base_gas);
+
+        const dest = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
+        const end: u64 = @as(u64, dest) + @as(u64, len);
+        try self.consumeGas(base_gas +| self.memoryExpansionCost(end) +| copyGasCost(len));
+        try self.expandMemoryTo(end);
+
+        // Saturated so that a source offset beyond the address space reads zeros.
+        const start = std.math.cast(usize, offset) orelse std.math.maxInt(usize);
+        var i: u32 = 0;
+        while (i < len) : (i += 1) {
+            const index = start +| i;
+            try self.writeMemory(dest + i, if (index < source.len) source[index] else 0);
+        }
+    }
+
+    /// Copy `len` bytes of memory starting at `offset` into a new buffer. The range
+    /// must already be covered by `expandMemoryTo`.
+    fn readMemoryRange(self: *Self, offset: u256, len: u32) MinimalEvmError![]u8 {
+        const data = try self.allocator.alloc(u8, len);
+        if (len == 0) return data;
+        const start = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+        var i: u32 = 0;
+        while (i < len) : (i += 1) {
+            data[i] = self.readMemory(start + i);
+        }
+        return data;
+    }
+
+    /// Gas a call or creation hands to the new frame out of the gas left. A call
+    /// requests an amount; a creation (`requested == null`) takes all it may. EIP-150
+    /// (Tangerine Whistle+) caps both at all but one 64th of the gas left. Earlier
+    /// forks forward a request as is and run out of gas when it exceeds what is left.
+    fn forwardedGas(self: *Self, requested: ?u64) MinimalEvmError!u64 {
+        const remaining: u64 = @intCast(@max(self.gas_remaining, 0));
+        const limit = if (fork_gas.hasAllButOne64th(self.hardfork)) remaining - remaining / 64 else remaining;
+        const wanted = requested orelse return limit;
+        if (fork_gas.hasAllButOne64th(self.hardfork)) return @min(wanted, limit);
+        if (wanted > limit) {
+            self.gas_remaining = 0;
+            return error.OutOfGas;
+        }
+        return wanted;
+    }
+
+    /// CALL, CALLCODE, DELEGATECALL and STATICCALL.
+    ///
+    /// The callee's context follows the instruction: CALL and STATICCALL run in the
+    /// target account, CALLCODE and DELEGATECALL in the current one, and
+    /// DELEGATECALL keeps this frame's caller and value. A CALL or CALLCODE that
+    /// sends value adds the 2300 gas stipend to what the callee receives.
+    fn opCall(self: *Self, opcode: u8, kind: MinimalEvm.CallKind) MinimalEvmError!void {
+        const evm = self.getEvm();
+        const has_value = kind == .call or kind == .callcode;
+        const gas = try self.popStack();
+        const target = primitives.Address.fromU256(try self.popStack());
+        const value: u256 = if (has_value) try self.popStack() else 0;
+        const in_offset = try self.popStack();
+        const in_length = try self.popStack();
+        const out_offset = try self.popStack();
+        const out_length = try self.popStack();
+
+        // The fork's flat base price; from Berlin on (EIP-2929) the warm/cold access cost.
+        var gas_cost = fork_gas.staticGas(self.hardfork, opcode, try evm.access_address(target));
+        if (value > 0) gas_cost += GasConstants.CallValueTransferGas;
+        // Creating an account costs G_newaccount: since Spurious Dragon (EIP-161) only
+        // for a value transfer to an empty account; before it, for any CALL to an
+        // account that does not exist.
+        if (kind == .call) {
+            const creates_account = if (fork_gas.newAccountNeedsValue(self.hardfork))
+                value > 0 and evm.is_empty(target)
+            else
+                !evm.account_exists(target);
+            if (creates_account) gas_cost += GasConstants.CallNewAccountGas;
+        }
+
+        // Memory expansion covers BOTH the input and the return region.
+        // Zero-length regions do not touch memory regardless of offset (Yellow Paper).
+        const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
+        const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
+        const in_offset_u64: u64 = if (in_length_u64 > 0) (std.math.cast(u64, in_offset) orelse return error.OutOfBounds) else 0;
+        const out_offset_u64: u64 = if (out_length_u64 > 0) (std.math.cast(u64, out_offset) orelse return error.OutOfBounds) else 0;
+        gas_cost +|= try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+        try self.consumeGas(gas_cost);
+        const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
+        const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
+        try self.expandMemoryTo(@max(in_end, out_end));
+
+        // EIP-214: a CALL that sends value changes state, so it fails in a static context.
+        if (kind == .call and value > 0 and self.is_static) return error.WriteProtection;
+
+        const forwarded = try self.forwardedGas(std.math.cast(u64, gas) orelse std.math.maxInt(u64));
+        const stipend: u64 = if (value > 0) GasConstants.CallStipend else 0;
+        const in_len = std.math.cast(u32, in_length) orelse return error.OutOfBounds;
+        const input = try self.readMemoryRange(in_offset, in_len);
+        self.gas_remaining -= @intCast(forwarded);
+        const result = try evm.call(.{
+            .kind = kind,
+            .target = target,
+            .value = value,
+            .input = input,
+            .gas = forwarded +| stipend,
+        });
+        // Unused gas comes back, including what is left of the stipend.
+        self.gas_remaining +|= std.math.cast(i64, result.gas_left) orelse std.math.maxInt(i64);
+
+        // Write output to memory (memory expansion already charged above)
+        const copy_len = @min(out_length_u64, result.output.len);
+        if (copy_len > 0) {
+            const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
+            for (result.output[0..copy_len], 0..) |byte, index| {
+                try self.writeMemory(out_off + @as(u32, @intCast(index)), byte);
+            }
+        }
+
+        self.return_data = result.output;
+        try self.pushStack(if (result.success) 1 else 0);
+        self.pc += 1;
+    }
+
+    /// CREATE and CREATE2: charge the creation cost, then run the init code in
+    /// MinimalEvm and push the new address, or 0 when the creation failed.
+    fn opCreate(self: *Self, is_create2: bool) MinimalEvmError!void {
+        const evm = self.getEvm();
+        const value = try self.popStack();
+        const offset = try self.popStack();
+        const length = try self.popStack();
+        const salt: ?u256 = if (is_create2) try self.popStack() else null;
+
+        const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
+        // Init code is read from memory: charge expansion over [offset, offset+len)
+        // (nothing for zero length, whatever the offset).
+        var end: u64 = 0;
+        if (len > 0) {
+            const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+            end = @as(u64, offset_u32) + @as(u64, len);
+        }
+        const gas_cost = if (is_create2) self.create2GasCost(len) else self.createGasCost(len);
+        try self.consumeGas(gas_cost +| self.memoryExpansionCost(end));
+        try self.expandMemoryTo(end);
+
+        // EIP-214: creation changes state, so it fails in a static context.
+        if (self.is_static) return error.WriteProtection;
+        // EIP-3860 (Shanghai): oversized init code is an exceptional halt.
+        if (self.hardfork.isAtLeast(.SHANGHAI) and len > GasConstants.MaxInitcodeSize) {
+            self.gas_remaining = 0;
+            return error.CreateInitCodeSizeLimit;
+        }
+
+        const init_code = try self.readMemoryRange(offset, len);
+        const forwarded = try self.forwardedGas(null);
+        self.gas_remaining -= @intCast(forwarded);
+        self.return_data = &[_]u8{};
+        const result = try evm.create(.{ .value = value, .init_code = init_code, .gas = forwarded, .salt = salt });
+        self.gas_remaining +|= std.math.cast(i64, result.gas_left) orelse std.math.maxInt(i64);
+
+        // Return data is the init code's revert data; empty after a successful creation.
+        self.return_data = result.output;
+        try self.pushStack(if (result.address) |address| primitives.Address.toU256(address) else 0);
+        self.pc += 1;
     }
 
     /// ----------------------------------- OPCODES ---------------------------------- ///
@@ -705,8 +894,7 @@ pub const MinimalFrame = struct {
                     const end_addr = @as(u64, offset_u32) + @as(u64, size_u32);
                     const mem_cost = self.memoryExpansionCost(end_addr);
                     try self.consumeGas(mem_cost);
-                    const aligned_size = wordAlignedSize(end_addr);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                    try self.expandMemoryTo(end_addr);
 
                     // Read data from memory
                     var data = try self.allocator.alloc(u8, size_u32);
@@ -784,9 +972,10 @@ pub const MinimalFrame = struct {
                 if (offset > std.math.maxInt(u32)) {
                     try self.pushStack(0);
                 } else {
-                    const off = @as(u32, @intCast(offset));
+                    // Widened so that an offset near the u32 maximum cannot wrap.
+                    const off: u64 = @intCast(offset);
                     var result: u256 = 0;
-                    var i: u32 = 0;
+                    var i: u64 = 0;
                     while (i < 32) : (i += 1) {
                         const idx = off + i;
                         const byte = if (idx < self.calldata.len) self.calldata[idx] else 0;
@@ -809,24 +998,7 @@ pub const MinimalFrame = struct {
                 const dest_offset = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
-
-                const dest_off = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
-                const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
-
-                // Charge base + memory expansion + copy per word
-                const end_bytes_copy: u64 = @as(u64, dest_off) + @as(u64, len);
-                const mem_cost4 = self.memoryExpansionCost(end_bytes_copy);
-                const copy_cost = copyGasCost(len);
-                try self.consumeGas(GasConstants.GasFastestStep + mem_cost4 + copy_cost);
-
-                // Copy calldata to memory
-                var i: u32 = 0;
-                while (i < len) : (i += 1) {
-                    const src_idx = src_off + i;
-                    const byte = if (src_idx < self.calldata.len) self.calldata[src_idx] else 0;
-                    try self.writeMemory(dest_off + i, byte);
-                }
+                try self.copyToMemory(self.calldata, dest_offset, offset, length, GasConstants.GasFastestStep);
                 self.pc += 1;
             },
 
@@ -842,23 +1014,7 @@ pub const MinimalFrame = struct {
                 const dest_offset = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
-
-                const dest_off = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
-                const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
-
-                const end_bytes_code: u64 = @as(u64, dest_off) + @as(u64, len);
-                const mem_cost5 = self.memoryExpansionCost(end_bytes_code);
-                const copy_cost = copyGasCost(len);
-                try self.consumeGas(GasConstants.GasFastestStep + mem_cost5 + copy_cost);
-
-                // Copy code to memory
-                var i: u32 = 0;
-                while (i < len) : (i += 1) {
-                    const src_idx = src_off + i;
-                    const byte = if (src_idx < self.bytecode.len) self.bytecode[src_idx] else 0;
-                    try self.writeMemory(dest_off + i, byte);
-                }
+                try self.copyToMemory(self.bytecode, dest_offset, offset, length, GasConstants.GasFastestStep);
                 self.pc += 1;
             },
 
@@ -888,26 +1044,11 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
-                const dest_off = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
-                const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
-
-                // Check bounds
-                if (src_off + len > self.return_data.len) {
-                    return error.OutOfBounds;
-                }
-
-                const end_bytes_ret: u64 = @as(u64, dest_off) + @as(u64, len);
-                const mem_cost6 = self.memoryExpansionCost(end_bytes_ret);
-                const copy_cost = copyGasCost(len);
-                try self.consumeGas(GasConstants.GasFastestStep + mem_cost6 + copy_cost);
-
-                // Copy return data to memory
-                var i: u32 = 0;
-                while (i < len) : (i += 1) {
-                    const byte = self.return_data[src_off + i];
-                    try self.writeMemory(dest_off + i, byte);
-                }
+                // EIP-211: reading past the end of the return data is an exceptional
+                // halt, also for a zero length. The sum is checked at full width.
+                const source_end = std.math.add(u256, offset, length) catch return error.OutOfBounds;
+                if (source_end > self.return_data.len) return error.OutOfBounds;
+                try self.copyToMemory(self.return_data, dest_offset, offset, length, GasConstants.GasFastestStep);
                 self.pc += 1;
             },
 
@@ -1030,8 +1171,7 @@ pub const MinimalFrame = struct {
                 const end_bytes: u64 = @as(u64, off) + 32;
                 const mem_cost = self.memoryExpansionCost(end_bytes);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost);
-                const aligned_size = wordAlignedSize(end_bytes);
-                if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                try self.expandMemoryTo(end_bytes);
 
                 // Read word from memory
                 var result: u256 = 0;
@@ -1055,6 +1195,7 @@ pub const MinimalFrame = struct {
                 const end_bytes2: u64 = @as(u64, off) + 32;
                 const mem_cost2 = self.memoryExpansionCost(end_bytes2);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost2);
+                try self.expandMemoryTo(end_bytes2);
 
                 // Write word to memory
                 var idx: u32 = 0;
@@ -1126,6 +1267,9 @@ pub const MinimalFrame = struct {
                 });
                 try self.consumeGas(cost.gas);
 
+                // EIP-214: SSTORE changes state, so it fails in a static context.
+                if (self.is_static) return error.WriteProtection;
+
                 if (cost.refund > 0) {
                     evm.add_refund(@intCast(cost.refund));
                 } else if (cost.refund < 0) {
@@ -1143,7 +1287,7 @@ pub const MinimalFrame = struct {
             0x56 => {
                 try self.consumeGas(GasConstants.GasMidStep);
                 const dest = try self.popStack();
-                const dest_pc = std.math.cast(u32, dest) orelse return error.OutOfBounds;
+                const dest_pc = std.math.cast(u32, dest) orelse return error.InvalidJump;
 
                 // Validate jump destination
                 if (!self.valid_jumpdests.contains(dest_pc)) return error.InvalidJump;
@@ -1158,7 +1302,7 @@ pub const MinimalFrame = struct {
                 const condition = try self.popStack();
 
                 if (condition != 0) {
-                    const dest_pc = std.math.cast(u32, dest) orelse return error.OutOfBounds;
+                    const dest_pc = std.math.cast(u32, dest) orelse return error.InvalidJump;
 
                     // Validate jump destination
                     if (!self.valid_jumpdests.contains(dest_pc)) return error.InvalidJump;
@@ -1217,6 +1361,8 @@ pub const MinimalFrame = struct {
                 try self.consumeGas(GasConstants.WarmStorageReadCost);
                 const key = try self.popStack();
                 const value = try self.popStack();
+                // EIP-1153: TSTORE fails in a static context.
+                if (self.is_static) return error.WriteProtection;
                 try evm.set_transient_storage(self.address, key, value);
                 self.pc += 1;
             },
@@ -1305,253 +1451,23 @@ pub const MinimalFrame = struct {
                 const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
                 try self.consumeGas(log_cost + mem_cost);
                 if (end > 0) {
-                    const aligned_size = wordAlignedSize(end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                    try self.expandMemoryTo(end);
                 }
 
-                // In minimal implementation, we don't actually emit logs
+                // EIP-214: LOG fails in a static context. MinimalFrame keeps no log
+                // records; only the gas, memory and static rules are modeled.
+                if (self.is_static) return error.WriteProtection;
                 self.pc += 1;
             },
 
             // CREATE
-            0xf0 => {
-                const value = try self.popStack();
-                const offset = try self.popStack();
-                const length = try self.popStack();
-
-                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
-                // Init code is read from memory: charge expansion over [offset, offset+len)
-                // (nothing for zero length, whatever the offset).
-                var end: u64 = 0;
-                if (len > 0) {
-                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                    end = @as(u64, offset_u32) + @as(u64, len);
-                }
-                const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
-                const gas_cost = self.createGasCost(len);
-                try self.consumeGas(gas_cost + mem_cost);
-                if (end > 0) {
-                    const aligned_size = wordAlignedSize(end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
-                }
-
-                // Single-frame MinimalFrame returns 0 here; full CREATE init-code execution
-                // and EIP-170/EIP-3860 size validation run in MinimalEvm during tracer sync.
-                _ = value;
-                try self.pushStack(0); // Dummy created address
-                self.pc += 1;
-            },
+            0xf0 => try self.opCreate(false),
 
             // CALL
-            0xf1 => {
-                // Pop all 7 arguments
-                const gas = try self.popStack();
-                const address_u256 = try self.popStack();
-                const value_arg = try self.popStack();
-                const in_offset = try self.popStack();
-                const in_length = try self.popStack();
-                const out_offset = try self.popStack();
-                const out_length = try self.popStack();
-
-                // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
-
-                // EIP-2929 (Berlin+): the warm/cold access cost added below IS the base
-                // price; there is no separate CallGas on top of it.
-                var gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN)) 0 else GasConstants.CallGas;
-                if (value_arg > 0) {
-                    gas_cost += GasConstants.CallValueTransferGas;
-                }
-                // Creating an account costs G_newaccount: since Spurious Dragon (EIP-161) only
-                // for a value transfer to a dead account; before it, for any call to an
-                // account that does not exist. MinimalEvm tracks no nonces, so balance and
-                // code decide liveness.
-                const target_dead = evm.get_balance(call_address) == 0 and evm.get_code(call_address).len == 0;
-                if (target_dead and (value_arg > 0 or evm.hardfork.isBefore(.SPURIOUS_DRAGON))) {
-                    gas_cost += GasConstants.CallNewAccountGas;
-                }
-                // EIP-2929: access target account (warm/cold)
-                const access_cost = try evm.access_address(call_address);
-                gas_cost += access_cost;
-
-                // Memory expansion gas - charge for BOTH input and return regions
-                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
-                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
-                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
-                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(
-                    in_offset_u64,
-                    in_length_u64,
-                    out_offset_u64,
-                    out_length_u64,
-                );
-                gas_cost += mem_expansion_cost;
-
-                try self.consumeGas(gas_cost);
-
-                // Update memory size if expanded
-                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
-                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
-                const max_end = @max(in_end, out_end);
-                if (max_end > 0) {
-                    const aligned_size = wordAlignedSize(max_end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
-                }
-
-                // Read input data from memory
-                var input_data: []const u8 = &.{};
-                if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
-                    const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
-                    const in_len = std.math.cast(u32, in_length) orelse return error.OutOfBounds;
-                    const data = try self.allocator.alloc(u8, in_len);
-                    var j: u32 = 0;
-                    while (j < in_len) : (j += 1) {
-                        data[j] = self.readMemory(in_off + j);
-                    }
-                    input_data = data;
-                }
-
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
-
-                // Write output to memory (memory expansion already charged above)
-                if (out_length > 0 and result.output.len > 0) {
-                    const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
-                    const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
-                    const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
-                    const copy_len = @min(out_len_u32, result_len_u32);
-
-                    var k: u32 = 0;
-                    while (k < copy_len) : (k += 1) {
-                        try self.writeMemory(out_off + k, result.output[k]);
-                    }
-                }
-
-                // Store return data
-                self.return_data = result.output;
-
-                // Push success status
-                try self.pushStack(if (result.success) 1 else 0);
-
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
-
-                self.pc += 1;
-            },
+            0xf1 => try self.opCall(opcode, .call),
 
             // CALLCODE
-            0xf2 => {
-                // Similar to CALL but executes code in current context
-                // Pop all 7 arguments
-                const gas = try self.popStack();
-                const address_u256 = try self.popStack();
-                const value_arg = try self.popStack();
-                const in_offset = try self.popStack();
-                const in_length = try self.popStack();
-                const out_offset = try self.popStack();
-                const out_length = try self.popStack();
-
-                // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
-
-                // EIP-2929 (Berlin+): the warm/cold access cost added below IS the base
-                // price; there is no separate CallGas on top of it.
-                var gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN)) 0 else GasConstants.CallGas;
-                if (value_arg > 0) {
-                    gas_cost += GasConstants.CallValueTransferGas;
-                }
-                // EIP-2929: access target account (warm/cold)
-                const access_cost = try evm.access_address(call_address);
-                gas_cost += access_cost;
-
-                // Memory expansion gas - charge for BOTH input and return regions
-                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
-                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
-                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
-                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(
-                    in_offset_u64,
-                    in_length_u64,
-                    out_offset_u64,
-                    out_length_u64,
-                );
-                gas_cost += mem_expansion_cost;
-
-                try self.consumeGas(gas_cost);
-
-                // Update memory size if expanded
-                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
-                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
-                const max_end = @max(in_end, out_end);
-                if (max_end > 0) {
-                    const aligned_size = wordAlignedSize(max_end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
-                }
-
-                // Read input data from memory
-                var input_data: []const u8 = &.{};
-                if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
-                    const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
-                    const in_len = std.math.cast(u32, in_length) orelse return error.OutOfBounds;
-                    const data = try self.allocator.alloc(u8, in_len);
-                    var j: u32 = 0;
-                    while (j < in_len) : (j += 1) {
-                        data[j] = self.readMemory(in_off + j);
-                    }
-                    input_data = data;
-                }
-
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
-
-                // Write output to memory (memory expansion already charged above)
-                if (out_length > 0 and result.output.len > 0) {
-                    const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
-                    const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
-                    const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
-                    const copy_len = @min(out_len_u32, result_len_u32);
-
-                    var k: u32 = 0;
-                    while (k < copy_len) : (k += 1) {
-                        try self.writeMemory(out_off + k, result.output[k]);
-                    }
-                }
-
-                // Store return data
-                self.return_data = result.output;
-
-                // Push success status
-                try self.pushStack(if (result.success) 1 else 0);
-
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
-
-                self.pc += 1;
-            },
+            0xf2 => try self.opCall(opcode, .callcode),
 
             // RETURN
             0xf3 => {
@@ -1566,8 +1482,7 @@ pub const MinimalFrame = struct {
                     const end_bytes = @as(u64, off) + @as(u64, len);
                     const mem_cost = self.memoryExpansionCost(end_bytes);
                     try self.consumeGas(mem_cost);
-                    const aligned_size = wordAlignedSize(end_bytes);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                    try self.expandMemoryTo(end_bytes);
 
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
@@ -1582,232 +1497,23 @@ pub const MinimalFrame = struct {
 
             // DELEGATECALL
             0xf4 => {
-                // Pop all 6 arguments (no value)
-                const gas = try self.popStack();
-                const address_u256 = try self.popStack();
-                const in_offset = try self.popStack();
-                const in_length = try self.popStack();
-                const out_offset = try self.popStack();
-                const out_length = try self.popStack();
-
-                // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
-
-                // EIP-2929 replaces the base with the warm/cold account-access price.
-                var gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN))
-                    try evm.access_address(call_address)
-                else
-                    GasConstants.CallGas;
-
-                // Memory expansion gas - charge for BOTH input and return regions
-                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
-                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
-                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
-                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(
-                    in_offset_u64,
-                    in_length_u64,
-                    out_offset_u64,
-                    out_length_u64,
-                );
-                gas_cost += mem_expansion_cost;
-
-                try self.consumeGas(gas_cost);
-
-                // Update memory size if expanded
-                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
-                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
-                const max_end = @max(in_end, out_end);
-                if (max_end > 0) {
-                    const aligned_size = wordAlignedSize(max_end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
-                }
-
-                // Read input data from memory
-                var input_data: []const u8 = &.{};
-                if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
-                    const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
-                    const in_len = std.math.cast(u32, in_length) orelse return error.OutOfBounds;
-                    const data = try self.allocator.alloc(u8, in_len);
-                    var j: u32 = 0;
-                    while (j < in_len) : (j += 1) {
-                        data[j] = self.readMemory(in_off + j);
-                    }
-                    input_data = data;
-                }
-
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, self.value, input_data, available_gas);
-
-                // Write output to memory (memory expansion already charged above)
-                if (out_length > 0 and result.output.len > 0) {
-                    const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
-                    const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
-                    const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
-                    const copy_len = @min(out_len_u32, result_len_u32);
-
-                    var k: u32 = 0;
-                    while (k < copy_len) : (k += 1) {
-                        try self.writeMemory(out_off + k, result.output[k]);
-                    }
-                }
-
-                // Store return data
-                self.return_data = result.output;
-
-                // Push success status
-                try self.pushStack(if (result.success) 1 else 0);
-
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
-
-                self.pc += 1;
+                // EIP-7: DELEGATECALL was introduced in Homestead hardfork
+                if (evm.hardfork.isBefore(.HOMESTEAD)) return error.InvalidOpcode;
+                try self.opCall(opcode, .delegatecall);
             },
 
             // CREATE2
             0xf5 => {
                 // EIP-1014: CREATE2 opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
-
-                const value = try self.popStack();
-                const offset = try self.popStack();
-                const length = try self.popStack();
-                const salt = try self.popStack();
-
-                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
-                // Init code is read from memory: charge expansion over [offset, offset+len)
-                // (nothing for zero length, whatever the offset).
-                var end: u64 = 0;
-                if (len > 0) {
-                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                    end = @as(u64, offset_u32) + @as(u64, len);
-                }
-                const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
-                const gas_cost = self.create2GasCost(len);
-                try self.consumeGas(gas_cost + mem_cost);
-                if (end > 0) {
-                    const aligned_size = wordAlignedSize(end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
-                }
-
-                // Single-frame MinimalFrame returns 0 here; full CREATE2 init-code execution
-                // and EIP-170/EIP-3860 size validation run in MinimalEvm during tracer sync.
-                _ = value;
-                _ = salt;
-                try self.pushStack(0); // Dummy created address
-                self.pc += 1;
+                try self.opCreate(true);
             },
 
             // STATICCALL
             0xfa => {
                 // EIP-214: STATICCALL was introduced in Byzantium hardfork
                 if (evm.hardfork.isBefore(.BYZANTIUM)) return error.InvalidOpcode;
-
-                // Pop all 6 arguments (no value for static call)
-                const gas = try self.popStack();
-                const address_u256 = try self.popStack();
-                const in_offset = try self.popStack();
-                const in_length = try self.popStack();
-                const out_offset = try self.popStack();
-                const out_length = try self.popStack();
-
-                // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
-
-                // EIP-2929 replaces the EIP-150 STATICCALL base with the
-                // warm/cold account-access price; it is not an added surcharge.
-                var call_gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN))
-                    try evm.access_address(call_address)
-                else
-                    GasConstants.StaticCallCost;
-
-                // Memory expansion gas - charge for BOTH input and return regions
-                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
-                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
-                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
-                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
-                const mem_expansion_cost = try self.callMemoryExpansionCost(
-                    in_offset_u64,
-                    in_length_u64,
-                    out_offset_u64,
-                    out_length_u64,
-                );
-                call_gas_cost += mem_expansion_cost;
-
-                try self.consumeGas(call_gas_cost);
-
-                // Update memory size if expanded
-                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
-                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
-                const max_end = @max(in_end, out_end);
-                if (max_end > 0) {
-                    const aligned_size = wordAlignedSize(max_end);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
-                }
-
-                // Read input data from memory
-                var input_data: []const u8 = &.{};
-                if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
-                    const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
-                    const in_len = std.math.cast(u32, in_length) orelse return error.OutOfBounds;
-                    const data = try self.allocator.alloc(u8, in_len);
-                    var j: u32 = 0;
-                    while (j < in_len) : (j += 1) {
-                        data[j] = self.readMemory(in_off + j);
-                    }
-                    input_data = data;
-                }
-
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
-                const result = try evm.inner_static_call(call_address, input_data, available_gas);
-
-                // Write output to memory (memory expansion already charged above)
-                if (out_length > 0 and result.output.len > 0) {
-                    const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
-                    const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
-                    const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
-                    const copy_len = @min(out_len_u32, result_len_u32);
-
-                    var k: u32 = 0;
-                    while (k < copy_len) : (k += 1) {
-                        try self.writeMemory(out_off + k, result.output[k]);
-                    }
-                }
-
-                // Store return data
-                self.return_data = result.output;
-
-                // Push success status
-                try self.pushStack(if (result.success) 1 else 0);
-
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
-
-                self.pc += 1;
+                try self.opCall(opcode, .staticcall);
             },
 
             // MCOPY (EIP-5656)
@@ -1840,6 +1546,7 @@ pub const MinimalFrame = struct {
                 const mem_cost = @max(mem_cost_src, mem_cost_dest);
                 const copy_cost = copyGasCost(len_u32);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost + copy_cost);
+                try self.expandMemoryTo(@max(end_src, end_dest));
 
                 // Copy via temporary buffer to handle overlapping regions
                 const tmp = try self.allocator.alloc(u8, len_u32);
@@ -1873,8 +1580,7 @@ pub const MinimalFrame = struct {
                     const end_bytes: u64 = @as(u64, off) + @as(u64, len);
                     const mem_cost = self.memoryExpansionCost(end_bytes);
                     try self.consumeGas(mem_cost);
-                    const aligned_size = wordAlignedSize(end_bytes);
-                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                    try self.expandMemoryTo(end_bytes);
 
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
@@ -1889,56 +1595,26 @@ pub const MinimalFrame = struct {
 
             // EXTCODESIZE
             0x3b => {
-                // Get code size of external account
-                const addr_int = try self.popStack();
-                const ext_addr = primitives.Address.fromU256(addr_int);
+                const ext_addr = primitives.Address.fromU256(try self.popStack());
 
                 // EIP-150/EIP-2929: hardfork-aware account access cost
                 const access_cost = try self.externalAccountGasCost(ext_addr);
                 try self.consumeGas(access_cost);
 
-                // For MinimalFrame, we don't have access to external code
-                // Just return 0 for now
-                try self.pushStack(0);
+                try self.pushStack(evm.get_code(ext_addr).len);
                 self.pc += 1;
             },
 
             // EXTCODECOPY
             0x3c => {
-                // Copy external account code to memory
-                const addr_int = try self.popStack();
+                const ext_addr = primitives.Address.fromU256(try self.popStack());
                 const dest_offset = try self.popStack();
                 const offset = try self.popStack();
                 const size = try self.popStack();
 
-                const ext_addr = primitives.Address.fromU256(addr_int);
-
-                // Gas cost calculation
-                if (size > 0) {
-                    const size_u32 = std.math.cast(u32, size) orelse return error.OutOfBounds;
-                    const copy_cost = copyGasCost(size_u32);
-
-                    // EIP-150/EIP-2929: hardfork-aware account access
-                    const access_cost = try self.externalAccountGasCost(ext_addr);
-                    try self.consumeGas(access_cost + copy_cost);
-
-                    const dest = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
-                    const len = size_u32;
-                    const end = @as(u64, dest) + @as(u64, len);
-                    const mem_cost = self.memoryExpansionCost(end);
-                    try self.consumeGas(mem_cost);
-
-                    // For MinimalFrame, just write zeros to memory
-                    _ = offset;
-                    var i: u32 = 0;
-                    while (i < len) : (i += 1) {
-                        try self.writeMemory(dest + i, 0);
-                    }
-                } else {
-                    // EIP-150/EIP-2929: charge account access cost even if size is zero
-                    const access_cost = try self.externalAccountGasCost(ext_addr);
-                    try self.consumeGas(access_cost);
-                }
+                // EIP-150/EIP-2929: the account access is charged whatever the size.
+                const access_cost = try self.externalAccountGasCost(ext_addr);
+                try self.copyToMemory(evm.get_code(ext_addr), dest_offset, offset, size, access_cost);
                 self.pc += 1;
             },
 
@@ -1947,18 +1623,21 @@ pub const MinimalFrame = struct {
                 // EIP-1052: EXTCODEHASH opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
 
-                // Get code hash of external account
-                const addr_int = try self.popStack();
-                const ext_addr = primitives.Address.fromU256(addr_int);
+                const ext_addr = primitives.Address.fromU256(try self.popStack());
 
                 // EIP-150/EIP-2929: hardfork-aware account access cost
                 const access_cost = try self.externalAccountGasCost(ext_addr);
                 try self.consumeGas(access_cost);
 
-                // For MinimalFrame, return empty code hash
-                // Empty code hash = keccak256("")
-                const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                try self.pushStack(empty_hash);
+                // EIP-1052: 0 for an account that does not exist or is empty (EIP-161),
+                // otherwise the Keccak-256 hash of its code.
+                var hash: u256 = 0;
+                if (!evm.is_empty(ext_addr)) {
+                    var hash_bytes: [32]u8 = undefined;
+                    std.crypto.hash.sha3.Keccak256.hash(evm.get_code(ext_addr), &hash_bytes, .{});
+                    hash = std.mem.readInt(u256, &hash_bytes, .big);
+                }
+                try self.pushStack(hash);
                 self.pc += 1;
             },
 
@@ -2018,22 +1697,22 @@ pub const MinimalFrame = struct {
                     // Move the whole balance to the beneficiary.
                     if (contract_balance > 0) {
                         const beneficiary_balance = evm.get_balance(beneficiary);
-                        evm.setBalance(self.address, 0) catch return error.StorageError;
+                        try evm.setBalance(self.address, 0);
                         // Wrapping add for overflow safety
                         const next_balance = beneficiary_balance +% contract_balance;
-                        evm.setBalance(beneficiary, next_balance) catch return error.StorageError;
+                        try evm.setBalance(beneficiary, next_balance);
                     }
                 } else if (deletes_account) {
                     // The beneficiary is the contract itself and the contract is
                     // deleted: its balance is burned.
-                    evm.setBalance(self.address, 0) catch return error.StorageError;
+                    try evm.setBalance(self.address, 0);
                 }
                 // Otherwise the beneficiary is the contract itself and it survives
                 // (EIP-6780): the balance stays where it is.
 
                 // The refund (removed by EIP-3529 in London) is granted once per
                 // contract per transaction, however often it self-destructs.
-                const first_destruction = evm.markSelfdestructed(self.address) catch return error.StorageError;
+                const first_destruction = try evm.markSelfdestructed(self.address);
                 const refund = self.selfdestructRefund();
                 if (refund > 0 and first_destruction) {
                     evm.gas_refund += refund;
@@ -2685,5 +2364,304 @@ test "MinimalFrame SELFDESTRUCT: self beneficiary, deadness, static context, EIP
             try frame.execute();
         }
         try testing.expectEqual(@as(u64, 24000), evm.gas_refund);
+    }
+}
+
+test "W3-13: MinimalFrame refuses SSTORE, TSTORE, LOG and value CALL in a static context" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const caller = Address{ .bytes = @as([20]u8, @splat(0x01)) };
+    const contract = Address{ .bytes = @as([20]u8, @splat(0xAA)) };
+    const other = Address{ .bytes = @as([20]u8, @splat(0xBB)) };
+
+    const sstore = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55 };
+    const tstore = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x5d };
+    const log0 = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xa0 };
+    const log4 = [_]u8{ 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0x00, 0x60, 0x00, 0xa4 };
+    // CALL(gas, other, value 1, no data)
+    const value_call = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x01, 0x73 } ++
+        @as([20]u8, @splat(0xBB)) ++ [_]u8{ 0x5a, 0xf1 };
+    const forbidden = [_][]const u8{ &sstore, &tstore, &log0, &log4, &value_call };
+
+    for (forbidden) |code| {
+        // The same code runs to its end outside a static context.
+        for ([_]bool{ false, true }) |is_static| {
+            const evm = try MinimalEvm.initPtr(allocator);
+            defer evm.deinitPtr(allocator);
+            evm.setHardfork(.CANCUN);
+            try evm.setBalance(contract, 10);
+            var frame = try MinimalFrame.init(evm.allocator, code, 1_000_000, caller, contract, 0, &.{}, evm, .CANCUN);
+            frame.is_static = is_static;
+            try evm.frames.append(evm.allocator, &frame);
+            if (!is_static) {
+                try frame.execute();
+                continue;
+            }
+            try testing.expectError(error.WriteProtection, frame.execute());
+            try testing.expectEqual(@as(u256, 0), evm.get_storage(contract, 0));
+            try testing.expectEqual(@as(u256, 0), evm.get_transient_storage(contract, 0));
+            try testing.expectEqual(@as(u256, 10), evm.get_balance(contract));
+            try testing.expectEqual(@as(u256, 0), evm.get_balance(other));
+        }
+    }
+
+    // A CALL without value is allowed in a static context, and the callee inherits it.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setCode(other, &sstore);
+        const plain_call = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73 } ++
+            @as([20]u8, @splat(0xBB)) ++ [_]u8{ 0x5a, 0xf1 };
+        var frame = try MinimalFrame.init(evm.allocator, &plain_call, 1_000_000, caller, contract, 0, &.{}, evm, .CANCUN);
+        frame.is_static = true;
+        try evm.frames.append(evm.allocator, &frame);
+        try frame.execute();
+        // The callee's SSTORE failed, so CALL pushed 0 and nothing was stored.
+        try testing.expectEqual(@as(u256, 0), try frame.peekStack(0));
+        try testing.expectEqual(@as(u256, 0), evm.get_storage(other, 0));
+    }
+
+    // STATICCALL makes the callee static.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setCode(other, &sstore);
+        const result = try evm.inner_static_call(other, &.{}, 100_000);
+        try testing.expect(!result.success);
+        try testing.expectEqual(@as(u64, 0), result.gas_left);
+        try testing.expectEqual(@as(u256, 0), evm.get_storage(other, 0));
+    }
+}
+
+test "W3-13: CALLCODE and DELEGATECALL run the target's code in the caller's context" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const sender = Address{ .bytes = @as([20]u8, @splat(0x01)) };
+    const contract = Address{ .bytes = @as([20]u8, @splat(0xAA)) };
+    const library = Address{ .bytes = @as([20]u8, @splat(0xBB)) };
+
+    // SSTORE(0, ADDRESS); SSTORE(1, CALLER); SSTORE(2, CALLVALUE); STOP
+    const library_code = [_]u8{ 0x30, 0x60, 0x00, 0x55, 0x33, 0x60, 0x01, 0x55, 0x34, 0x60, 0x02, 0x55, 0x00 };
+    // DELEGATECALL(gas, library, no data); STOP
+    const delegatecall = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73 } ++
+        @as([20]u8, @splat(0xBB)) ++ [_]u8{ 0x5a, 0xf4, 0x00 };
+    // CALLCODE(gas, library, value 3, no data); STOP
+    const callcode = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x03, 0x73 } ++
+        @as([20]u8, @splat(0xBB)) ++ [_]u8{ 0x5a, 0xf2, 0x00 };
+
+    const Case = struct { code: []const u8, seen_caller: Address, seen_value: u256 };
+    const cases = [_]Case{
+        // DELEGATECALL keeps the frame's own caller and value.
+        .{ .code = &delegatecall, .seen_caller = sender, .seen_value = 7 },
+        // CALLCODE is a call from the contract to itself with the value argument.
+        .{ .code = &callcode, .seen_caller = contract, .seen_value = 3 },
+    };
+    for (cases) |case| {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setCode(library, &library_code);
+        try evm.setBalance(contract, 10);
+
+        var frame = try MinimalFrame.init(evm.allocator, case.code, 1_000_000, sender, contract, 7, &.{}, evm, .CANCUN);
+        try evm.frames.append(evm.allocator, &frame);
+        try frame.execute();
+
+        try testing.expectEqual(@as(u256, 1), try frame.peekStack(0));
+        // The writes land in the calling contract's storage, not the library's.
+        try testing.expectEqual(primitives.Address.toU256(contract), evm.get_storage(contract, 0));
+        try testing.expectEqual(primitives.Address.toU256(case.seen_caller), evm.get_storage(contract, 1));
+        try testing.expectEqual(case.seen_value, evm.get_storage(contract, 2));
+        try testing.expectEqual(@as(u256, 0), evm.get_storage(library, 0));
+        try testing.expectEqual(@as(u256, 0), evm.get_storage(library, 1));
+        // No value leaves the contract: CALLCODE sends to itself.
+        try testing.expectEqual(@as(u256, 10), evm.get_balance(contract));
+        try testing.expectEqual(@as(u256, 0), evm.get_balance(library));
+    }
+}
+
+test "W3-13: a CALL or CALLCODE that sends value gives the callee the 2300 stipend" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const sender = Address{ .bytes = @as([20]u8, @splat(0x01)) };
+    const contract = Address{ .bytes = @as([20]u8, @splat(0xAA)) };
+    const callee = Address{ .bytes = @as([20]u8, @splat(0xBB)) };
+
+    // GAS; MSTORE(0, gas); RETURN(0, 32)
+    const callee_code = [_]u8{ 0x5a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+    inline for ([_]u8{ 0xf1, 0xf2 }) |call_opcode| {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setCode(callee, &callee_code);
+        try evm.setBalance(contract, 10);
+
+        // CALL/CALLCODE(gas 0, callee, value 1, no input, output to memory[0..32]); STOP
+        const code = [_]u8{ 0x60, 0x20, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x01, 0x73 } ++
+            @as([20]u8, @splat(0xBB)) ++ [_]u8{ 0x60, 0x00, call_opcode, 0x00 };
+        var frame = try MinimalFrame.init(evm.allocator, &code, 1_000_000, sender, contract, 0, &.{}, evm, .CANCUN);
+        try evm.frames.append(evm.allocator, &frame);
+        try frame.execute();
+
+        try testing.expectEqual(@as(u256, 1), try frame.peekStack(0));
+        // The callee asked for no gas and ran on the stipend alone: 2300 minus GAS (2).
+        var seen: u256 = 0;
+        for (0..32) |index| seen = (seen << 8) | frame.readMemory(@intCast(index));
+        try testing.expectEqual(@as(u256, 2300 - 2), seen);
+    }
+}
+
+test "W3-13: MinimalFrame arithmetic on offsets, sizes and gas cannot overflow" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const zero = Address{ .bytes = @as([20]u8, @splat(0)) };
+    const max_u32 = std.math.maxInt(u32);
+    const max_u64 = std.math.maxInt(u64);
+
+    const evm = try MinimalEvm.initPtr(allocator);
+    defer evm.deinitPtr(allocator);
+    evm.setHardfork(.CANCUN);
+
+    // Pure helpers at the edge of their domain.
+    try testing.expectEqual(@as(u64, max_u64 / 32 + 1), MinimalFrame.wordCount(max_u64));
+    try testing.expectError(error.OutOfBounds, MinimalFrame.wordAlignedSize(max_u64));
+    try testing.expectError(error.OutOfBounds, MinimalFrame.wordAlignedSize(@as(u64, max_u32) + 1));
+    try testing.expectEqual(@as(u32, 0xFFFF_FFE0), try MinimalFrame.wordAlignedSize(0xFFFF_FFE0));
+    try testing.expectEqual(@as(u64, max_u64), MinimalFrame.memoryCost(max_u64));
+    try testing.expectEqual(@as(u64, max_u64), MinimalFrame.memoryCost(@as(u64, 1) << 32));
+    try testing.expectEqual(@as(u64, 3 * 2 + 4 / 512), MinimalFrame.memoryCost(2));
+
+    {
+        var frame = try MinimalFrame.init(evm.allocator, &.{}, 1000, zero, zero, 0, &.{}, evm, .CANCUN);
+        // A size no frame can pay for is a huge cost, not a wrapped small one.
+        try testing.expect(frame.memoryExpansionCost(max_u64) > 1 << 62);
+        try testing.expectError(error.OutOfBounds, frame.callMemoryExpansionCost(max_u64, 1, 0, 0));
+        try testing.expectError(error.OutOfBounds, frame.callMemoryExpansionCost(0, 0, 1, max_u64));
+
+        // The last addressable byte would need a size of 2^32, which does not fit.
+        try testing.expectError(error.OutOfBounds, frame.writeMemory(max_u32, 1));
+        try testing.expectEqual(@as(u32, 0), frame.memory_size);
+        try frame.writeMemory(0xFFFF_FFDF, 1);
+        try testing.expectEqual(@as(u32, 0xFFFF_FFE0), frame.memory_size);
+
+        // A charge beyond i64 is an out-of-gas halt.
+        try testing.expectError(error.OutOfGas, frame.consumeGas(max_u64));
+        try testing.expectEqual(@as(i64, 0), frame.gas_remaining);
+        frame.gas_remaining = 10;
+        try testing.expectError(error.OutOfGas, frame.consumeGas(@as(u64, std.math.maxInt(i64)) + 1));
+        frame.gas_remaining = 10;
+        try frame.consumeGas(10);
+        try testing.expectEqual(@as(i64, 0), frame.gas_remaining);
+    }
+
+    // CALLDATALOAD at offsets where `offset + i` passes the u32 maximum reads zeros.
+    {
+        const calldata = [_]u8{ 0x11, 0x22, 0x33 };
+        const Case = struct { offset: u32, word: u256 };
+        const cases = [_]Case{
+            .{ .offset = max_u32, .word = 0 },
+            .{ .offset = max_u32 - 31, .word = 0 },
+            .{ .offset = max_u32 - 1, .word = 0 },
+            .{ .offset = 2, .word = @as(u256, 0x33) << 248 },
+            .{ .offset = 3, .word = 0 },
+        };
+        for (cases) |case| {
+            // PUSH4 offset, CALLDATALOAD
+            var code = [_]u8{ 0x63, 0, 0, 0, 0, 0x35 };
+            std.mem.writeInt(u32, code[1..5], case.offset, .big);
+            var frame = try MinimalFrame.init(evm.allocator, &code, 1000, zero, zero, 0, &calldata, evm, .CANCUN);
+            try frame.execute();
+            try testing.expectEqual(case.word, try frame.peekStack(0));
+            try testing.expectEqual(@as(i64, 1000 - 6), frame.gas_remaining);
+        }
+    }
+
+    // A zero-length copy touches no memory, so offsets up to 2^256 - 1 are valid.
+    {
+        const all_ones = @as([32]u8, @splat(0xFF));
+        const operands = [_]u8{ 0x60, 0x00, 0x7f } ++ all_ones ++ [_]u8{0x7f} ++ all_ones;
+        const calldatacopy = operands ++ [_]u8{0x37};
+        const codecopy = operands ++ [_]u8{0x39};
+        const mcopy = operands ++ [_]u8{0x5e};
+        // EXTCODECOPY takes the account first: 3 x 4 pushes plus the cold access.
+        const extcodecopy = operands ++ [_]u8{ 0x60, 0xEE, 0x3c };
+        const Case = struct { code: []const u8, gas: i64 };
+        const cases = [_]Case{
+            .{ .code = &calldatacopy, .gas = 9 + 3 },
+            .{ .code = &codecopy, .gas = 9 + 3 },
+            .{ .code = &mcopy, .gas = 9 + 3 },
+            .{ .code = &extcodecopy, .gas = 12 + 2600 },
+        };
+        for (cases) |case| {
+            var frame = try MinimalFrame.init(evm.allocator, case.code, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+            try frame.execute();
+            try testing.expectEqual(@as(i64, 100_000) - case.gas, frame.gas_remaining);
+            try testing.expectEqual(@as(u32, 0), frame.memory_size);
+            try testing.expectEqual(@as(usize, 0), frame.stack.items.len);
+        }
+
+        // A non-zero length at such an offset is refused, not wrapped.
+        const one_byte = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x7f } ++ all_ones ++ [_]u8{0x37};
+        var frame = try MinimalFrame.init(evm.allocator, &one_byte, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+        try testing.expectError(error.OutOfBounds, frame.execute());
+    }
+}
+
+test "W3-13: EXTCODESIZE, EXTCODECOPY, EXTCODEHASH and BLOBHASH read real state" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const zero = Address{ .bytes = @as([20]u8, @splat(0)) };
+    const target = Address{ .bytes = @as([20]u8, @splat(0xBB)) };
+    const target_code = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF, 0x00 };
+    const push_target = [_]u8{0x73} ++ @as([20]u8, @splat(0xBB));
+
+    const evm = try MinimalEvm.initPtr(allocator);
+    defer evm.deinitPtr(allocator);
+    evm.setHardfork(.CANCUN);
+    try evm.setCode(target, &target_code);
+
+    {
+        const code = push_target ++ [_]u8{0x3b};
+        var frame = try MinimalFrame.init(evm.allocator, &code, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+        try frame.execute();
+        try testing.expectEqual(@as(u256, target_code.len), try frame.peekStack(0));
+    }
+    {
+        var expected: [32]u8 = undefined;
+        std.crypto.hash.sha3.Keccak256.hash(&target_code, &expected, .{});
+        const code = push_target ++ [_]u8{0x3f};
+        var frame = try MinimalFrame.init(evm.allocator, &code, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+        try frame.execute();
+        try testing.expectEqual(std.mem.readInt(u256, &expected, .big), try frame.peekStack(0));
+    }
+    {
+        // EXTCODEHASH of an account that does not exist is 0.
+        const code = [_]u8{0x73} ++ @as([20]u8, @splat(0xCC)) ++ [_]u8{0x3f};
+        var frame = try MinimalFrame.init(evm.allocator, &code, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+        try frame.execute();
+        try testing.expectEqual(@as(u256, 0), try frame.peekStack(0));
+    }
+    {
+        // EXTCODECOPY(target, dest 0, offset 1, length 8): code bytes, then zero padding.
+        const code = [_]u8{ 0x60, 0x08, 0x60, 0x01, 0x60, 0x00 } ++ push_target ++ [_]u8{0x3c};
+        var frame = try MinimalFrame.init(evm.allocator, &code, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+        try frame.execute();
+        const expected = [_]u8{ 0xAD, 0xBE, 0xEF, 0x00, 0, 0, 0, 0 };
+        for (expected, 0..) |byte, index| try testing.expectEqual(byte, frame.readMemory(@intCast(index)));
+        try testing.expectEqual(@as(u32, 32), frame.memory_size);
+    }
+    {
+        const hashes = [_][32]u8{ @as([32]u8, @splat(0x01)), @as([32]u8, @splat(0x02)) };
+        evm.setBlobVersionedHashes(&hashes);
+        defer evm.setBlobVersionedHashes(&.{});
+        // BLOBHASH(1), BLOBHASH(2), BLOBHASH(2^256 - 1)
+        const code = [_]u8{ 0x60, 0x01, 0x49, 0x60, 0x02, 0x49, 0x7f } ++ @as([32]u8, @splat(0xFF)) ++ [_]u8{0x49};
+        var frame = try MinimalFrame.init(evm.allocator, &code, 100_000, zero, zero, 0, &.{}, evm, .CANCUN);
+        try frame.execute();
+        try testing.expectEqual(@as(u256, 0), try frame.peekStack(0));
+        try testing.expectEqual(@as(u256, 0), try frame.peekStack(1));
+        try testing.expectEqual(std.mem.readInt(u256, &hashes[1], .big), try frame.peekStack(2));
     }
 }

@@ -1022,7 +1022,7 @@ fn fuzzGasPure(suite: *Suite, r: std.Random, arena: *std.heap.ArenaAllocator) an
                 var answer = Line.init(a);
                 try answer.num(eips.create_gas_cost() + eips.eip_3860_initcode_word_cost(len));
                 try answer.num(eips.eip_3860_initcode_word_cost(len));
-                try answer.num(eips.size_limit());
+                try answer.opt(if (eips.size_limit()) |limit| limit else null);
                 try suite.check(.gas, "CREATE gas (EIP-3860)", line.str(), answer.str());
             }
 

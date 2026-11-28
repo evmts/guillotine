@@ -30,23 +30,26 @@ pub const MemoryError = error{
 ///
 /// Memory configuration controls initial capacity and maximum size limits.
 /// The implementation uses ArrayList for dynamic growth with efficient resizing.
-/// Read a big-endian 256-bit word as four byte-swapped 64-bit limbs.
+/// Read a big-endian 256-bit word as four 64-bit limbs.
 /// A generic `std.mem.readInt(u256, ..., .big)` lowers to a long scalar byte shuffle;
-/// this form is four loads and four `bswap`.
+/// this form is four loads and, on a little-endian host, four `bswap`.
+/// `std.mem.bigToNative` is `@byteSwap` on a little-endian host and the identity on a
+/// big-endian one, so the word is right on both.
 pub inline fn loadWordBigEndian(bytes: *const [WORD_SIZE]u8) u256 {
-    const limb3 = @byteSwap(@as(u64, @bitCast(bytes[0..8].*)));
-    const limb2 = @byteSwap(@as(u64, @bitCast(bytes[8..16].*)));
-    const limb1 = @byteSwap(@as(u64, @bitCast(bytes[16..24].*)));
-    const limb0 = @byteSwap(@as(u64, @bitCast(bytes[24..32].*)));
+    const limb3 = std.mem.bigToNative(u64, @bitCast(bytes[0..8].*));
+    const limb2 = std.mem.bigToNative(u64, @bitCast(bytes[8..16].*));
+    const limb1 = std.mem.bigToNative(u64, @bitCast(bytes[16..24].*));
+    const limb0 = std.mem.bigToNative(u64, @bitCast(bytes[24..32].*));
     return (@as(u256, limb3) << 192) | (@as(u256, limb2) << 128) | (@as(u256, limb1) << 64) | @as(u256, limb0);
 }
 
-/// Write a 256-bit word big-endian as four byte-swapped 64-bit limbs.
+/// Write a 256-bit word big-endian as four 64-bit limbs (`bswap` on a little-endian
+/// host only; see `loadWordBigEndian`).
 pub inline fn storeWordBigEndian(bytes: *[WORD_SIZE]u8, value: u256) void {
-    bytes[0..8].* = @bitCast(@byteSwap(@as(u64, @truncate(value >> 192))));
-    bytes[8..16].* = @bitCast(@byteSwap(@as(u64, @truncate(value >> 128))));
-    bytes[16..24].* = @bitCast(@byteSwap(@as(u64, @truncate(value >> 64))));
-    bytes[24..32].* = @bitCast(@byteSwap(@as(u64, @truncate(value))));
+    bytes[0..8].* = @bitCast(std.mem.nativeToBig(u64, @truncate(value >> 192)));
+    bytes[8..16].* = @bitCast(std.mem.nativeToBig(u64, @truncate(value >> 128)));
+    bytes[16..24].* = @bitCast(std.mem.nativeToBig(u64, @truncate(value >> 64)));
+    bytes[24..32].* = @bitCast(std.mem.nativeToBig(u64, @truncate(value)));
 }
 
 pub fn Memory(config: MemoryConfig) type {
@@ -70,10 +73,17 @@ pub fn Memory(config: MemoryConfig) type {
 
         flat: Flat,
         checkpoint: u32,
+        /// True only for a value made by `init`, which allocated `buffer_ptr` and
+        /// its bytes. A view made by `init_borrowed` or `init_child` never owns
+        /// them, whatever `is_owned` says: `deinit` frees nothing through it.
+        /// The flag sits in the padding after `checkpoint`.
+        owns_buffer: bool,
         buffer_ptr: *std.ArrayList(u8),
 
-        /// Words a `Memory` value takes: two, plus the two of the inline copy.
-        pub const size_in_words = if (is_flat) 4 else 2;
+        /// Words a `Memory` value takes: on 64-bit, `checkpoint` (u32) + `owns_buffer` (bool)
+        /// fit in one 8-byte word alongside `buffer_ptr` (2 words, +2 when `is_flat`); on
+        /// 32-bit targets `owns_buffer` requires an extra word (3 words, +2 when `is_flat`).
+        pub const size_in_words: usize = 1 + (if (@sizeOf(usize) >= 8) @as(usize, 1) else 2) + (if (is_flat) @as(usize, 2) else 0);
 
         comptime {
             if (@sizeOf(Self) != size_in_words * @sizeOf(usize)) {
@@ -99,10 +109,11 @@ pub fn Memory(config: MemoryConfig) type {
         }
 
         /// A view of `buffer_ptr` starting at `checkpoint`, with its inline copy set.
-        inline fn view(buffer_ptr: *std.ArrayList(u8), checkpoint: u32) Self {
+        inline fn view(buffer_ptr: *std.ArrayList(u8), checkpoint: u32, owns_buffer: bool) Self {
             var self = Self{
                 .flat = if (comptime is_flat) .{ .data = buffer_ptr.items.ptr, .len = 0 } else .{},
                 .checkpoint = checkpoint,
+                .owns_buffer = owns_buffer,
                 .buffer_ptr = buffer_ptr,
             };
             self.sync();
@@ -116,24 +127,32 @@ pub fn Memory(config: MemoryConfig) type {
                 buffer_ptr.* = std.ArrayList(u8).empty;
                 errdefer buffer_ptr.deinit(allocator);
                 try buffer_ptr.ensureTotalCapacity(allocator, INITIAL_CAPACITY);
-                return view(buffer_ptr, 0);
+                return view(buffer_ptr, 0, true);
             } else {
                 @compileError("Cannot call init() on borrowed memory type. Use init_borrowed() instead.");
             }
         }
 
+        /// A view of a buffer the caller keeps. The view never owns the buffer, on
+        /// an owned memory type too: `deinit` on it frees nothing, and the caller
+        /// releases the buffer the way it was acquired (for a frame, to its pool).
         pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: u32) !Self {
-            // For backward compatibility on owned memory types, ignore ownership
-            // and return borrowed-like behavior.
-            return view(buffer_ptr, checkpoint);
+            return view(buffer_ptr, checkpoint, false);
         }
 
+        /// True when `deinit` frees this value's buffer.
+        pub inline fn ownsBuffer(self: *const Self) bool {
+            if (comptime !is_owned) return false;
+            return self.owns_buffer;
+        }
+
+        /// Free the buffer when this value owns it; a no-op for a borrowed view.
+        /// The value owns nothing afterwards, so a second call is a no-op too.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            if (is_owned) {
-                self.buffer_ptr.deinit(allocator);
-                allocator.destroy(self.buffer_ptr);
-            }
-            // No-op for borrowed memory
+            if (!self.ownsBuffer()) return;
+            self.owns_buffer = false;
+            self.buffer_ptr.deinit(allocator);
+            allocator.destroy(self.buffer_ptr);
         }
 
         pub fn init_child(self: *Self) !Memory(.{
@@ -152,6 +171,7 @@ pub fn Memory(config: MemoryConfig) type {
             });
             return BorrowedMemType{
                 .flat = .{},
+                .owns_buffer = false,
                 .checkpoint = std.math.cast(u32, self.buffer_ptr.*.items.len) orelse return MemoryError.MemoryOverflow,
                 .buffer_ptr = self.buffer_ptr,
             };
@@ -431,9 +451,11 @@ pub fn Memory(config: MemoryConfig) type {
             @memcpy(self.buffer_ptr.*.items[start_idx .. start_idx + data.len], data);
         }
 
-        /// Clears memory: resets owned memory to empty, sets checkpoint for borrowed memory
+        /// Clears memory: empties a buffer this value owns; for a borrowed view,
+        /// moves the checkpoint to the end of the buffer and leaves the owner's
+        /// bytes alone.
         pub fn clear(self: *Self) void {
-            if (is_owned) {
+            if (self.ownsBuffer()) {
                 self.buffer_ptr.*.items.len = 0;
                 self.checkpoint = 0;
             } else {
@@ -1159,4 +1181,107 @@ test "flat memory: a view over an existing buffer starts at its checkpoint" {
     const empty = try Flat.init_borrowed(&list, 40);
     try std.testing.expectEqual(@as(usize, 0), empty.flat.len);
     try std.testing.expect(empty.byte_ptr_in_bounds(0) == null);
+}
+
+test "W3-8: loadWordBigEndian and storeWordBigEndian agree with the big-endian byte order on any host" {
+    var bytes: [WORD_SIZE]u8 = undefined;
+    for (&bytes, 0..) |*byte, i| byte.* = @intCast(i + 1);
+    // Byte 0 is the most significant byte of the word, whatever the host's order.
+    const expected: u256 = 0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20;
+    try std.testing.expectEqual(expected, loadWordBigEndian(&bytes));
+    try std.testing.expectEqual(std.mem.readInt(u256, &bytes, .big), loadWordBigEndian(&bytes));
+
+    var stored: [WORD_SIZE]u8 = undefined;
+    storeWordBigEndian(&stored, expected);
+    try std.testing.expectEqualSlices(u8, &bytes, &stored);
+
+    const words = [_]u256{
+        0,
+        1,
+        0xff,
+        1 << 64,
+        1 << 128,
+        1 << 192,
+        1 << 255,
+        std.math.maxInt(u256),
+        0xdeadbeef_00000000_cafebabe_11111111_22222222_33333333_44444444_55555555,
+    };
+    for (words) |word| {
+        var buffer: [WORD_SIZE]u8 = undefined;
+        storeWordBigEndian(&buffer, word);
+        var reference: [WORD_SIZE]u8 = undefined;
+        std.mem.writeInt(u256, &reference, word, .big);
+        try std.testing.expectEqualSlices(u8, &reference, &buffer);
+        try std.testing.expectEqual(word, loadWordBigEndian(&buffer));
+    }
+}
+
+test "W3-8: limb conversion is a byte swap on little-endian hosts and the identity on big-endian hosts" {
+    const limb: u64 = 0x0102030405060708;
+    const native_is_little = @import("builtin").cpu.arch.endian() == .little;
+    const expected: u64 = if (native_is_little) @byteSwap(limb) else limb;
+    try std.testing.expectEqual(expected, std.mem.bigToNative(u64, limb));
+    try std.testing.expectEqual(expected, std.mem.nativeToBig(u64, limb));
+
+    // The value the helpers produce is the same one a per-byte big-endian read gives,
+    // which does not depend on the host at all.
+    const zeros: [24]u8 = @splat(0);
+    const bytes = zeros ++ [_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
+    var by_bytes: u256 = 0;
+    for (bytes) |byte| by_bytes = (by_bytes << 8) | byte;
+    try std.testing.expectEqual(by_bytes, loadWordBigEndian(&bytes));
+}
+
+test "W3-14: deinit of an init_borrowed view on an owned Memory type leaves the owner usable" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .initial_capacity = 64, .memory_limit = 1 << 20, .owned = true });
+
+    var owner = try Mem.init(allocator);
+    defer owner.deinit(allocator);
+    try std.testing.expect(owner.ownsBuffer());
+    try owner.set_data(allocator, 0, &.{ 0xAA, 0xBB, 0xCC });
+
+    var borrowed = try Mem.init_borrowed(owner.buffer_ptr, 32);
+    try std.testing.expect(!borrowed.ownsBuffer());
+    try borrowed.set_data(allocator, 0, &.{ 0x11, 0x22 });
+    // Twice: a borrowed view frees nothing however often it is released.
+    borrowed.deinit(allocator);
+    borrowed.deinit(allocator);
+
+    // The owner's buffer is alive, holds both writes, and still grows.
+    try std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, owner.buffer_ptr.items[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x11, 0x22 }, owner.buffer_ptr.items[32..34]);
+    try owner.set_data(allocator, 96, &.{0xEE});
+    try std.testing.expectEqual(@as(u8, 0xEE), owner.buffer_ptr.items[96]);
+}
+
+test "W3-14: a borrowed view of a caller-owned list is never freed and clear leaves the caller's bytes" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .initial_capacity = 64, .memory_limit = 1 << 20, .owned = true, .flat = true });
+
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(allocator);
+    try list.appendNTimes(allocator, 0x5A, 64);
+
+    var view = try Mem.init_borrowed(&list, 32);
+    try std.testing.expect(!view.ownsBuffer());
+    view.clear();
+    try std.testing.expectEqual(@as(usize, 0), view.size());
+    try std.testing.expectEqual(@as(usize, 64), list.items.len);
+    try std.testing.expectEqual(@as(u8, 0x5A), list.items[0]);
+    view.deinit(allocator);
+
+    // `list` is still the caller's to use and to free (the deferred deinit above).
+    try list.append(allocator, 0x01);
+    try std.testing.expectEqual(@as(usize, 65), list.items.len);
+}
+
+test "W3-14: deinit of an owning Memory is idempotent" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var memory = try Mem.init(allocator);
+    try memory.set_data(allocator, 0, &.{0x01});
+    memory.deinit(allocator);
+    try std.testing.expect(!memory.ownsBuffer());
+    memory.deinit(allocator);
 }

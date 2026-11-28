@@ -26,7 +26,6 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const config = FrameType.frame_config;
         const dispatch_next = @import("dispatch_next.zig");
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
         const address_utils = @import("address_utils.zig");
@@ -191,7 +190,6 @@ pub fn Handlers(FrameType: type) type {
         /// Stack: [destOffset, offset, length] → []
         pub fn calldatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.CALLDATACOPY, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 3, "CALLDATACOPY requires 3 stack items");
             }
@@ -203,8 +201,7 @@ pub fn Handlers(FrameType: type) type {
             // A zero-length copy touches no memory and charges no dynamic gas, whatever
             // the offsets are.
             if (length == 0) {
-                const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
-                return op_data.next_cursor.cursor;
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLDATACOPY);
             }
 
             // Memory cannot reach beyond usize: such a copy could never pay for expansion.
@@ -235,18 +232,22 @@ pub fn Handlers(FrameType: type) type {
             const total_gas = verified_ops.saturatingGasSum(memory_expansion_cost, copy_cost);
 
             if (!self.chargeDynamicGas(total_gas)) {
+                self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| return FrameType.memoryHalt(err);
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| {
+                self.afterComplete(.CALLDATACOPY);
+                return FrameType.memoryHalt(err);
+            };
 
             if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = self.calldata_slice, .offset = offset_usize, .length = length_usize })) {
+                self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLDATACOPY);
         }
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
@@ -272,8 +273,7 @@ pub fn Handlers(FrameType: type) type {
             // A zero-length copy touches no memory and charges no dynamic gas, whatever
             // the offsets are.
             if (length == 0) {
-                const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
-                return op_data.next_cursor.cursor;
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .CODECOPY);
             }
 
             // Memory cannot reach beyond usize: such a copy could never pay for expansion.
@@ -304,18 +304,22 @@ pub fn Handlers(FrameType: type) type {
             const total_gas = verified_ops.saturatingGasSum(memory_expansion_cost, copy_cost);
 
             if (!self.chargeDynamicGas(total_gas)) {
+                self.afterComplete(.CODECOPY);
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u32)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| return FrameType.memoryHalt(err);
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| {
+                self.afterComplete(.CODECOPY);
+                return FrameType.memoryHalt(err);
+            };
 
             if (!copyPadded(self, .{ .dest = dest_offset_usize, .source = self.code, .offset = offset_usize, .length = length_usize })) {
+                self.afterComplete(.CODECOPY);
                 return Error.OutOfBounds;
             }
 
-            const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
-            return op_data.next_cursor.cursor;
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .CODECOPY);
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
@@ -607,8 +611,6 @@ pub fn Handlers(FrameType: type) type {
         pub fn blockhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.BLOCKHASH, cursor);
             // BLOCKHASH's 20 gas is static and charged with the basic block.
-
-            const dispatch = Dispatch{ .cursor = cursor };
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BLOCKHASH requires 1 stack item");
             }
@@ -633,8 +635,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.set_top_unsafe(0);
             }
 
-            const op_data = dispatch.getOpData(.BLOCKHASH); // Use op_data.next_handler and op_data.next_cursor directly
-            return op_data.next_cursor.cursor;
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .BLOCKHASH);
         }
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
@@ -728,9 +729,9 @@ pub fn Handlers(FrameType: type) type {
         /// context the EVM already holds, so there is no host work to hand over to.
         /// An index at or past the number of hashes, however large, gives zero.
         ///
-        /// It continues without the post-instruction hook, as it did behind the
-        /// adapter: the reference interpreter the tracer compares against has no
-        /// versioned hashes, so it cannot confirm the value pushed here.
+        /// It continues through `N.next`, so the tracer's post-instruction hook runs:
+        /// the reference interpreter is given the transaction's versioned hashes and
+        /// confirms the value pushed here.
         pub fn blobhash(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_left: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView.init(sp, t0, t1, t2, t3);
             N.before(self, .BLOBHASH, cursor, s, gas_left);

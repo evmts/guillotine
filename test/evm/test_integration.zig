@@ -33,7 +33,6 @@ const TestFrameConfig = frame_mod.FrameConfig{
 const TestFrame = frame_mod.Frame(TestFrameConfig);
 const TestEvm = evm_mod.Evm(.{
     .max_call_depth = 16,
-    .max_input_size = 4096,
     .frame_config = TestFrameConfig,
 });
 

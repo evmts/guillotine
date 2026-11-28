@@ -1,66 +1,118 @@
 # CLAUDE.md - Instructions Module
 
-## MISSION CRITICAL: Core Execution Engine
-**Financial operations where bugs = fund loss.** Test with `zig build test-opcodes`.
+## Mission critical: the execution engine
 
-## Handler Architecture
+A wrong handler loses funds. After every change run `zig build && zig build test-opcodes`.
 
-**Function Pattern**:
+## Handler ABI
+
+Every opcode handler has the register-passing tail-call signature defined in
+`src/preprocessor/handler_abi.zig`:
+
 ```zig
-pub fn opcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    // Implementation
-    const dispatch = Dispatch{ .cursor = cursor };
-    const op_data = dispatch.getOpData(.OPCODE);
-    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+fn (frame, cursor, sp, gas, t0, t1, t2, t3) callconv(handler_abi.handler_cc) handler_abi.ExitCode
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `frame` | The executing `Frame` |
+| `cursor` | Pointer into the dispatch schedule (not a bytecode PC) |
+| `sp` | Live stack pointer; `sp[0]` is the top item's spill slot and is stale |
+| `gas` | Live gas counter |
+| `t0..t3` | Top stack item as 64-bit limbs, least significant first |
+
+On LLVM x86_64 and aarch64 `handler_cc` is `preserve_none`. That convention cannot
+return an error union or take a `u256` by value, so a handler returns an `ExitCode`
+and the frame maps it back with `handler_abi.errorFromExit`. Other targets use the C
+ABI with ordinary calls.
+
+`frame.stack.stack_ptr`, the stack memory at `sp[0]` and `frame.gas_remaining` are
+stale while handlers run. `N.flush` writes them back; `N.before`, `N.next`, `N.jump`
+and `N.exit` flush when they must.
+
+## Two ways to write a handler
+
+### Native handler (hot opcodes)
+
+```zig
+const N = handler_abi.Native(FrameType);
+
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType, t0: u64, t1: u64, t2: u64, t3: u64) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView.init(sp, t0, t1, t2, t3);
+    N.before(self, .ADD, cursor, s, gas);
+    s.binary_op_unsafe(struct {
+        fn op(top: WordType, second: WordType) WordType {
+            return top +% second;
+        }
+    }.op);
+    return N.next(self, .ADD, cursor, s, gas);
 }
 ```
 
-**Principles**: Tail calls, unsafe ops after validation, cursor dispatch, precise gas accounting
+- `N.before` runs `frame.beforeInstruction` (tracer synchronization). It compiles to
+  nothing in untraced ReleaseFast builds. Every handler must call it.
+- `N.next` runs `frame.afterInstruction` and tail-calls the next handler.
+- `N.jump` continues at a resolved jump target.
+- `N.exit` flushes, runs `frame.afterComplete` and returns an `ExitCode`. Use it for
+  every terminating path, error exits included.
 
-## File Organization
+### Step function (host-bound opcodes)
 
-**Core Handlers**: arithmetic, bitwise, comparison, stack, memory, storage, jump, system, context, keccak, log
-**Synthetic**: arithmetic_synthetic, bitwise_synthetic, memory_synthetic, jump_synthetic, advanced_synthetic (PUSH+op fusions)
+Handlers dominated by host work (storage, calls, logs, copies) are step functions
+adapted by `handler_abi.wrap`:
 
-## Critical Implementation
-
-**Stack**: Validate `self.stack.size() >= N`, use `_unsafe` variants after validation, 1024 max
-**Memory**: Quadratic gas costs, `calculateMemoryGas()`, 32-byte words
-**Gas**: `self.gas_remaining -= cost`, check overflow, exact Yellow Paper costs
-
-**Error Types**: StackOverflow/Underflow, InvalidJumpDestination, OutOfGas, StaticViolation, InvalidOpcode
-
-## Common Patterns
-
-**Binary Ops**:
 ```zig
-std.debug.assert(self.stack.size() >= 2);
-self.stack.binary_op_unsafe(op_function);
+pub fn calldatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const Dispatch.Item {
+    self.beforeInstruction(.CALLDATACOPY, cursor);
+    // ... work on self.stack and self.gas_remaining ...
+    // On an error exit: self.afterComplete(.CALLDATACOPY); return Error.OutOfGas;
+    return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLDATACOPY);
+}
 ```
 
-**Memory Ops**:
-```zig
-const memory_cost = try self.calculateMemoryGas(offset, size);
-self.gas_remaining -= @intCast(memory_cost);
-if (self.gas_remaining < 0) return Error.OutOfGas;
-```
+A step function works on `frame.stack` and `frame.gas_remaining` directly and returns
+the cursor of the next handler. It must call `beforeInstruction` first,
+`afterInstruction` (through `dispatch_next.nextInstruction`) on the continuing path,
+and `afterComplete` on every exit path.
 
-## Synthetic Optimizations
-- **Inline**: ≤8 byte values in dispatch metadata
-- **Pointer**: >8 byte values in constant pool
-- **Patterns**: PUSH+OP, multi-operations, static jumps
+## Files
 
-## Performance
-- Tail call optimization
-- Unsafe ops skip bounds checking
-- Cache-friendly layouts
-- Exact gas costs per Yellow Paper
+- Core: `handlers_arithmetic`, `handlers_bitwise`, `handlers_comparison`,
+  `handlers_stack`, `handlers_memory`, `handlers_storage`, `handlers_jump`,
+  `handlers_system`, `handlers_context`, `handlers_keccak`, `handlers_log`
+- Fused (synthetic) opcodes: `handlers_arithmetic_synthetic`,
+  `handlers_bitwise_synthetic`, `handlers_memory_synthetic`,
+  `handlers_jump_synthetic`, `handlers_advanced_synthetic`
+- Shared: `dispatch_next.zig` (step-function continuation), `address_utils.zig`
 
-## Security
-- Validate stack depth before ops
-- Check integer overflows
-- Validate jump destinations
-- Enforce static context
-- Accurate gas metering prevents DoS
+`src/frame/frame_handlers.zig` builds the 256-entry handler table. Undefined bytes,
+opcodes a fork has not activated, and the withdrawn `0xF6`/`0xF7` map to the invalid
+handler. `getSyntheticHandlerForByte` returns the invalid handler for a byte that is
+not a synthetic opcode.
 
-**Remember: Zero tolerance for errors in financial operations.**
+## Rules
+
+- **Stack**: bytecode analysis validates each basic block's stack bounds before the
+  block runs, so handlers use the `_unsafe` operations. Do not add bounds checks to
+  them. Checks inside handlers are `tracer.assert(condition, "message")`, a
+  development aid that is a no-op without a tracer.
+- **Gas**: static gas is charged per basic block at block entry. A handler charges
+  only its dynamic gas (memory expansion, cold access, copy cost) with checked
+  arithmetic and exits with `OutOfGas` when the charge does not fit.
+- **Memory**: expansion cost is quadratic and word-aligned; offsets and lengths are
+  `u256` values that must be range-checked before any cast to `usize`.
+- **Static context**: `SSTORE`, `TSTORE`, `LOG0..LOG4`, `CREATE`, `CREATE2`,
+  `SELFDESTRUCT` and value-bearing `CALL` exit with `WriteProtection`.
+- **Errors**: never crash and never swallow an error. Return a typed error or exit
+  code. No `@panic`, `unreachable`, empty `catch`, or stub.
+- **Logging**: `log.zig` only.
+
+## Synthetic opcodes
+
+Dispatch fuses common sequences (PUSH+op, PUSH+JUMP, ISZERO+JUMPI and others) into
+one handler. Small operands are stored inline in the schedule; wider ones go to the
+constant pool. A synthetic handler passes its synthetic opcode to `N.before`, and the
+tracer steps the reference interpreter once per fused bytecode instruction.
+
+`-Devm-enable-fusion=false` builds without fusion; both modes must pass
+`zig build test-opcodes`, `zig build test-fusions` and `zig build state-tests`.

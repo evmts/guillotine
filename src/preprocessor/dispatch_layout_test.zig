@@ -187,7 +187,7 @@ test "bytecode analysis works with a u32 program counter" {
     var saw_push_jump = false;
     var saw_iszero_jumpi = false;
     var saw_push_add_dup1 = false;
-    while (iter.next()) |op| {
+    while (try iter.next()) |op| {
         switch (op) {
             .pc => |data| saw_pc = data.value,
             .push_jump_fusion => |data| {

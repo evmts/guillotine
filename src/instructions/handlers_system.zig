@@ -18,10 +18,10 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
         const handler_abi = @import("../preprocessor/handler_abi.zig");
         const N = handler_abi.Native(FrameType);
-        const config = FrameType.frame_config;
 
-        // Use default configuration for CallParams - this maintains backward compatibility
-        const CallParams = call_params_mod.CallParams(.{});
+        /// The call parameters of the EVM this frame belongs to, so a handler builds
+        /// exactly the type `Evm.inner_call` accepts whatever the configuration.
+        const CallParams = FrameType.Evm.CallParams;
         const address_utils = @import("address_utils.zig");
 
         const dispatch_next = @import("dispatch_next.zig");
@@ -80,7 +80,12 @@ pub fn Handlers(FrameType: type) type {
             var extra_gas: u64 = access_cost -| fork_gas.warm_access_cost;
 
             if (comptime hardfork.isAtLeast(.PRAGUE)) {
-                if (try delegateOf(self, addr)) |delegate| {
+                const delegation = delegateOf(self, addr) catch |err| {
+                    @branchHint(.cold);
+                    self.afterComplete(opcode);
+                    return err;
+                };
+                if (delegation) |delegate| {
                     extra_gas +|= evm.access_address(delegate) catch {
                         @branchHint(.cold);
                         self.afterComplete(opcode);
@@ -91,10 +96,14 @@ pub fn Handlers(FrameType: type) type {
             if (value != 0) extra_gas +|= GasConstants.CallValueTransferGas;
 
             if (comptime kind == .call) {
-                const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork))
-                    value != 0 and try isDeadAccount(self, addr)
-                else
-                    !evm.database.account_exists(addr.bytes);
+                const charge_new_account = if (comptime fork_gas.newAccountNeedsValue(hardfork)) blk: {
+                    if (value == 0) break :blk false;
+                    break :blk isDeadAccount(self, addr) catch |err| {
+                        @branchHint(.cold);
+                        self.afterComplete(opcode);
+                        return err;
+                    };
+                } else !evm.database.account_exists(addr.bytes);
                 if (charge_new_account) extra_gas +|= fork_gas.new_account_gas;
             }
             return extra_gas;
@@ -373,19 +382,10 @@ pub fn Handlers(FrameType: type) type {
             return createFamily(self, cursor, true);
         }
 
-        /// RETURN opcode (0xf3) - Halt execution returning output data.
-        /// Stack: [offset, size] → []
-        pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
-            self.beforeInstruction(.RETURN, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            _ = dispatch;
-
-            if (self.stack.size() < 2) {
-                return Error.StackUnderflow;
-            }
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 2, "RETURN requires 2 stack items");
-            }
+        /// Pop `[offset, size]` and copy that memory range into the call arena as the
+        /// frame's output, charging memory expansion. Shared by RETURN and REVERT.
+        /// The caller has checked that the stack holds two items.
+        fn captureHaltOutput(self: *FrameType) Error!void {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
@@ -393,108 +393,63 @@ pub fn Handlers(FrameType: type) type {
             // ignored (execution-specs `calculate_gas_extend_memory` skips size 0).
             if (size == 0) {
                 self.output_data = &.{};
-                self.afterComplete(.RETURN);
-                return Error.Return;
+                return;
             }
 
-            // Bounds checking for memory offset and size
-            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                return Error.OutOfBounds;
-            }
-
+            const limit = FrameType.Memory.MEMORY_LIMIT;
+            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) return Error.OutOfBounds;
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
-
-            // Calculate gas cost for memory expansion
             const memory_end = std.math.add(usize, offset_usize, size_usize) catch return Error.OutOfBounds;
             // Every value must lie within the configured memory limit.
-            if (offset_usize > FrameType.Memory.MEMORY_LIMIT or size_usize > FrameType.Memory.MEMORY_LIMIT or memory_end > FrameType.Memory.MEMORY_LIMIT) {
-                return Error.OutOfBounds;
-            }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
-            if (!chargeGas(self, memory_expansion_cost)) {
-                return Error.OutOfGas;
-            }
+            if (offset_usize > limit or size_usize > limit or memory_end > limit) return Error.OutOfBounds;
 
-            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32).
-            // A host that cannot grow the memory has failed; that is not an out-of-bounds halt.
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch |err| return FrameType.memoryHalt(err);
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
+            if (!chargeGas(self, memory_expansion_cost)) return Error.OutOfGas;
+
+            // memory_end is within MEMORY_LIMIT, so it fits in u32. A host that cannot
+            // grow the memory has failed; that is not an out-of-bounds halt.
+            const arena = self.getEvm().getCallArenaAllocator();
+            self.memory.ensure_capacity(arena, @as(u32, @intCast(memory_end))) catch |err| {
+                return FrameType.memoryHalt(err);
+            };
 
             // Copy the output range out of frame memory into the call arena.
-            const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
+            const range = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
                 return Error.OutOfBounds;
             };
-            // Allocate and copy output to thread-local storage
-            const new_output = self.getEvm().getCallArenaAllocator().alloc(u8, return_data.len) catch {
-                return Error.AllocationError;
-            };
-            @memcpy(new_output, return_data);
-            self.output_data = new_output;
+            const output = arena.alloc(u8, range.len) catch return Error.AllocationError;
+            @memcpy(output, range);
+            self.output_data = output;
+        }
 
-            // Return indicates successful execution
+        /// RETURN opcode (0xf3) - Halt execution returning output data.
+        /// Stack: [offset, size] → []
+        ///
+        /// Every exit, including each error, reaches the tracer's completion hook.
+        pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
+            self.beforeInstruction(.RETURN, cursor);
+            if (self.stack.size() < 2) {
+                self.afterComplete(.RETURN);
+                return Error.StackUnderflow;
+            }
+            const halt: Error = if (captureHaltOutput(self)) |_| Error.Return else |err| err;
             self.afterComplete(.RETURN);
-            return Error.Return;
+            return halt;
         }
 
         /// REVERT opcode (0xfd) - Halt execution reverting state changes.
         /// Stack: [offset, size] → []
+        ///
+        /// Every exit, including each error, reaches the tracer's completion hook.
         pub fn revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.REVERT, cursor);
-            const dispatch = Dispatch{ .cursor = cursor };
-            _ = dispatch;
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 2, "REVERT requires 2 stack items");
             }
-            const offset = self.stack.pop_unsafe(); // Top of stack
-            const size = self.stack.pop_unsafe(); // Second from top
-
-            // A zero-size range neither touches nor expands memory, so the offset is
-            // ignored (execution-specs `calculate_gas_extend_memory` skips size 0).
-            if (size == 0) {
-                self.output_data = &.{};
-                self.afterComplete(.REVERT);
-                return Error.REVERT;
-            }
-
-            // Bounds checking for memory offset and size
-            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                return Error.OutOfBounds;
-            }
-
-            const offset_usize = @as(usize, @intCast(offset));
-            const size_usize = @as(usize, @intCast(size));
-
-            // Calculate gas cost for memory expansion
-            const memory_end = std.math.add(usize, offset_usize, size_usize) catch return Error.OutOfBounds;
-            // Every value must lie within the configured memory limit.
-            if (offset_usize > FrameType.Memory.MEMORY_LIMIT or size_usize > FrameType.Memory.MEMORY_LIMIT or memory_end > FrameType.Memory.MEMORY_LIMIT) {
-                return Error.OutOfBounds;
-            }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
-            if (!chargeGas(self, memory_expansion_cost)) {
-                return Error.OutOfGas;
-            }
-
-            // Ensure memory capacity (memory_end is within MEMORY_LIMIT, so it fits in u32).
-            // A host that cannot grow the memory has failed; that is not an out-of-bounds halt.
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch |err| return FrameType.memoryHalt(err);
-
-            // Copy the output range out of frame memory into the call arena.
-            const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                return Error.OutOfBounds;
-            };
-            // Allocate and copy output to thread-local storage
-            const revert_output = self.getEvm().getCallArenaAllocator().alloc(u8, revert_data.len) catch {
-                return Error.AllocationError;
-            };
-            @memcpy(revert_output, revert_data);
-            self.output_data = revert_output;
-
-            // Reduce log noise: no verbose REVERT logging
-
-            // Always return REVERT error for proper handling
+            const halt: Error = if (captureHaltOutput(self)) |_| Error.REVERT else |err| err;
             self.afterComplete(.REVERT);
-            return Error.REVERT;
+            return halt;
         }
 
         /// SELFDESTRUCT opcode (0xff) - Halt execution and mark account for later deletion.
@@ -531,7 +486,11 @@ pub fn Handlers(FrameType: type) type {
                         self.afterComplete(.SELFDESTRUCT);
                         return Error.AllocationError;
                     };
-                    break :blk balance != 0 and try isDeadAccount(self, recipient);
+                    const dead = isDeadAccount(self, recipient) catch |err| {
+                        self.afterComplete(.SELFDESTRUCT);
+                        return err;
+                    };
+                    break :blk balance != 0 and dead;
                 } else !evm.database.account_exists(recipient.bytes);
                 if (charge_new_account) extra_gas +|= fork_gas.new_account_gas;
             }

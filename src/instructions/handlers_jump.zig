@@ -90,9 +90,14 @@ pub fn Handlers(FrameType: type) type {
             s: N.StackView,
             gas_before: FrameType.GasType,
         ) BlockCheck {
+            // With `FrameType.gas_checks_disabled` a block charges nothing, the same
+            // as the first block and every dynamic charge; its stack bounds are still
+            // validated.
             // A u32 block charge fits directly in i64. On narrower targets the
             // comparison must precede the signed conversion.
-            const gas = if (@bitSizeOf(FrameType.GasType) > @bitSizeOf(@TypeOf(meta.gas))) blk: {
+            const gas = if (comptime FrameType.gas_checks_disabled)
+                gas_before
+            else if (@bitSizeOf(FrameType.GasType) > @bitSizeOf(@TypeOf(meta.gas))) blk: {
                 const remaining = gas_before - @as(FrameType.GasType, meta.gas);
                 if (remaining < 0) {
                     @branchHint(.unlikely);

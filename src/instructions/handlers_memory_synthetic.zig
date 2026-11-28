@@ -174,7 +174,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(opcode);
                 return Error.OutOfBounds;
             }
-            if (comptime FrameType.config.disable_gas_checks) return;
+            if (comptime FrameType.gas_checks_disabled) return;
             const cost = self.memory.get_expansion_cost(@intCast(offset + size));
             if (!chargeGas(self, cost)) {
                 self.afterComplete(opcode);

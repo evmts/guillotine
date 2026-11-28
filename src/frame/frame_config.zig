@@ -33,11 +33,12 @@ pub const FrameConfig = struct {
     /// Database implementation type for storage operations (always required).
     DatabaseType: type,
 
-    /// Block info configuration for the frame
-    block_info_config: @import("block_info_config.zig").BlockInfoConfig = .{},
-
-    /// Disable gas checks for testing/development (default: false)
-    /// When enabled, gas consumption methods become no-ops
+    /// Disable gas checks for testing/development (default: false).
+    /// Honored by the interpreter in Debug builds only (`Frame.gas_checks_disabled`):
+    /// there no block, dynamic or memory charge is made and none can fail, so gas
+    /// no longer bounds execution. Other build modes always charge gas.
+    /// Transaction admission skips its fee-cap and calldata-floor checks whenever
+    /// the flag is set.
     disable_gas_checks: bool = false,
 
     /// Disable balance checks for testing/development (default: false)
@@ -56,10 +57,6 @@ pub const FrameConfig = struct {
     /// null = disabled (default for optimized builds)
     /// value = maximum iterations before panic (default for debug/safe builds)
     loop_quota: ?u32 = if (builtin.mode == .debug or builtin.mode == .safe) 1_000_000 else null,
-
-    /// Custom opcode handler overrides
-    /// These will override the default handlers in frame_handlers.zig
-    opcode_overrides: []const struct { opcode: u8, handler: *const anyopaque } = &.{},
 
     pub fn validate(self: Self) void {
         if (self.stack_size > 4095) @compileError("stack_size cannot exceed 4095");

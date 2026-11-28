@@ -7,7 +7,7 @@ const evm = @import("evm");
 const Opcode = evm.Opcode;
 const BytecodeConfig = evm.BytecodeConfig;
 const BytecodeType = evm.Bytecode(BytecodeConfig{});
-const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
+const bytecodeAnalyze = evm.bytecode_analyze.bytecodeAnalyze;
 const opcode_data = evm.OpcodeData;
 
 const allocator = std.heap.c_allocator;
@@ -39,22 +39,30 @@ pub const CBytecodeHandle = struct {
 // BYTECODE LIFECYCLE
 // ============================================================================
 
+/// The `len` bytes at `ptr`. A NULL pointer is valid only for a length of zero and
+/// then yields the empty slice; NULL with a non-zero length yields null.
+fn inputSlice(ptr: ?[*]const u8, len: usize) ?[]const u8 {
+    if (ptr) |bytes| return bytes[0..len];
+    return if (len == 0) &.{} else null;
+}
+
 /// Create and analyze bytecode from raw bytes
-/// @param data Pointer to bytecode data
+/// @param data Pointer to bytecode data (may be NULL only when data_len is 0)
 /// @param data_len Length of bytecode data
 /// @return Opaque bytecode handle, or NULL on failure
-pub fn evm_bytecode_create(data: [*]const u8, data_len: usize) callconv(.c) ?*CBytecodeHandle {
+pub fn evm_bytecode_create(data: ?[*]const u8, data_len: usize) callconv(.c) ?*CBytecodeHandle {
     return evm_bytecode_create_with_allocator(allocator, data, data_len);
 }
 
 pub fn evm_bytecode_create_with_allocator(
     alloc: std.mem.Allocator,
-    data: [*]const u8,
+    data: ?[*]const u8,
     data_len: usize,
 ) ?*CBytecodeHandle {
+    const code = inputSlice(data, data_len) orelse return null;
     // `errdefer` does not run on `return null`, so the fallible work lives in
     // `createHandle`, whose errdefers free the handle and the copied input.
-    return createHandle(alloc, data[0..data_len]) catch |err| {
+    return createHandle(alloc, code) catch |err| {
         log.debug("evm_bytecode_create rejected {d} bytes: {s}", .{ data_len, @errorName(err) });
         return null;
     };
@@ -107,12 +115,13 @@ pub fn evm_bytecode_get_length(handle: ?*const CBytecodeHandle) callconv(.c) usi
 /// @param handle Bytecode handle
 /// @param buffer Output buffer
 /// @param buffer_len Buffer length
-/// @return Number of bytes copied, or 0 on error
-pub fn evm_bytecode_get_data(handle: ?*const CBytecodeHandle, buffer: [*]u8, buffer_len: usize) callconv(.c) usize {
+/// @return Number of bytes copied, or 0 on error (NULL handle or NULL buffer)
+pub fn evm_bytecode_get_data(handle: ?*const CBytecodeHandle, buffer: ?[*]u8, buffer_len: usize) callconv(.c) usize {
     const h = handle orelse return 0;
+    const out = buffer orelse return 0;
 
     const copy_len = @min(h.raw_data.len, buffer_len);
-    @memcpy(buffer[0..copy_len], h.raw_data[0..copy_len]);
+    @memcpy(out[0..copy_len], h.raw_data[0..copy_len]);
     return copy_len;
 }
 
@@ -151,16 +160,17 @@ pub fn evm_bytecode_get_full_length(handle: ?*const CBytecodeHandle) callconv(.c
 }
 
 /// Copy validated runtime code (excludes metadata) to buffer
-/// Returns number of bytes copied
+/// Returns number of bytes copied, or 0 on error (NULL handle or NULL buffer)
 pub fn evm_bytecode_get_runtime_data(
     handle: ?*const CBytecodeHandle,
-    buffer: [*]u8,
+    buffer: ?[*]u8,
     buffer_len: usize,
 ) callconv(.c) usize {
     const h = handle orelse return 0;
+    const out = buffer orelse return 0;
     const runtime = h.bytecode.raw();
     const copy_len = @min(runtime.len, buffer_len);
-    @memcpy(buffer[0..copy_len], runtime[0..copy_len]);
+    @memcpy(out[0..copy_len], runtime[0..copy_len]);
     return copy_len;
 }
 
@@ -170,27 +180,33 @@ pub fn evm_bytecode_get_runtime_data(
 
 /// Find all jump destinations in bytecode
 /// @param handle Bytecode handle
-/// @param jump_dests Output buffer for jump destinations
+/// @param jump_dests Output buffer for jump destinations (may be NULL only when max_dests is 0)
 /// @param max_dests Maximum number of destinations to find
-/// @param count_out Actual number of destinations found
-/// @return Error code
+/// @param count_out Actual number of destinations found; set to 0 on every error
+/// @return Error code: EVM_BYTECODE_ERROR_NULL_POINTER for a NULL handle, a NULL
+///         count_out, or a NULL jump_dests with a non-zero max_dests
 pub fn evm_bytecode_find_jump_dests(
     handle: ?*const CBytecodeHandle,
-    jump_dests: [*]u32,
+    jump_dests: ?[*]u32,
     max_dests: u32,
-    count_out: *u32,
+    count_out: ?*u32,
 ) callconv(.c) c_int {
+    const found = count_out orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
+    found.* = 0;
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
+    if (max_dests == 0) return EVM_BYTECODE_SUCCESS;
+    const out = jump_dests orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
+
     var count: u32 = 0;
     var pos: usize = 0;
     const len: usize = @intCast(h.bytecode.len());
     while (pos < len and count < max_dests) : (pos += 1) {
         if (h.bytecode.isValidJumpDest(@intCast(pos))) {
-            jump_dests[count] = @intCast(pos);
+            out[count] = @intCast(pos);
             count += 1;
         }
     }
-    count_out.* = count;
+    found.* = count;
     return EVM_BYTECODE_SUCCESS;
 }
 
@@ -259,7 +275,7 @@ pub const CBytecodeAnalysis = extern struct {
 /// @param handle Bytecode handle
 /// @param analysis_out Output analysis structure
 /// @return Error code
-pub fn evm_bytecode_analyze(handle: ?*const CBytecodeHandle, analysis_out: *CBytecodeAnalysis) callconv(.c) c_int {
+pub fn evm_bytecode_analyze(handle: ?*const CBytecodeHandle, analysis_out: ?*CBytecodeAnalysis) callconv(.c) c_int {
     return evm_bytecode_analyze_with_allocator(allocator, handle, analysis_out);
 }
 
@@ -334,11 +350,12 @@ fn marshalBytecodeAnalysis(alloc: std.mem.Allocator, analysis: anytype) std.mem.
 pub fn evm_bytecode_analyze_with_allocator(
     alloc: std.mem.Allocator,
     handle: ?*const CBytecodeHandle,
-    analysis_out: *CBytecodeAnalysis,
+    analysis_out: ?*CBytecodeAnalysis,
 ) c_int {
+    const out = analysis_out orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
     // Zero the output first: on every failure path the caller holds an empty analysis
     // that evm_bytecode_free_analysis accepts, never uninitialized pointers and counts.
-    analysis_out.* = std.mem.zeroes(CBytecodeAnalysis);
+    out.* = std.mem.zeroes(CBytecodeAnalysis);
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
 
     const BasicBlock = struct {
@@ -352,36 +369,31 @@ pub fn evm_bytecode_analyze_with_allocator(
         count: u8 = 0,
     };
 
-    const analysis = bytecodeAnalyze(
+    var analysis = bytecodeAnalyze(
         BytecodeType.PcType,
         BasicBlock,
         FusionInfo,
         alloc,
         h.bytecode.raw(),
-    ) catch return EVM_BYTECODE_ERROR_INVALID_BYTECODE;
+    ) catch |err| return switch (err) {
+        error.OutOfMemory => EVM_BYTECODE_ERROR_OUT_OF_MEMORY,
+        error.CodeTooLarge => EVM_BYTECODE_ERROR_BYTECODE_TOO_LARGE,
+    };
+    defer analysis.deinit(alloc);
 
-    defer {
-        alloc.free(analysis.push_pcs);
-        alloc.free(analysis.jumpdests);
-        alloc.free(analysis.basic_blocks);
-        var mut_jump_fusions = analysis.jump_fusions;
-        mut_jump_fusions.deinit();
-        var mut_advanced_fusions = analysis.advanced_fusions;
-        mut_advanced_fusions.deinit();
-    }
-
-    analysis_out.* = marshalBytecodeAnalysis(alloc, analysis) catch
+    out.* = marshalBytecodeAnalysis(alloc, &analysis) catch
         return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
     return EVM_BYTECODE_SUCCESS;
 }
 
 /// Free memory allocated by bytecode analysis
-/// @param analysis Analysis structure to free
-pub fn evm_bytecode_free_analysis(analysis: *CBytecodeAnalysis) callconv(.c) void {
+/// @param analysis Analysis structure to free (NULL is a no-op)
+pub fn evm_bytecode_free_analysis(analysis: ?*CBytecodeAnalysis) callconv(.c) void {
     return evm_bytecode_free_analysis_with_allocator(allocator, analysis);
 }
 
-pub fn evm_bytecode_free_analysis_with_allocator(alloc: std.mem.Allocator, analysis: *CBytecodeAnalysis) void {
+pub fn evm_bytecode_free_analysis_with_allocator(alloc: std.mem.Allocator, analysis_opt: ?*CBytecodeAnalysis) void {
+    const analysis = analysis_opt orelse return;
     if (analysis.push_pcs_count > 0) {
         alloc.free(analysis.push_pcs[0..analysis.push_pcs_count]);
     }
@@ -466,21 +478,29 @@ pub fn evm_bytecode_error_string(error_code: c_int) callconv(.c) [*:0]const u8 {
 /// @param data_len Length of the bytecode data
 /// @param buffer Buffer to store the output string
 /// @param buffer_len Length of the buffer
-/// @return Number of bytes written (including null terminator), or 0 on error
-pub fn evm_bytecode_pretty_print(data: [*]const u8, data_len: usize, buffer: [*]u8, buffer_len: usize) usize {
+/// @return Number of bytes written (including null terminator), or 0 on error.
+///         A NULL data pointer returns 0. With buffer_len 0 the required size is
+///         returned and buffer may be NULL; a NULL buffer with a non-zero
+///         buffer_len returns 0.
+pub fn evm_bytecode_pretty_print(
+    data: ?[*]const u8,
+    data_len: usize,
+    buffer: ?[*]u8,
+    buffer_len: usize,
+) callconv(.c) usize {
     return evm_bytecode_pretty_print_with_allocator(allocator, data, data_len, buffer, buffer_len);
 }
 
 pub fn evm_bytecode_pretty_print_with_allocator(
     alloc: std.mem.Allocator,
-    data: [*]const u8,
+    data: ?[*]const u8,
     data_len: usize,
-    buffer: [*]u8,
+    buffer: ?[*]u8,
     buffer_len: usize,
 ) usize {
     if (data_len == 0) return 0;
-
-    const bytecode_slice = data[0..data_len];
+    const bytecode_slice = (data orelse return 0)[0..data_len];
+    if (buffer == null and buffer_len != 0) return 0;
 
     // Create bytecode instance with wide 32-bit PCs so arbitrarily large inputs
     // (> 65,502 bytes) disassemble cleanly across the C ABI.
@@ -494,10 +514,11 @@ pub fn evm_bytecode_pretty_print_with_allocator(
 
     // Copy to buffer
     if (buffer_len == 0) return output.len + 1; // Return required size
+    const out = buffer orelse return 0;
 
     const copy_len = @min(output.len, buffer_len - 1);
-    @memcpy(buffer[0..copy_len], output[0..copy_len]);
-    buffer[copy_len] = 0; // Null terminate
+    @memcpy(out[0..copy_len], output[0..copy_len]);
+    out[copy_len] = 0; // Null terminate
 
     return copy_len + 1;
 }
@@ -607,6 +628,87 @@ test "Bytecode C API analysis" {
 
     // Folded value should be 8 (5 + 3)
     try std.testing.expectEqual(@as(u64, 8), analysis.advanced_fusions[0].info.folded_value_low);
+}
+
+test "W3-12: Bytecode C API getters treat a NULL handle or buffer as an error value" {
+    try std.testing.expect(evm_bytecode_create(null, 4) == null);
+    evm_bytecode_destroy(null);
+
+    var buffer: [16]u8 = @splat(0xAA);
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_length(null));
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_full_length(null));
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_data(null, &buffer, buffer.len));
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_runtime_data(null, &buffer, buffer.len));
+    try std.testing.expectEqual(@as(u8, 0xFF), evm_bytecode_get_opcode_at(null, 0));
+    try std.testing.expectEqual(@as(c_int, 0), evm_bytecode_is_jump_dest(null, 0));
+
+    // JUMPDEST STOP
+    const code = [_]u8{ 0x5b, 0x00 };
+    const handle = evm_bytecode_create(&code, code.len).?;
+    defer evm_bytecode_destroy(handle);
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_data(handle, null, buffer.len));
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_runtime_data(handle, null, buffer.len));
+    // Nothing was written through the valid buffer by the failed calls.
+    for (buffer) |byte| try std.testing.expectEqual(@as(u8, 0xAA), byte);
+}
+
+test "W3-12: evm_bytecode_find_jump_dests reports NULL pointers and zeroes the count" {
+    // JUMPDEST STOP JUMPDEST
+    const code = [_]u8{ 0x5b, 0x00, 0x5b };
+    const handle = evm_bytecode_create(&code, code.len).?;
+    defer evm_bytecode_destroy(handle);
+
+    var out: [4]u32 = @splat(0);
+    var found: u32 = 99;
+    var rc = evm_bytecode_find_jump_dests(null, &out, out.len, &found);
+    try std.testing.expectEqual(EVM_BYTECODE_ERROR_NULL_POINTER, rc);
+    try std.testing.expectEqual(@as(u32, 0), found);
+
+    rc = evm_bytecode_find_jump_dests(handle, &out, out.len, null);
+    try std.testing.expectEqual(EVM_BYTECODE_ERROR_NULL_POINTER, rc);
+
+    found = 99;
+    rc = evm_bytecode_find_jump_dests(handle, null, out.len, &found);
+    try std.testing.expectEqual(EVM_BYTECODE_ERROR_NULL_POINTER, rc);
+    try std.testing.expectEqual(@as(u32, 0), found);
+
+    // A NULL output with room for nothing is a valid request that finds nothing.
+    found = 99;
+    try std.testing.expectEqual(EVM_BYTECODE_SUCCESS, evm_bytecode_find_jump_dests(handle, null, 0, &found));
+    try std.testing.expectEqual(@as(u32, 0), found);
+
+    try std.testing.expectEqual(EVM_BYTECODE_SUCCESS, evm_bytecode_find_jump_dests(handle, &out, out.len, &found));
+    try std.testing.expectEqual(@as(u32, 2), found);
+}
+
+test "W3-12: evm_bytecode_analyze and evm_bytecode_free_analysis accept NULL without touching memory" {
+    const code = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 };
+    const handle = evm_bytecode_create(&code, code.len).?;
+    defer evm_bytecode_destroy(handle);
+
+    try std.testing.expectEqual(EVM_BYTECODE_ERROR_NULL_POINTER, evm_bytecode_analyze(handle, null));
+
+    // A NULL handle leaves an empty analysis that the free function accepts.
+    var analysis: CBytecodeAnalysis = undefined;
+    analysis.push_pcs_count = 7;
+    analysis.advanced_fusions_count = 7;
+    try std.testing.expectEqual(EVM_BYTECODE_ERROR_NULL_POINTER, evm_bytecode_analyze(null, &analysis));
+    try std.testing.expectEqual(@as(u32, 0), analysis.push_pcs_count);
+    try std.testing.expectEqual(@as(u32, 0), analysis.jumpdests_count);
+    try std.testing.expectEqual(@as(u32, 0), analysis.basic_blocks_count);
+    try std.testing.expectEqual(@as(u32, 0), analysis.jump_fusions_count);
+    try std.testing.expectEqual(@as(u32, 0), analysis.advanced_fusions_count);
+    evm_bytecode_free_analysis(&analysis);
+    evm_bytecode_free_analysis(null);
+}
+
+test "W3-12: evm_bytecode_pretty_print rejects NULL data and a NULL buffer with a length" {
+    const code = [_]u8{ 0x60, 0x01, 0x00 };
+    var buffer: [256]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_pretty_print(null, code.len, &buffer, buffer.len));
+    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_pretty_print(&code, code.len, null, buffer.len));
+    // The size query needs no buffer.
+    try std.testing.expect(evm_bytecode_pretty_print(&code, code.len, null, 0) > 0);
 }
 
 test "Pretty print basic bytecode" {

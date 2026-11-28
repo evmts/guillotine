@@ -48,14 +48,10 @@ pub inline fn Handlers(comptime TracerType: type) type {
             self: *TracerType,
             initial_capacity: usize,
             max_capacity: usize,
-            growth_factor: u32,
         ) void {
             if (!self.config.enabled) return;
             if (self.config.enable_debug_logging) {
-                log.debug(
-                    "[ARENA] Initialized: initial={d}, max={d}, growth={d}%",
-                    .{ initial_capacity, max_capacity, growth_factor },
-                );
+                log.debug("[ARENA] Initialized: initial={d}, max retained={d}", .{ initial_capacity, max_capacity });
             }
         }
 

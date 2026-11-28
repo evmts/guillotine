@@ -287,6 +287,118 @@ const seed_corpus: []const []const u8 = &.{
     &.{ 0x00, 0x01, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00 },
 };
 
+/// `GrowingArenaAllocator` under arbitrary request sizes and resets: a request whose
+/// size overflows `usize` or passes the hard limit fails with `OutOfMemory` and
+/// changes nothing, ordinary requests are served and stay intact, and a reset
+/// never keeps more than the retain limit of an arena that outgrew it.
+pub fn fuzzGrowingArenaCapacity(_: void, input: []const u8) !void {
+    if (input.len < 2) return;
+    const Arena = evm.GrowingArenaAllocator;
+    const initial: usize = (@as(usize, input[0] % 8) + 1) * 1024;
+    const retain: usize = initial * (@as(usize, input[1] % 4) + 1);
+    var arena = try Arena.initWithMaxCapacity(fuzz_alloc.get(), initial, retain);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var live: usize = 0;
+    var last: ?[]u8 = null;
+    var last_fill: u8 = 0;
+    var i: usize = 2;
+    while (i + 1 < input.len) : (i += 2) {
+        const arg = input[i + 1];
+        switch (input[i] % 6) {
+            0, 1 => { // an ordinary request, up to 16 KiB
+                const len: usize = @as(usize, arg) * 64 + 1;
+                const block = try allocator.alloc(u8, len);
+                @memset(block, arg);
+                live += len;
+                last = block;
+                last_fill = arg;
+            },
+            2 => { // a size that overflows `used + len`
+                const capacity = arena.queryCapacity();
+                const len = std.math.maxInt(usize) - @as(usize, arg);
+                try std.testing.expectError(error.OutOfMemory, allocator.alloc(u8, len));
+                try std.testing.expectEqual(capacity, arena.queryCapacity());
+            },
+            3 => { // a size at or just under the hard limit, with bytes already live
+                if (live <= arg) continue;
+                const capacity = arena.queryCapacity();
+                const len = Arena.MAX_ABSOLUTE_CAPACITY - @as(usize, arg);
+                try std.testing.expectError(error.OutOfMemory, allocator.alloc(u8, len));
+                try std.testing.expectEqual(capacity, arena.queryCapacity());
+            },
+            4 => { // the per-call reset
+                const before = arena.queryCapacity();
+                arena.resetRetainCapacity();
+                live = 0;
+                last = null;
+                const after = arena.queryCapacity();
+                try std.testing.expect(after <= before);
+                if (before > retain) try std.testing.expect(after <= retain);
+            },
+            else => { // growing a live block past the address space is refused
+                const block = last orelse continue;
+                try std.testing.expect(!allocator.resize(block, std.math.maxInt(usize) - @as(usize, arg)));
+            },
+        }
+        try std.testing.expectEqual(live, arena.used);
+        try std.testing.expect(arena.used <= Arena.MAX_ABSOLUTE_CAPACITY);
+        // A refused request never disturbs a block that was already served.
+        if (last) |block| {
+            for (block) |byte| try std.testing.expectEqual(last_fill, byte);
+        }
+    }
+}
+
+/// `loadWordBigEndian` / `storeWordBigEndian` against `std.mem.readInt` /
+/// `writeInt` with an explicit byte order, which are correct on every host.
+pub fn fuzzWordBigEndianRoundtrip(_: void, input: []const u8) !void {
+    var bytes: [32]u8 = @splat(0);
+    const len = @min(input.len, bytes.len);
+    @memcpy(bytes[0..len], input[0..len]);
+
+    const word = evm.memory.loadWordBigEndian(&bytes);
+    try std.testing.expectEqual(std.mem.readInt(u256, &bytes, .big), word);
+
+    var stored: [32]u8 = @splat(0xA5);
+    evm.memory.storeWordBigEndian(&stored, word);
+    try std.testing.expectEqualSlices(u8, &bytes, &stored);
+
+    // A word built limb by limb lands most significant byte first.
+    const rotated = std.math.rotl(u256, word, @as(usize, if (input.len > 0) input[0] else 0));
+    var expected: [32]u8 = undefined;
+    std.mem.writeInt(u256, &expected, rotated, .big);
+    evm.memory.storeWordBigEndian(&stored, rotated);
+    try std.testing.expectEqualSlices(u8, &expected, &stored);
+    try std.testing.expectEqual(rotated, evm.memory.loadWordBigEndian(&stored));
+}
+
+const arena_corpus: []const []const u8 = &.{
+    &.{ 0, 0 },
+    &.{ 0, 0, 2, 0, 2, 1, 2, 255 }, // maxInt, maxInt - 1, maxInt - 255 on an empty arena
+    &.{ 0, 0, 0, 7, 2, 0, 3, 0, 3, 1, 5, 0, 5, 1 }, // one live block, then every refusal
+    &.{ 0, 0, 0, 255, 0, 255, 0, 255, 4, 0, 0, 1, 4, 0 }, // outgrow the retain limit, reset twice
+    &.{ 7, 3, 0, 255, 0, 255, 0, 255, 0, 255, 4, 0, 2, 0, 0, 16 }, // the largest retain limit
+    &.{ 3, 1, 0, 200, 4, 0, 0, 200, 4, 0, 0, 200, 2, 9, 4, 0 }, // steady reuse within the limit
+};
+
+const word_corpus: []const []const u8 = &.{
+    &.{},
+    &.{0x01},
+    &.{ 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 },
+    &.{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38 },
+    &.{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
+};
+
+test "fuzz GrowingArenaAllocator overflow refusal, hard limit and retain-limit resets" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzGrowingArenaCapacity), .{ .corpus = arena_corpus });
+}
+
+test "fuzz big-endian memory word load and store against explicit byte order" {
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzWordBigEndianRoundtrip), .{ .corpus = word_corpus });
+}
+
 test "fuzz memory stateful model checker and child checkpoints" {
     try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMemoryModel), .{ .corpus = seed_corpus });
 }

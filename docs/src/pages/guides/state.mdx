@@ -183,8 +183,9 @@ EVM's accumulated log buffer; free that slice with
 
 ## Per-call arena
 
-Each call level gets scratch space from a growing arena (`arena_capacity_limit`,
-default 64 MiB; `arena_growth_factor`, default 150%). Intermediate allocations
+Each call level gets scratch space from a growing arena. `arena_capacity_limit`
+(default 64 MiB) is the most capacity it keeps between calls, not a limit on
+one call. Intermediate allocations
 inside a call come from there and are released in one operation when the call
 unwinds. Data that must outlive the call is copied out by `toOwnedResult()`,
 which is where the memory you are responsible for comes from.
